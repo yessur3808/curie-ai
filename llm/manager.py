@@ -102,3 +102,24 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=128):
 
 def get_available_models():
     return AVAILABLE_MODELS
+
+import re
+
+def clean_assistant_reply(reply: str) -> str:
+    """
+    Removes leading speaker tags (e.g., 'Curie:') and repeated lines.
+    """
+    # Remove leading speaker tag (Curie:) if present
+    reply = reply.strip()
+    reply = re.sub(r"^(Curie:|Assistant:)\s*", "", reply, flags=re.IGNORECASE)
+    
+    # Remove repeated lines (very basic de-duplication)
+    lines = [line.strip() for line in reply.splitlines() if line.strip()]
+    seen = set()
+    cleaned_lines = []
+    for line in lines:
+        if line not in seen:
+            cleaned_lines.append(line)
+            seen.add(line)
+    # Join lines again
+    return " ".join(cleaned_lines)

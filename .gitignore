@@ -33,7 +33,8 @@ models/*.gguf
 
 # Sensitive Project Files (DO NOT COMMIT)
 /assets/persona.json
-/assets/curie.jpg
+/assets/*.jpg
+/assets/personality/*.json
 /log
 *.pub
 *.key

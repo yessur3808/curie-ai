@@ -1,0 +1,6 @@
+{
+    "goal": "Add module-level docstrings to every file.",
+    "files_to_edit": "all",
+    "repo_path": "/path/to/myrepo",
+    "branch_name": "ai/docstrings"
+}
