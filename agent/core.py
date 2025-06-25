@@ -5,6 +5,7 @@ from utils.busy import detect_busy_intent, detect_resume_intent
 from utils.project_indexer import index_project_dir, project_index_markdown, classify_project_intent
 from utils.weather import get_weather, extract_city_from_message, get_hko_typhoon_signal
 from utils.search import web_search, image_search, crawl_google_images
+from agent.skills.find_info import find_info as find_info_skill
 from llm import manager
 import asyncio
 import json
@@ -18,6 +19,10 @@ class Agent:
         init_memory()
         self.user_projects = dict()
         
+    async def handle_find_info(self, user_message):
+        "Handles info-finding using the new skill."
+        # Optionally show progress messages if you have a streaming/chat UI
+        return await find_info_skill(user_message)
         
     def recall_conversation_history(self, internal_id, limit=20):
         """
@@ -316,6 +321,7 @@ class Agent:
             "create_project",
             "show_project",
             "project_help",
+            "find_info",
             "list_directories"
         }
 
@@ -355,6 +361,9 @@ class Agent:
                     for r in results:
                         reply += f"[{r['title']}]({r['href']})\n{r['body']}\n\n"
                     responses.append(reply)
+            elif action in ("find_info", "scrape_info", "multi_source_info"):
+                reply = await find_info_skill(user_message)
+                responses.append(reply)
 
             elif action == "image_search":
                 query = params.get("query") or user_message
@@ -559,6 +568,22 @@ class Agent:
             "}\n"
             f"User: {user_message}\n"
             "JSON:\n"
+            "User: What's happening in the NBA right now?\n"
+            "{\n"
+            "  \"intents\": [\n"
+            "    {\"action\": \"find_info\", \"description\": \"Find real-time NBA news and scores from multiple sources.\", \"confidence\": 0.97, \"parameters\": {\"topic\": \"NBA\", \"time\": \"now\"}, \"reasoning\": \"The user wants current NBA info from the web.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"news\", \"language\": \"en\"}\n"
+            "  ],\n"
+            "  \"overall_clarification_needed\": false,\n"
+            "  \"overall_suggested_questions\": []\n"
+            "}\n"
+            "User: Latest iPhone price in Tokyo?\n"
+            "{\n"
+            "  \"intents\": [\n"
+            "    {\"action\": \"find_info\", \"description\": \"Find the current iPhone price in Tokyo from multiple sources.\", \"confidence\": 0.95, \"parameters\": {\"product\": \"iPhone\", \"location\": \"Tokyo\"}, \"reasoning\": \"The user wants the latest price info from the web.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"productivity\", \"language\": \"en\"}\n"
+            "  ],\n"
+            "  \"overall_clarification_needed\": false,\n"
+            "  \"overall_suggested_questions\": []\n"
+            "}\n"
         )
         result = manager.ask_llm(prompt, temperature=0, max_tokens=256)
 
