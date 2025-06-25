@@ -1,6 +1,6 @@
 # 🚀 Project Structure
 
-📅 Generated: 2025-06-15 03:32:02
+📅 Generated: 2025-06-26 00:00:56
 
 
 📁 
@@ -12,15 +12,25 @@
       📁 download
 
   📁 agent
+
+    📁 skills
+      🐍 __init__.py
+      🐍 coder.py
     🐍 __init__.py
     🐍 core.py
 
   📁 assets
+
+    📁 personality
+      ⚙️ andreja.json
+      ⚙️ curie.json
+    ⚙️ coder_job.json
     ⚙️ example_persona.json
     ⚙️ persona.json
 
   📁 connectors
     🐍 __init__.py
+    🐍 api.py
     🐍 telegram.py
 
   📁 llm
@@ -58,10 +68,14 @@
 
   📁 utils
     🐍 __init__.py
+    🐍 busy.py
     🐍 db.py
     🐍 persona.py
+    🐍 project_indexer.py
+    🐍 search.py
     🐍 session.py
     🐍 users.py
+    🐍 weather.py
   📝 CODE_OF_CONDUCT.md
   📝 CONTRIBUTING.md
   📝 CONTRIBUTORS.md

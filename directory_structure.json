@@ -24,6 +24,20 @@
       "name": "agent",
       "contents": [
         {
+          "type": "directory",
+          "name": "skills",
+          "contents": [
+            {
+              "type": "file",
+              "name": "__init__.py"
+            },
+            {
+              "type": "file",
+              "name": "coder.py"
+            }
+          ]
+        },
+        {
           "type": "file",
           "name": "__init__.py"
         },
@@ -37,6 +51,24 @@
       "type": "directory",
       "name": "assets",
       "contents": [
+        {
+          "type": "directory",
+          "name": "personality",
+          "contents": [
+            {
+              "type": "file",
+              "name": "andreja.json"
+            },
+            {
+              "type": "file",
+              "name": "curie.json"
+            }
+          ]
+        },
+        {
+          "type": "file",
+          "name": "coder_job.json"
+        },
         {
           "type": "file",
           "name": "example_persona.json"
@@ -54,6 +86,10 @@
         {
           "type": "file",
           "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "api.py"
         },
         {
           "type": "file",
@@ -182,6 +218,10 @@
         },
         {
           "type": "file",
+          "name": "busy.py"
+        },
+        {
+          "type": "file",
           "name": "db.py"
         },
         {
@@ -190,11 +230,23 @@
         },
         {
           "type": "file",
+          "name": "project_indexer.py"
+        },
+        {
+          "type": "file",
+          "name": "search.py"
+        },
+        {
+          "type": "file",
           "name": "session.py"
         },
         {
           "type": "file",
           "name": "users.py"
+        },
+        {
+          "type": "file",
+          "name": "weather.py"
         }
       ]
     },
