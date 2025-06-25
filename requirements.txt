@@ -10,5 +10,11 @@ GitPython==3.1.44
 PyGithub==2.6.1
 
 fastapi==0.115.12
-
+uvicorn==0.34.3
 black==25.1.0
+
+python-weather==2.1.0
+
+duckduckgo-search==8.0.4
+
+icrawler==0.6.10

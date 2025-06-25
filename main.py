@@ -1,3 +1,5 @@
+# main.py
+
 import argparse
 import os
 import threading
@@ -10,6 +12,24 @@ from memory import init_memory
 from llm import manager
 import uvicorn
 
+from agent.core import Agent
+from utils.persona import load_persona, list_available_personas
+import asyncio
+
+
+def load_all_agents():
+    agents = {}
+    for persona_info in list_available_personas():
+        persona = load_persona(persona_info['filename'])
+        name = persona['name']
+        agents[name] = Agent(persona=persona)
+    return agents
+
+
+def load_default_agent(persona_filename=None):
+    persona = load_persona(filename=persona_filename)
+    return Agent(persona=persona)
+
 # --- Helper: Find all files recursively ---
 def find_all_files(repo_path, exts=None):
     all_files = []
@@ -21,9 +41,20 @@ def find_all_files(repo_path, exts=None):
     return all_files
 
 # --- Connector Runners ---
-def run_telegram():
+
+
+def run_telegram(agents):
     print("Starting Telegram connector...")
-    start_telegram_bot()
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    start_telegram_bot(agents)
+
+
 
 def run_api():
     print("Starting API (FastAPI) connector on http://0.0.0.0:8000 ...")
@@ -71,6 +102,7 @@ def parse_args():
     parser.add_argument('--coder-branch', type=str, help="Branch name for coder batch mode")
     parser.add_argument('--all', action='store_true', help="Run all connectors")
     parser.add_argument('--no-init', action='store_true', help="Skip model preload and memory init")
+    parser.add_argument('--persona', type=str, help="Filename of persona to use (in assets/personality)")
     return parser.parse_args()
 
 # --- Config Determination ---
@@ -158,12 +190,21 @@ def main():
     args = parse_args()
     run_telegram_flag, run_api_flag, run_coder_flag, run_coder_batch_flag = determine_what_to_run(args)
     init_llm_and_memory(args.no_init)
+    
+    # Decide agent(s) based on persona argument/env
+    persona_arg = getattr(args, "persona", None)
+    if (persona_arg and persona_arg.strip().lower() == "all") or (
+        not persona_arg and os.getenv("DEFAULT_PERSONA", "").strip().lower() == "all"
+    ):
+        agents = load_all_agents()
+        agent_or_agents = agents
+    else:
+        agent = load_default_agent(persona_arg)
+        agent_or_agents = agent
 
     threads = []
     if run_telegram_flag:
-        t = threading.Thread(target=run_telegram, daemon=True)
-        threads.append(t)
-        t.start()
+        run_telegram(agent_or_agents) 
 
     if run_api_flag:
         t = threading.Thread(target=run_api, daemon=True)
@@ -183,6 +224,7 @@ def main():
 
     for t in threads:
         t.join()
-
+        
+        
 if __name__ == "__main__":
     main()

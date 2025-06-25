@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from agent.core import Agent
-from utils.busy import detect_busy_intent, detect_resume_intent, classify_intent_llm
+from utils.busy import detect_busy_intent, detect_resume_intent
 from utils.persona import load_persona
 from utils.session import small_talk_chance
 from memory import UserManager, ConversationManager
@@ -54,7 +54,7 @@ async def chat_api(req: MessageRequest):
         return MessageResponse(response=response, intent="resume")
 
     # LLM-based intent detection fallback
-    intent = classify_intent_llm(message)
+    intent = agent.classify_intent_llm(message)
     if intent == "busy":
         response = agent.handle_busy(internal_id)
         return MessageResponse(response=response, intent="busy")

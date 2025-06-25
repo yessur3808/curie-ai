@@ -31,26 +31,3 @@ def detect_resume_intent(text):
     if re.search(r'\bresume\b|\bcontinue\b|\bback\b|\bfree\b', text):
         return True
     return False
-
-def classify_intent_llm(user_message):
-    """
-    Uses the LLM to classify user intent as 'busy', 'resume', or 'none'.
-    Always returns one of those three strings.
-    """
-    prompt = (
-        "Classify the user's intent as one of: [busy, resume, none]. "
-        "Only output the label (busy, resume, or none), nothing else. "
-        "User message: " + user_message
-    )
-    result = manager.ask_llm(prompt, temperature=0, max_tokens=10)
-    intent = result.strip().lower()
-
-    if "busy" in intent:
-        return "busy"
-    elif "resume" in intent or "continue" in intent or "back" in intent or "free" in intent:
-        return "resume"
-    elif "none" in intent:
-        return "none"
-    else:
-        # Fallback: if LLM hallucinates, treat as "none"
-        return "none"
