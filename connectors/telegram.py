@@ -84,8 +84,6 @@ async def handle_busy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
 
-    
-
 async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
     clear_user_busy(tg_user_id)
