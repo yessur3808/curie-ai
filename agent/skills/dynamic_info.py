@@ -17,7 +17,7 @@ class DynamicScraper:
             f"Suggest 3-5 reputable URLs to answer: '{query}'. "
             "Just output one full URL per line."
         )
-        response = manager.ask_llm(prompt, temperature=0.1, max_tokens=128)
+        response = manager.ask_llm(prompt, temperature=0.1, max_tokens=2048)
         return [line.strip() for line in response.splitlines() if line.strip().startswith("http")]
 
     def analyze_search_results(self, urls):
@@ -118,4 +118,4 @@ async def synthesize_results_llm(query, texts):
         + "\n---\n".join(texts)
         + "\nPlease give a concise, up-to-date answer based on these. If info conflicts, mention it."
     )
-    return manager.ask_llm(prompt, temperature=0.2, max_tokens=256)
+    return manager.ask_llm(prompt, temperature=0.2, max_tokens=2048)

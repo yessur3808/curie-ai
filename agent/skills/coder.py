@@ -88,7 +88,7 @@ def summarize_change_for_pr(goal, changes, model_name):
         f"Provide a concise PR title and a detailed PR body in Markdown. "
         f"Title should be a single line. Body should explain what was improved or fixed and why."
     )
-    result = llm.manager.ask_llm(prompt, model_name=model_name, max_tokens=300)
+    result = llm.manager.ask_llm(prompt, model_name=model_name, max_tokens=2048)
     if "\n" in result:
         title, body = result.split("\n", 1)
     else:
@@ -131,7 +131,7 @@ def ai_project_idea_suggestions(goal, files_to_edit, repo_path, model_name):
         "For each idea, give a short summary and explain why it would be valuable. "
         "Output as a markdown list. Avoid duplicating what's already in the project."
     )
-    return llm.manager.ask_llm(prompt, model_name=model_name, max_tokens=400)
+    return llm.manager.ask_llm(prompt, model_name=model_name, max_tokens=2048)
 
 def comment_ai_suggestions(pr, suggestions_md):
     suggestion_comment = (

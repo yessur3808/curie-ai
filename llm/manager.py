@@ -52,7 +52,7 @@ def preload_llama_model():
             n_threads=18  # Adjust to your CPU
         )
 
-def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=128):
+def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=2048):
     provider = llm_config.get('provider', 'llama.cpp')
 
     if provider == 'openai':

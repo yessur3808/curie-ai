@@ -68,7 +68,7 @@ class Agent:
             f"User message: {user_message}\n"
             "Extracted (JSON):"
         )
-        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=100)
+        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=2048)
         try:
             facts = json.loads(result.strip())
             if isinstance(facts, dict):
@@ -109,8 +109,11 @@ class Agent:
             else:
                 conversation += f"Curie: {msg}\n"
         conversation += f"User: {message}\nCurie:"
+        
+        
 
         response = manager.ask_llm(conversation)
+        
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
 
@@ -146,7 +149,7 @@ class Agent:
             prompt += f"{role.capitalize()}: {msg}\n"
         prompt += "Curie (small talk):"
 
-        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=60)
+        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=1024)
         return small_talk.strip()
     
     async def get_weather_info(self, city: str, unit: str = "metric"):
@@ -585,7 +588,7 @@ class Agent:
             "  \"overall_suggested_questions\": []\n"
             "}\n"
         )
-        result = manager.ask_llm(prompt, temperature=0, max_tokens=256)
+        result = manager.ask_llm(prompt, temperature=0, max_tokens=2048)
 
         import json
         try:

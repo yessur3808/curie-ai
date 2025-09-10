@@ -15,7 +15,7 @@ async def search_sources_llm(query):
         f"Request: {query}\n"
         "Just output the URLs, one per line."
     )
-    response = manager.ask_llm(prompt, temperature=0.2, max_tokens=256)
+    response = manager.ask_llm(prompt, temperature=0.2, max_tokens=2048)
     urls = [line.strip() for line in response.splitlines() if line.strip().startswith("http")]
     return urls
 
@@ -68,7 +68,7 @@ async def cross_reference_llm(query, snippets):
         f"{joined}\n"
         "Based on these, answer the user's question in a concise, up-to-date summary. If information conflicts, mention the discrepancy."
     )
-    return manager.ask_llm(prompt, temperature=0.2, max_tokens=256)
+    return manager.ask_llm(prompt, temperature=0.2, max_tokens=2048)
 
 
 async def find_info(query):
