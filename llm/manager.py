@@ -81,10 +81,28 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=2048):
                 return f"[Error loading model: {e}]"
         llama_model = llama_models_cache[selected_model]
 
+        # Dynamically cap max_tokens to avoid exceeding context window
+        # Calculate prompt tokens and ensure prompt_tokens + max_tokens <= n_ctx
+        try:
+            prompt_tokens = len(llama_model.tokenize(prompt.encode('utf-8')))
+            # Reserve buffer for safety (system tokens, etc.)
+            buffer = 16
+            available_tokens = 2048 - prompt_tokens - buffer
+            
+            # Cap max_tokens to available space, with a minimum of 64 tokens
+            if available_tokens < 64:
+                # Prompt is too long, return error
+                return f"[Error: Prompt too long ({prompt_tokens} tokens). Maximum context is 2048 tokens.]"
+            
+            capped_max_tokens = min(max_tokens, available_tokens)
+        except Exception as e:
+            # If tokenization fails, use a conservative default
+            capped_max_tokens = min(max_tokens, 512)
+
         try:
             result = llama_model(
                 prompt,
-                max_tokens=max_tokens,
+                max_tokens=capped_max_tokens,
                 stop=["</s>", "User:", "user:", "\nUser:", "\nuser:"],
                 temperature=temperature,
                 repeat_penalty=1.1,  # Prevent repetition
