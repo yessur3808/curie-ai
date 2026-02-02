@@ -65,6 +65,7 @@ class ScraperPatternManager:
             fields['content_pattern'] = Json(fields['content_pattern'])
         set_clause = ", ".join([f"{k} = %s" for k in fields.keys()])
         values = list(fields.values())
+        values.append(datetime.utcnow())
         values.append(id)
         with get_pg_conn() as conn:
             cur = conn.cursor()
