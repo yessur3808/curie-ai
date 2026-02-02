@@ -51,6 +51,7 @@ class ScraperPatternManager:
             cur = conn.cursor()
             cur.execute("""
                 SELECT * FROM scraper_patterns WHERE url = %s
+                ORDER BY reliability_score DESC, updated_at DESC
             """, (url,))
             results = cur.fetchall()
             return [dict(zip([desc[0] for desc in cur.description], row)) for row in results]
