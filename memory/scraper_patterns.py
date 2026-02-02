@@ -3,6 +3,12 @@
 from datetime import datetime
 from .database import get_pg_conn
 
+# Allowlist of columns that can be updated to prevent SQL injection
+ALLOWED_UPDATE_COLUMNS = {
+    'url', 'domain', 'query_type', 'content_pattern',
+    'last_success', 'last_error', 'reliability_score'
+}
+
 class ScraperPatternManager:
     @staticmethod
     def save_pattern(url, domain, query_type=None, content_pattern=None,
@@ -52,13 +58,8 @@ class ScraperPatternManager:
     def update_pattern(id, **fields):
         if not fields:
             return False
-        # Allowlist of columns that can be updated to prevent SQL injection
-        allowed_columns = {
-            'url', 'domain', 'query_type', 'content_pattern',
-            'last_success', 'last_error', 'reliability_score'
-        }
         # Filter fields to only include allowed columns
-        filtered_fields = {k: v for k, v in fields.items() if k in allowed_columns}
+        filtered_fields = {k: v for k, v in fields.items() if k in ALLOWED_UPDATE_COLUMNS}
         if not filtered_fields:
             return False
         
