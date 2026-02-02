@@ -160,7 +160,7 @@ class Agent:
         prompt += "Here is the recent chat history (user and assistant):\n"
         for role, msg in recent_history:
             prompt += f"{role.capitalize()}: {msg}\n"
-        prompt += "Curie (small talk, be natural and friendly, don't repeat topics already discussed):"
+        prompt += "Curie (small talk, be natural, caring, attentive, and friendly, don't repeat topics already discussed):"
 
         small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=60)
         return small_talk.strip()
