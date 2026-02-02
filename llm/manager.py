@@ -145,10 +145,8 @@ def _sanity_filter_response(response: str) -> str:
     if len(response) < 2:
         return "I'm not sure how to respond to that."
     
-    # Check for non-ASCII gibberish (allow some unicode but not all garbage)
-    non_ascii_ratio = sum(1 for c in response if ord(c) > 127) / len(response)
-    if non_ascii_ratio > 0.5:
-        return "I apologize, I seem to have generated an invalid response. Could you try asking again?"
+    # Note: Non-ASCII check removed to allow multilingual content (French, etc.)
+    # Curie uses French phrases like 'C'est intéressant!' which contain accented characters
     
     # Response passes all sanity checks
     return response

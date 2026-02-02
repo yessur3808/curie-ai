@@ -18,6 +18,9 @@ class Agent:
         init_memory()
         self.user_projects = dict()
         
+    # Keywords indicating uncertain or unconfirmed facts
+    UNCERTAIN_KEYWORDS = ['maybe', 'might', 'perhaps', 'unsure', 'not sure', 'possibly', 'probably']
+        
         
     def recall_conversation_history(self, internal_id, limit=20):
         """
@@ -75,7 +78,7 @@ class Agent:
                 validated_facts = {}
                 for key, value in facts.items():
                     # Skip facts that are too vague or uncertain
-                    if value and not any(uncertain in str(value).lower() for uncertain in ['maybe', 'might', 'perhaps', 'unsure', 'not sure']):
+                    if value and not any(uncertain in str(value).lower() for uncertain in self.UNCERTAIN_KEYWORDS):
                         validated_facts[key] = value
                 return validated_facts
         except Exception:

@@ -70,10 +70,10 @@ def _is_duplicate_update(update: Update) -> bool:
     Check if this update has already been processed.
     Returns True if duplicate, False otherwise.
     """
-    if not update or not update.update_id:
+    if not update or not update.update_id or not update.message:
         return False
     
-    user_id = update.message.from_user.id if update.message else None
+    user_id = update.message.from_user.id if update.message.from_user else None
     if not user_id:
         return False
     
