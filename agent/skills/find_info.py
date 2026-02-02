@@ -53,8 +53,10 @@ async def scrape_url(url, query, pattern=None):
                     node = soup.select_one(main_selector)
                     if node:
                         return node.get_text(separator=" ", strip=True)
-            except Exception:
-                pass
+            except Exception as e:
+                # If pattern-based extraction fails, fall back to full-page text below.
+                # This exception is non-fatal and is logged for debugging purposes.
+                print(f"Pattern-based scraping failed for {url}: {e}")
         text = soup.get_text(separator="\n", strip=True)
         return text[:2000]
     except Exception as e:
@@ -71,6 +73,44 @@ async def cross_reference_llm(query, snippets):
     return manager.ask_llm(prompt, temperature=0.2, max_tokens=2048)
 
 
+class DynamicScraper:
+    """
+    Minimal dynamic scraper that delegates source discovery to the LLM-based
+    `search_sources_llm` helper defined in this module.
+    """
+
+    async def find_sources(self, query: str):
+        return await search_sources_llm(query)
+
+
+class AdaptiveScraper:
+    """
+    Minimal adaptive scraper that delegates scraping and pattern persistence
+    to helpers defined in this module.
+    """
+
+    async def analyze_webpage(self, url: str, query: str):
+        # Try to load an existing scraper pattern for this URL, if any.
+        pattern = load_scraper_pattern(url)
+        return await scrape_url(url, query, pattern=pattern)
+
+    def save_scraper_pattern(
+        self,
+        url,
+        domain,
+        query_type,
+        content_pattern,
+        success: bool = True,
+        error_msg: str | None = None,
+    ):
+        return save_scraper_pattern(
+            url=url,
+            domain=domain,
+            query_type=query_type,
+            content_pattern=content_pattern,
+            success=success,
+            error_msg=error_msg,
+        )
 async def find_info(query):
     scraper = DynamicScraper()
     adaptive = AdaptiveScraper()
@@ -85,6 +125,11 @@ async def find_info(query):
         domain = urlparse(url).netloc
         try:
             data = await adaptive.analyze_webpage(url, query)
+            # Ensure data is a string to avoid TypeError when checking for "Error scraping"
+            if data is None:
+                data = f"Error scraping {url}: no data returned"
+            elif not isinstance(data, str):
+                data = f"Error scraping {url}: unexpected response type {type(data).__name__}"
             if "Error scraping" not in data:
                 # Save the pattern (for demo, use main_selector=body or enhance with LLM)
                 example_pattern = '{"main_selector": "body"}'
