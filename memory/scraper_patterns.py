@@ -1,6 +1,7 @@
 # memory/scraper_patterns.py
 
 from datetime import datetime
+from psycopg2.extras import Json
 from .database import get_pg_conn
 
 # Allowlist of columns that can be updated to prevent SQL injection
@@ -23,10 +24,10 @@ class ScraperPatternManager:
                 INSERT INTO scraper_patterns
                 (url, domain, query_type, content_pattern, last_success, last_error,
                  reliability_score, created_at, updated_at)
-                VALUES (%s, %s, %s, %s::JSONB, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
-                url, domain, query_type, content_pattern,
+                url, domain, query_type, Json(content_pattern) if content_pattern is not None else None,
                 last_success, last_error, reliability_score, created_at, updated_at
             ))
             conn.commit()
@@ -58,16 +59,12 @@ class ScraperPatternManager:
     def update_pattern(id, **fields):
         if not fields:
             return False
-        # Filter fields to only include allowed columns
-        filtered_fields = {k: v for k, v in fields.items() if k in ALLOWED_UPDATE_COLUMNS}
-        if not filtered_fields:
-            return False
-        
-        set_clause = ", ".join([f"{k} = %s" for k in filtered_fields.keys()])
-        values = list(filtered_fields.values())
-        # Add updated_at and id to the values list
-        values.extend([datetime.utcnow(), id])
-        
+        # Wrap content_pattern with Json() if present
+        if 'content_pattern' in fields and fields['content_pattern'] is not None:
+            fields['content_pattern'] = Json(fields['content_pattern'])
+        set_clause = ", ".join([f"{k} = %s" for k in fields.keys()])
+        values = list(fields.values())
+        values.append(id)
         with get_pg_conn() as conn:
             cur = conn.cursor()
             cur.execute(f"""
