@@ -16,7 +16,7 @@ This project and everyone participating in it is governed by our [Code of Conduc
 ## Getting Started
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.10+
 - pip
 - virtualenv
 
