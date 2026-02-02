@@ -28,11 +28,11 @@ llm_config = {
 # Cache for loaded llama models
 llama_models_cache = {}
 
-# Context window and token management constants
-MODEL_CONTEXT_SIZE = 2048  # Total context window size for llama.cpp models
-CONTEXT_BUFFER_TOKENS = 16  # Reserve buffer for system tokens, etc.
-MIN_AVAILABLE_TOKENS = 64  # Minimum tokens required for a meaningful response
-FALLBACK_MAX_TOKENS = 512  # Conservative fallback if tokenization fails
+# Context window and token management configuration from environment variables
+MODEL_CONTEXT_SIZE = int(os.getenv("LLM_CONTEXT_SIZE", 2048))  # Total context window size for llama.cpp models
+CONTEXT_BUFFER_TOKENS = int(os.getenv("LLM_CONTEXT_BUFFER", 16))  # Reserve buffer for system tokens, etc.
+MIN_AVAILABLE_TOKENS = int(os.getenv("LLM_MIN_TOKENS", 64))  # Minimum tokens required for a meaningful response
+FALLBACK_MAX_TOKENS = int(os.getenv("LLM_FALLBACK_MAX_TOKENS", 512))  # Conservative fallback if tokenization fails
 
 
 def preload_llama_model():
