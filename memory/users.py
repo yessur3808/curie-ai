@@ -1,5 +1,6 @@
 # memory/users.py
 
+import uuid
 from datetime import datetime
 from .database import get_pg_conn, mongo_db
 

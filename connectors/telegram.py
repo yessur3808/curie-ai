@@ -3,6 +3,8 @@
 import datetime
 import random
 import os
+import time
+from collections import OrderedDict
 from dotenv import load_dotenv
 
 from telegram import Update
@@ -30,6 +32,12 @@ user_persona_map = {}
 # Maps telegram user_id to internal_id for this session
 user_session_map = {}
 
+# Deduplication cache: stores (user_id, update_id) -> timestamp
+# Using OrderedDict for efficient FIFO cleanup
+processed_updates = OrderedDict()
+MAX_CACHE_SIZE = 1000
+CACHE_EXPIRY_SECONDS = 300  # 5 minutes
+
 
 
 # Small talk prompts for Curie
@@ -41,6 +49,46 @@ SMALL_TALK_QUESTIONS = [
     "If you could travel anywhere, where would you go?",
     "C'est intéressant! Do you have any hobbies you love?",
 ]
+
+def _cleanup_update_cache():
+    """Remove expired entries from the processed updates cache."""
+    current_time = time.time()
+    # Remove entries older than CACHE_EXPIRY_SECONDS
+    keys_to_remove = [
+        key for key, timestamp in processed_updates.items()
+        if current_time - timestamp > CACHE_EXPIRY_SECONDS
+    ]
+    for key in keys_to_remove:
+        del processed_updates[key]
+    
+    # Also limit cache size (FIFO)
+    while len(processed_updates) > MAX_CACHE_SIZE:
+        processed_updates.popitem(last=False)
+
+def _is_duplicate_update(update: Update) -> bool:
+    """
+    Check if this update has already been processed.
+    Returns True if duplicate, False otherwise.
+    """
+    if not update or not update.update_id or not update.message:
+        return False
+    
+    user_id = update.message.from_user.id if update.message.from_user else None
+    if not user_id:
+        return False
+    
+    cache_key = (user_id, update.update_id)
+    
+    # Clean up old entries periodically
+    _cleanup_update_cache()
+    
+    # Check if already processed
+    if cache_key in processed_updates:
+        return True
+    
+    # Mark as processed
+    processed_updates[cache_key] = time.time()
+    return False
 
 async def handle_identify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
@@ -92,15 +140,25 @@ async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Deduplicate: Skip if we've already processed this update
+    if _is_duplicate_update(update):
+        return
+    
     user_message = update.message.text
     tg_user_id = update.message.from_user.id
     agent = get_agent_for_user(update, context)
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
-    internal_id = agent.get_or_create_internal_id(
-        external_id=tg_user_id,
-        channel='telegram',
-        secret_username=telegram_username
-    )
+    
+    # Get or create stable internal_id for this session
+    if tg_user_id in user_session_map:
+        internal_id = user_session_map[tg_user_id]
+    else:
+        internal_id = agent.get_or_create_internal_id(
+            external_id=tg_user_id,
+            channel='telegram',
+            secret_username=telegram_username
+        )
+        user_session_map[tg_user_id] = internal_id
 
     # --- Proactive weather heads-up (call only at right time) ---
     now = datetime.datetime.now()
