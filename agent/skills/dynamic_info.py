@@ -49,7 +49,7 @@ class AdaptiveScraper:
     
     
     async def analyze_webpage(self, url, query):
-        pattern = self.load_scraper_pattern(url)
+        self.load_scraper_pattern(url)
         # scraping logic using pattern as in previous example
 
     def load_scraper_pattern(self, url):
