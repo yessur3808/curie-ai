@@ -52,14 +52,26 @@ class ScraperPatternManager:
     def update_pattern(id, **fields):
         if not fields:
             return False
-        set_clause = ", ".join([f"{k} = %s" for k in fields.keys()])
-        values = list(fields.values())
-        values.append(id)
+        # Allowlist of columns that can be updated to prevent SQL injection
+        allowed_columns = {
+            'url', 'domain', 'query_type', 'content_pattern',
+            'last_success', 'last_error', 'reliability_score'
+        }
+        # Filter fields to only include allowed columns
+        filtered_fields = {k: v for k, v in fields.items() if k in allowed_columns}
+        if not filtered_fields:
+            return False
+        
+        set_clause = ", ".join([f"{k} = %s" for k in filtered_fields.keys()])
+        values = list(filtered_fields.values())
+        # Add updated_at and id to the values list
+        values.extend([datetime.utcnow(), id])
+        
         with get_pg_conn() as conn:
             cur = conn.cursor()
             cur.execute(f"""
                 UPDATE scraper_patterns SET {set_clause}, updated_at = %s WHERE id = %s
-            """, values + [datetime.utcnow(), id])
+            """, values)
             conn.commit()
             return cur.rowcount > 0
 
