@@ -2,6 +2,7 @@
 
 import asyncio
 import httpx
+import os
 from bs4 import BeautifulSoup
 from llm import manager
 from memory.scraper_patterns import ScraperPatternManager
@@ -12,13 +13,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Info search task-specific configuration from environment variables
+INFO_SEARCH_TEMPERATURE = float(os.getenv("INFO_SEARCH_TEMPERATURE", "0.2"))
+INFO_SEARCH_MAX_TOKENS = int(os.getenv("INFO_SEARCH_MAX_TOKENS", "2048"))
+
 async def search_sources_llm(query):
     prompt = (
         f"Suggest 3 to 5 reputable web sources (with full URLs) where I can find up-to-date information for the following request:\n"
         f"Request: {query}\n"
         "Just output the URLs, one per line."
     )
-    response = await asyncio.to_thread(manager.ask_llm, prompt, temperature=0.2, max_tokens=2048)
+    response = await asyncio.to_thread(manager.ask_llm, prompt, temperature=INFO_SEARCH_TEMPERATURE, max_tokens=INFO_SEARCH_MAX_TOKENS)
     urls = [line.strip() for line in response.splitlines() if line.strip().startswith("http")]
     return urls
 
@@ -73,7 +78,7 @@ async def cross_reference_llm(query, snippets):
         f"{joined}\n"
         "Based on these, answer the user's question in a concise, up-to-date summary. If information conflicts, mention the discrepancy."
     )
-    return await asyncio.to_thread(manager.ask_llm, prompt, temperature=0.2, max_tokens=2048)
+    return await asyncio.to_thread(manager.ask_llm, prompt, temperature=INFO_SEARCH_TEMPERATURE, max_tokens=INFO_SEARCH_MAX_TOKENS)
 
 
 class DynamicScraper:
