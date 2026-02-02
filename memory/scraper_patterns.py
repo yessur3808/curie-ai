@@ -1,6 +1,7 @@
 # memory/scraper_patterns.py
 
 from datetime import datetime
+from psycopg2.extras import Json
 from .database import get_pg_conn
 
 class ScraperPatternManager:
@@ -17,10 +18,10 @@ class ScraperPatternManager:
                 INSERT INTO scraper_patterns
                 (url, domain, query_type, content_pattern, last_success, last_error,
                  reliability_score, created_at, updated_at)
-                VALUES (%s, %s, %s, %s::JSONB, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
-                url, domain, query_type, content_pattern,
+                url, domain, query_type, Json(content_pattern) if content_pattern is not None else None,
                 last_success, last_error, reliability_score, created_at, updated_at
             ))
             conn.commit()
@@ -52,6 +53,9 @@ class ScraperPatternManager:
     def update_pattern(id, **fields):
         if not fields:
             return False
+        # Wrap content_pattern with Json() if present
+        if 'content_pattern' in fields and fields['content_pattern'] is not None:
+            fields['content_pattern'] = Json(fields['content_pattern'])
         set_clause = ", ".join([f"{k} = %s" for k in fields.keys()])
         values = list(fields.values())
         values.append(id)
