@@ -71,6 +71,44 @@ async def cross_reference_llm(query, snippets):
     return manager.ask_llm(prompt, temperature=0.2, max_tokens=2048)
 
 
+class DynamicScraper:
+    """
+    Minimal dynamic scraper that delegates source discovery to the LLM-based
+    `search_sources_llm` helper defined in this module.
+    """
+
+    async def find_sources(self, query: str):
+        return await search_sources_llm(query)
+
+
+class AdaptiveScraper:
+    """
+    Minimal adaptive scraper that delegates scraping and pattern persistence
+    to helpers defined in this module.
+    """
+
+    async def analyze_webpage(self, url: str, query: str):
+        # Try to load an existing scraper pattern for this URL, if any.
+        pattern = load_scraper_pattern(url)
+        return await scrape_url(url, query, pattern=pattern)
+
+    def save_scraper_pattern(
+        self,
+        url,
+        domain,
+        query_type,
+        content_pattern,
+        success: bool = True,
+        error_msg: str | None = None,
+    ):
+        return save_scraper_pattern(
+            url=url,
+            domain=domain,
+            query_type=query_type,
+            content_pattern=content_pattern,
+            success=success,
+            error_msg=error_msg,
+        )
 async def find_info(query):
     scraper = DynamicScraper()
     adaptive = AdaptiveScraper()
