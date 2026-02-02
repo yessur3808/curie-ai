@@ -28,6 +28,12 @@ llm_config = {
 # Cache for loaded llama models
 llama_models_cache = {}
 
+# Context window and token management constants
+MODEL_CONTEXT_SIZE = 2048  # Total context window size for llama.cpp models
+CONTEXT_BUFFER_TOKENS = 16  # Reserve buffer for system tokens, etc.
+MIN_AVAILABLE_TOKENS = 64  # Minimum tokens required for a meaningful response
+FALLBACK_MAX_TOKENS = 512  # Conservative fallback if tokenization fails
+
 
 def preload_llama_model():
     """
@@ -48,7 +54,7 @@ def preload_llama_model():
     if selected_model not in llama_models_cache:
         llama_models_cache[selected_model] = Llama(
             model_path=model_path,
-            n_ctx=2048,
+            n_ctx=MODEL_CONTEXT_SIZE,
             n_threads=18  # Adjust to your CPU
         )
 
@@ -74,7 +80,7 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=2048):
             try:
                 llama_models_cache[selected_model] = Llama(
                     model_path=model_path,
-                    n_ctx=2048,
+                    n_ctx=MODEL_CONTEXT_SIZE,
                     n_threads=18
                 )
             except Exception as e:
@@ -85,19 +91,17 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=2048):
         # Calculate prompt tokens and ensure prompt_tokens + max_tokens <= n_ctx
         try:
             prompt_tokens = len(llama_model.tokenize(prompt.encode('utf-8')))
-            # Reserve buffer for safety (system tokens, etc.)
-            buffer = 16
-            available_tokens = 2048 - prompt_tokens - buffer
+            available_tokens = MODEL_CONTEXT_SIZE - prompt_tokens - CONTEXT_BUFFER_TOKENS
             
-            # Cap max_tokens to available space, with a minimum of 64 tokens
-            if available_tokens < 64:
+            # Cap max_tokens to available space, with a minimum threshold
+            if available_tokens < MIN_AVAILABLE_TOKENS:
                 # Prompt is too long, return error
-                return f"[Error: Prompt too long ({prompt_tokens} tokens). Maximum context is 2048 tokens.]"
+                return f"[Error: Prompt too long ({prompt_tokens} tokens). Maximum context is {MODEL_CONTEXT_SIZE} tokens.]"
             
             capped_max_tokens = min(max_tokens, available_tokens)
         except Exception as e:
             # If tokenization fails, use a conservative default
-            capped_max_tokens = min(max_tokens, 512)
+            capped_max_tokens = min(max_tokens, FALLBACK_MAX_TOKENS)
 
         try:
             result = llama_model(
