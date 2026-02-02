@@ -123,6 +123,11 @@ async def find_info(query):
         domain = urlparse(url).netloc
         try:
             data = await adaptive.analyze_webpage(url, query)
+            # Ensure data is a string to avoid TypeError when checking for "Error scraping"
+            if data is None:
+                data = f"Error scraping {url}: no data returned"
+            elif not isinstance(data, str):
+                data = f"Error scraping {url}: unexpected response type {type(data).__name__}"
             if "Error scraping" not in data:
                 # Save the pattern (for demo, use main_selector=body or enhance with LLM)
                 example_pattern = '{"main_selector": "body"}'
