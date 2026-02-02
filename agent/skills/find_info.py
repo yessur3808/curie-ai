@@ -8,6 +8,9 @@ from memory.scraper_patterns import ScraperPatternManager
 from urllib.parse import urlparse
 from datetime import datetime
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def search_sources_llm(query):
     prompt = (
@@ -56,7 +59,7 @@ async def scrape_url(url, query, pattern=None):
             except Exception as e:
                 # If pattern-based extraction fails, fall back to full-page text below.
                 # This exception is non-fatal and is logged for debugging purposes.
-                print(f"Pattern-based scraping failed for {url}: {e}")
+                logger.warning(f"Pattern-based scraping failed for {url}: {e}", exc_info=True)
         text = soup.get_text(separator="\n", strip=True)
         return text[:2000]
     except Exception as e:
