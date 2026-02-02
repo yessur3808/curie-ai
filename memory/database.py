@@ -5,9 +5,7 @@ from pymongo import MongoClient, errors as mongo_errors
 import logging
 from .config import PG_CONN_INFO, MONGODB_URI, MONGODB_DB
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 def get_pg_conn():
     try:
         conn = psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
