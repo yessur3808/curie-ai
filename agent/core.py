@@ -55,19 +55,29 @@ class Agent:
     def extract_user_facts(self, user_message):
         """
         Use LLM to extract preferences, interests, traits, etc. from user input.
-        Returns a dict of facts.
+        Returns a dict of facts with confidence scoring.
+        Only stores facts when there is clear evidence in the message.
         """
         prompt = (
             "Extract any preferences, likes, interests, or personality traits about the user from the following message. "
-            "Return them as a JSON dictionary of key:value pairs. If nothing can be extracted, return {}.\n"
+            "IMPORTANT: Only extract facts that are explicitly stated or clearly implied. Do NOT make assumptions. "
+            "If the user says 'I like pizza', extract {\"likes_food\": \"pizza\"}. "
+            "If the user says 'maybe I'll try pizza', do NOT extract anything - there's no commitment. "
+            "Return them as a JSON dictionary of key:value pairs. If nothing can be confidently extracted, return {}.\n"
             f"User message: {user_message}\n"
-            "Extracted (JSON):"
+            "Extracted facts (JSON only, be conservative):"
         )
-        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=100)
+        result = manager.ask_llm(prompt, temperature=0.1, max_tokens=100)
         try:
             facts = json.loads(result.strip())
             if isinstance(facts, dict):
-                return facts
+                # Validate facts - only keep those with clear evidence
+                validated_facts = {}
+                for key, value in facts.items():
+                    # Skip facts that are too vague or uncertain
+                    if value and not any(uncertain in str(value).lower() for uncertain in ['maybe', 'might', 'perhaps', 'unsure', 'not sure']):
+                        validated_facts[key] = value
+                return validated_facts
         except Exception:
             pass
         return {}
@@ -91,12 +101,19 @@ class Agent:
         conversation = ""
         if self.persona and self.persona.get("system_prompt"):
             conversation += self.persona["system_prompt"] + "\n"
+            conversation += (
+                "IMPORTANT RULES:\n"
+                "- If you don't know something, say so. Don't make up facts or information.\n"
+                "- When uncertain, ask clarifying questions instead of guessing.\n"
+                "- Only make claims you can support with evidence from the conversation or known facts.\n"
+                "- Stay in character but prioritize accuracy over creativity.\n\n"
+            )
             # --- Inject user facts into the persona prompt ---
             if user_profile:
-                conversation += "Here are some things I know about the user so far:\n"
+                conversation += "Here are verified facts I know about you (based on our conversations):\n"
                 for k, v in user_profile.items():
                     conversation += f"- {k}: {v}\n"
-                conversation += "Use these facts to make your response more personal and relevant.\n"
+                conversation += "I will use these facts to personalize my responses, but I will not make up new facts about you.\n\n"
 
         for role, msg in history:
             if role == "user":
@@ -129,17 +146,18 @@ class Agent:
             "You are in a friendly conversation. "
             "Generate only a brief, friendly, and natural small talk question or comment (no notes, explanations, or instructions), "
             "in the style of Curie (occasionally using simple French phrases), that helps get to know the user. "
+            "IMPORTANT: Base your question on what you already know OR ask something new. Do NOT make assumptions. "
             "Do not repeat previous questions. Be creative and context-aware. "
             "Reply only with what Curie would say. Do NOT include notes, explanations, or any meta-commentary.\n"
         )
         if user_profile:
-            prompt += "Here are some things you know about the user:\n"
+            prompt += "Here are verified facts you know about the user:\n"
             for k, v in user_profile.items():
                 prompt += f"- {k}: {v}\n"
         prompt += "Here is the recent chat history (user and assistant):\n"
         for role, msg in recent_history:
             prompt += f"{role.capitalize()}: {msg}\n"
-        prompt += "Curie (small talk):"
+        prompt += "Curie (small talk, be natural and friendly, don't repeat topics already discussed):"
 
         small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=60)
         return small_talk.strip()
