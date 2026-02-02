@@ -96,6 +96,22 @@ def init_pg():
                             FOREIGN KEY (user_internal_id) REFERENCES users(internal_id) ON DELETE CASCADE
                         );
                     """)
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS scraper_patterns (
+                            id SERIAL PRIMARY KEY,
+                            url TEXT NOT NULL,
+                            domain TEXT NOT NULL,
+                            query_type TEXT,
+                            content_pattern JSONB,
+                            last_success TIMESTAMPTZ,
+                            last_error TEXT,
+                            reliability_score FLOAT DEFAULT 0.5,
+                            created_at TIMESTAMPTZ DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ DEFAULT NOW()
+                        );
+                    """)
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_scraper_patterns_domain ON scraper_patterns(domain);")
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_scraper_patterns_url ON scraper_patterns(url);")
                     conn.commit()
                     logger.info("Postgres tables initialized successfully.")
                 except DatabaseError as e:
