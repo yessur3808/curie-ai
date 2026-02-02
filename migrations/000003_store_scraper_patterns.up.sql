@@ -1,4 +1,4 @@
-CREATE TABLE scraper_patterns (
+CREATE TABLE IF NOT EXISTS scraper_patterns (
     id SERIAL PRIMARY KEY,
     url TEXT NOT NULL,
     domain TEXT NOT NULL,
