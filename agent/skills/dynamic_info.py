@@ -46,31 +46,6 @@ class AdaptiveScraper:
         # LLM can suggest selectors if needed
         text = soup.get_text(separator="\n", strip=True)
         return text[:2000]  # For MVP, just return a snippet
-    
-    
-    async def analyze_webpage(self, url, query):
-        pattern = self.load_scraper_pattern(url)
-        # scraping logic using pattern as in previous example
-
-    def load_scraper_pattern(self, url):
-        patterns = ScraperPatternManager.load_by_url(url)
-        if patterns:
-            return patterns[0].get('content_pattern')
-        return None
-
-    def save_scraper_pattern(self, url, domain, query_type, content_pattern, success=True, error_msg=None):
-        ScraperPatternManager.save_pattern(
-            url=url,
-            domain=domain,
-            query_type=query_type,
-            content_pattern=content_pattern,
-            last_success=datetime.utcnow() if success else None,
-            last_error=error_msg if not success else None,
-            reliability_score=0.9 if success else 0.2,
-            updated_at=datetime.utcnow()
-        )
-
-    # Add handle_anti_bot, handle_captcha, rotate_user_agent, etc. as needed
 
 class AutoLearner:
     def __init__(self, db=None):

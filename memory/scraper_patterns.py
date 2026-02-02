@@ -4,6 +4,12 @@ from datetime import datetime
 from psycopg2.extras import Json
 from .database import get_pg_conn
 
+# Allowlist of columns that can be updated to prevent SQL injection
+ALLOWED_UPDATE_COLUMNS = {
+    'url', 'domain', 'query_type', 'content_pattern',
+    'last_success', 'last_error', 'reliability_score'
+}
+
 class ScraperPatternManager:
     @staticmethod
     def save_pattern(url, domain, query_type=None, content_pattern=None,
@@ -63,7 +69,7 @@ class ScraperPatternManager:
             cur = conn.cursor()
             cur.execute(f"""
                 UPDATE scraper_patterns SET {set_clause}, updated_at = %s WHERE id = %s
-            """, values + [datetime.utcnow(), id])
+            """, values)
             conn.commit()
             return cur.rowcount > 0
 
