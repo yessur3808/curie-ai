@@ -37,7 +37,7 @@ def save_scraper_pattern(url, domain, query_type, content_pattern, success=True,
         updated_at=datetime.utcnow()
     )
 
-async def scrape_url(url, query, pattern=None):
+async def scrape_url(url, pattern=None):
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(url)
@@ -92,7 +92,7 @@ class AdaptiveScraper:
     async def analyze_webpage(self, url: str, query: str):
         # Try to load an existing scraper pattern for this URL, if any.
         pattern = load_scraper_pattern(url)
-        return await scrape_url(url, query, pattern=pattern)
+        return await scrape_url(url, pattern=pattern)
 
     def save_scraper_pattern(
         self,
