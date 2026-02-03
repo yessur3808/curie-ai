@@ -312,7 +312,7 @@ def start_telegram_bot(agents):
     
     # Handle both single-agent and multi-agent mode
     if isinstance(agents, dict):
-        default_agent_name = os.getenv("DEFAULT_PERSONA_NAME") or next(iter(agents))
+        default_agent_name = os.getenv("ASSISTANT_NAME") or next(iter(agents))
         default_agent = agents[default_agent_name]
         app.bot_data['agents'] = agents
         app.bot_data['default_agent_name'] = default_agent_name

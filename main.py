@@ -194,7 +194,7 @@ def main():
     # Decide agent(s) based on persona argument/env
     persona_arg = getattr(args, "persona", None)
     if (persona_arg and persona_arg.strip().lower() == "all") or (
-        not persona_arg and os.getenv("DEFAULT_PERSONA", "").strip().lower() == "all"
+        not persona_arg and os.getenv("PERSONA_FILE", "").strip().lower() == "all"
     ):
         agents = load_all_agents()
         agent_or_agents = agents
