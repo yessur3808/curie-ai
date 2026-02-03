@@ -6,7 +6,7 @@ import os
 from bs4 import BeautifulSoup
 from llm import manager
 from memory.scraper_patterns import ScraperPatternManager
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from datetime import datetime
 import json
 import logging
@@ -229,7 +229,6 @@ async def scrape_url(url, pattern=None):
                 
                 # Make redirect URL absolute if it's relative
                 if not redirect_url.startswith('http'):
-                    from urllib.parse import urljoin
                     redirect_url = urljoin(url, redirect_url)
                 
                 # Validate redirect target
