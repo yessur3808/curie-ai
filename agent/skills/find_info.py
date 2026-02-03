@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 from datetime import datetime
 import json
 import logging
+import ipaddress
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,76 @@ def _get_int_env(name: str, default: int) -> int:
 INFO_SEARCH_TEMPERATURE = _get_float_env("INFO_SEARCH_TEMPERATURE", 0.2)
 INFO_SEARCH_MAX_TOKENS = _get_int_env("INFO_SEARCH_MAX_TOKENS", 2048)
 
+def is_safe_url(url: str) -> bool:
+    """
+    Validates URL to prevent SSRF attacks.
+    
+    Returns True if the URL is safe to fetch, False otherwise.
+    Blocks:
+    - Non-http/https schemes
+    - localhost and loopback addresses
+    - Private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+    - Link-local addresses (169.254.0.0/16)
+    - Cloud metadata endpoints (169.254.169.254)
+    """
+    try:
+        parsed = urlparse(url)
+        
+        # Only allow http and https schemes
+        if parsed.scheme not in ('http', 'https'):
+            logger.warning(f"Blocked URL with invalid scheme: {url}")
+            return False
+        
+        # Get hostname
+        hostname = parsed.hostname
+        if not hostname:
+            logger.warning(f"Blocked URL with no hostname: {url}")
+            return False
+        
+        # Block localhost variations
+        if hostname.lower() in ('localhost', '0.0.0.0', '127.0.0.1', '::1'):
+            logger.warning(f"Blocked localhost URL: {url}")
+            return False
+        
+        # Resolve hostname to IP address
+        try:
+            # Use socket.getaddrinfo to resolve hostname
+            addr_info = socket.getaddrinfo(hostname, None)
+            for family, _, _, _, sockaddr in addr_info:
+                ip_str = sockaddr[0]
+                ip = ipaddress.ip_address(ip_str)
+                
+                # Block loopback addresses
+                if ip.is_loopback:
+                    logger.warning(f"Blocked loopback address: {url} -> {ip}")
+                    return False
+                
+                # Block private addresses
+                if ip.is_private:
+                    logger.warning(f"Blocked private address: {url} -> {ip}")
+                    return False
+                
+                # Block link-local addresses (including 169.254.169.254)
+                if ip.is_link_local:
+                    logger.warning(f"Blocked link-local address: {url} -> {ip}")
+                    return False
+                
+                # Block multicast addresses
+                if ip.is_multicast:
+                    logger.warning(f"Blocked multicast address: {url} -> {ip}")
+                    return False
+        
+        except (socket.gaierror, socket.herror, ValueError) as e:
+            # DNS resolution failed or invalid IP
+            logger.warning(f"Could not resolve hostname for URL validation: {url} - {e}")
+            return False
+        
+        return True
+    
+    except Exception as e:
+        logger.error(f"Error validating URL {url}: {e}")
+        return False
+
 async def search_sources_llm(query):
     prompt = (
         f"Suggest 3 to 5 reputable web sources (with full URLs) where I can find up-to-date information for the following request:\n"
@@ -43,7 +115,11 @@ async def search_sources_llm(query):
     )
     response = await asyncio.to_thread(manager.ask_llm, prompt, temperature=INFO_SEARCH_TEMPERATURE, max_tokens=INFO_SEARCH_MAX_TOKENS)
     urls = [line.strip() for line in response.splitlines() if line.strip().startswith("http")]
-    return urls
+    # Filter URLs to only include safe ones (SSRF protection)
+    safe_urls = [url for url in urls if is_safe_url(url)]
+    if len(safe_urls) < len(urls):
+        logger.warning(f"Filtered out {len(urls) - len(safe_urls)} unsafe URLs from LLM response")
+    return safe_urls
 
 def load_scraper_pattern(url):
     patterns = ScraperPatternManager.load_by_url(url)
@@ -64,6 +140,11 @@ def save_scraper_pattern(url, domain, query_type, content_pattern, success=True,
     )
 
 async def scrape_url(url, pattern=None):
+    # Validate URL to prevent SSRF attacks
+    if not is_safe_url(url):
+        logger.error(f"Blocked unsafe URL in scrape_url: {url}")
+        return f"Error scraping {url}: URL blocked for security reasons"
+    
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(url)
