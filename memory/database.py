@@ -141,6 +141,9 @@ def init_databases():
             raise
         raise RuntimeError(f"Failed to initialize Postgres DB: {e}") from e
     try:
+        # Eagerly initialize MongoDB connection at startup to catch configuration
+        # or connectivity issues early, rather than deferring until first use
+        _init_mongo_connection()
         init_mongo()
     except Exception as e:
         logger.error(f"Failed to initialize MongoDB: {e}")
