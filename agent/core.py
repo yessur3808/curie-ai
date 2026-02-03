@@ -352,6 +352,8 @@ class Agent:
             "show_project",
             "project_help",
             "find_info",
+            "scrape_info",
+            "multi_source_info",
             "list_directories"
         }
 
@@ -596,8 +598,6 @@ class Agent:
             "  \"overall_clarification_needed\": true,\n"
             "  \"overall_suggested_questions\": [\"Please upload the file you'd like me to analyze.\"]\n"
             "}\n"
-            f"User: {user_message}\n"
-            "JSON:\n"
             "User: What's happening in the NBA right now?\n"
             "{\n"
             "  \"intents\": [\n"
@@ -606,6 +606,8 @@ class Agent:
             "  \"overall_clarification_needed\": false,\n"
             "  \"overall_suggested_questions\": []\n"
             "}\n"
+            f"User: {user_message}\n"
+            "JSON:\n"
         )
         result = manager.ask_llm(prompt, temperature=0, max_tokens=2048)
 
