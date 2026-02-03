@@ -65,8 +65,8 @@ class Agent:
     def extract_user_facts(self, user_message):
         """
         Use LLM to extract preferences, interests, traits, etc. from user input.
-        Returns a dict of facts with confidence scoring.
-        Only stores facts when there is clear evidence in the message.
+        Returns a dict of validated facts (key–value pairs) without explicit confidence scores.
+        Only stores facts when there is clear evidence in the message and filters out uncertain or vague statements.
         """
         prompt = (
             "Extract any preferences, likes, interests, or personality traits about the user from the following message. "
