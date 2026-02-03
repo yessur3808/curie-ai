@@ -212,17 +212,17 @@ def test_dedupe_cache_concurrent_same_key():
 
 
 def run_all_tests():
-    """Run all tests."""
+    """Run all tests using automatic test discovery."""
+    # Discover all test functions in the current module
+    import inspect
+    current_module = sys.modules[__name__]
     tests = [
-        test_dedupe_cache_basic,
-        test_dedupe_cache_ttl_expiration,
-        test_dedupe_cache_size_limit,
-        test_dedupe_cache_empty_key,
-        test_dedupe_cache_invalid_params,
-        test_dedupe_cache_clear,
-        test_dedupe_cache_thread_safety,
-        test_dedupe_cache_concurrent_same_key,
+        obj for name, obj in inspect.getmembers(current_module)
+        if inspect.isfunction(obj) and name.startswith('test_')
     ]
+    
+    # Sort tests by name for consistent ordering
+    tests.sort(key=lambda f: f.__name__)
     
     print("Running deduplication cache tests...")
     print("=" * 60)

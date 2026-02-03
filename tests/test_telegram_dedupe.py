@@ -206,20 +206,17 @@ def test_is_duplicate_same_update_id_different_user():
 
 
 def run_all_tests():
-    """Run all tests."""
+    """Run all tests using automatic test discovery."""
+    # Discover all test functions in the current module
+    import inspect
+    current_module = sys.modules[__name__]
     tests = [
-        test_build_update_key_with_user,
-        test_build_update_key_without_user,
-        test_build_update_key_with_message_no_user,
-        test_build_update_key_none_update,
-        test_build_update_key_no_update_id,
-        test_is_duplicate_update_first_time,
-        test_is_duplicate_update_second_time,
-        test_is_duplicate_update_different_updates,
-        test_is_duplicate_update_none_update,
-        test_is_duplicate_update_no_update_id,
-        test_is_duplicate_same_update_id_different_user,
+        obj for name, obj in inspect.getmembers(current_module)
+        if inspect.isfunction(obj) and name.startswith('test_')
     ]
+    
+    # Sort tests by name for consistent ordering
+    tests.sort(key=lambda f: f.__name__)
     
     print("Running telegram deduplication integration tests...")
     print("=" * 60)
