@@ -234,7 +234,8 @@ def clean_assistant_reply(reply: str) -> str:
     reply = re.sub(speaker_pattern, "", reply, flags=re.IGNORECASE)
 
     # Remove common meta-note patterns
-    meta_patterns = [
+    # Patterns that span multiple lines (use DOTALL to match . across newlines)
+    multiline_patterns = [
         # Bracketed meta-notes
         r"\[Note:.*?\]",  # [Note: ...]
         r"\(Note:.*?\)",  # (Note: ...)
@@ -276,7 +277,13 @@ def clean_assistant_reply(reply: str) -> str:
         r"<s>.*?</s>",  # Special tokens
         r"###\s*Instruction:.*?###",  # ### Instruction: ... ###
         r"###\s*System:.*?###",  # ### System: ... ###
-        # Common prefixes that indicate meta-commentary
+    ]
+    for pattern in multiline_patterns:
+        reply = re.sub(pattern, "", reply, flags=re.IGNORECASE | re.DOTALL)
+
+    # Line-anchored patterns (use MULTILINE so ^ and $ match line boundaries)
+    # These should only remove content on a single line, not span multiple lines
+    line_anchored_patterns = [
         r"^\*\*Note:\*\*.*?$",  # **Note:** at start of line
         r"^\*\*System:\*\*.*?$",  # **System:** at start of line
         r"^\*\*Meta:\*\*.*?$",  # **Meta:** at start of line
@@ -284,8 +291,8 @@ def clean_assistant_reply(reply: str) -> str:
         r"^System:.*?$",  # System: at start of line
         r"^Meta:.*?$",  # Meta: at start of line
     ]
-    for pattern in meta_patterns:
-        reply = re.sub(pattern, "", reply, flags=re.IGNORECASE | re.DOTALL)
+    for pattern in line_anchored_patterns:
+        reply = re.sub(pattern, "", reply, flags=re.IGNORECASE | re.MULTILINE)
 
     # Remove lines that look like system prompts or instructions
     lines = [line.strip() for line in reply.splitlines() if line.strip()]
