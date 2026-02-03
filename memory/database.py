@@ -136,9 +136,13 @@ def init_databases():
         init_pg()
     except Exception as e:
         logger.error(f"Failed to initialize Postgres DB: {e}")
-        raise RuntimeError(f"Failed to initialize Postgres DB: {e}")
+        if isinstance(e, RuntimeError):
+            raise
+        raise RuntimeError(f"Failed to initialize Postgres DB: {e}") from e
     try:
         init_mongo()
     except Exception as e:
         logger.error(f"Failed to initialize MongoDB: {e}")
-        raise RuntimeError(f"Failed to initialize MongoDB: {e}")
+        if isinstance(e, RuntimeError):
+            raise
+        raise RuntimeError(f"Failed to initialize MongoDB: {e}") from e
