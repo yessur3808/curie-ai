@@ -274,7 +274,7 @@ def clean_assistant_reply(reply: str) -> str:
         r"<\|im_start\|>.*?<\|im_end\|>",  # ChatML format
         r"\[SYSTEM\].*?\[/SYSTEM\]",  # [SYSTEM]...[/SYSTEM]
         r"<<SYS>>.*?<</SYS>>",  # <<SYS>>...</SYS>>
-        r"<s>.*?</s>",  # Special tokens
+        r"(?m-s)^(?:<s>.*?</s>)$",  # Special tokens on their own line
         r"###\s*Instruction:.*?###",  # ### Instruction: ... ###
         r"###\s*System:.*?###",  # ### System: ... ###
     ]
