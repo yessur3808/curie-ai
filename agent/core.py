@@ -158,7 +158,7 @@ class Agent:
         
         
 
-        response = manager.ask_llm(conversation)
+        response = manager.ask_llm(conversation, max_tokens=512)
         
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
@@ -283,7 +283,7 @@ class Agent:
             f"User's question: {user_question}\n"
             "Advise or help the user based on their project files and structure."
         )
-        response = manager.ask_llm(prompt)
+        response = manager.ask_llm(prompt, max_tokens=512)
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
 
