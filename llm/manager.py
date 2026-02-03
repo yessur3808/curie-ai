@@ -37,7 +37,7 @@ def _get_int_env(key, default):
     try:
         return int(os.getenv(key, default))
     except (ValueError, TypeError):
-        logger.warning(f"Invalid value for {key}, using default {default}")
+        logger.warning(f"Invalid value '{os.getenv(key)}' for {key}, using default {default}")
         return default
 
 MODEL_CONTEXT_SIZE = _get_int_env("LLM_CONTEXT_SIZE", 2048)  # Total context window size for llama.cpp models
