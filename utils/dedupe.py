@@ -79,8 +79,11 @@ class DedupeCache:
         
         This method is thread-safe and performs the following operations atomically:
         1. Check if the key exists and is not expired
-        2. Update the timestamp for the key (or add it if new)
+        2. Add the key with current timestamp if new
         3. Prune expired entries and enforce size limits
+        
+        Note: For strict FIFO behavior, existing keys are NOT updated when checked again.
+        This ensures that eviction happens in true insertion order, not access order.
         
         Args:
             key: The key to check (None or empty string returns False)
@@ -102,8 +105,7 @@ class DedupeCache:
             # Check if key exists and is not expired
             if existing_timestamp is not None:
                 if self.ttl_seconds <= 0 or (now - existing_timestamp) < self.ttl_seconds:
-                    # Update timestamp (touch)
-                    self._cache[key] = now
+                    # Don't update timestamp - maintain strict FIFO order
                     self._prune(now)
                     return True
             

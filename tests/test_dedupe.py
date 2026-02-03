@@ -48,28 +48,35 @@ def test_dedupe_cache_ttl_expiration():
 
 
 def test_dedupe_cache_size_limit():
-    """Test that cache enforces size limit with FIFO eviction."""
+    """Test that cache enforces size limit with strict FIFO eviction."""
     cache = DedupeCache(ttl_seconds=60, max_size=3)
     
-    # Add 3 keys
+    # Add 3 keys (cache: key1, key2, key3)
     assert cache.check("key1") is False
     assert cache.check("key2") is False
     assert cache.check("key3") is False
     assert cache.size() == 3
     
-    # Add a 4th key, should evict the first
+    # Add a 4th key, should evict key1 (oldest)
+    # Cache becomes: key2, key3, key4
     assert cache.check("key4") is False
     assert cache.size() == 3
     
-    # Now check that key2, key3, key4 are still there (marking them as duplicates)
+    # Verify key1 was evicted (returns False for new entry)
+    # key2, key3, key4 should still be in cache
     assert cache.check("key2") is True
     assert cache.check("key3") is True
     assert cache.check("key4") is True
     
-    # Add a new key to verify FIFO eviction continues
+    # Now add key5, should evict key2 (oldest in current cache)
+    # Cache becomes: key3, key4, key5
     assert cache.check("key5") is False
-    # key2 should have been evicted now
     assert cache.size() == 3
+    
+    # Verify key2 was evicted
+    assert cache.check("key3") is True
+    assert cache.check("key4") is True
+    assert cache.check("key5") is True
     
     print("✓ test_dedupe_cache_size_limit passed")
 
