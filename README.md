@@ -44,7 +44,7 @@ API                   ChromaDB,           etc)
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - PostgreSQL
 - MongoDB
 - Docker (optional but preferred)
@@ -59,8 +59,8 @@ API                   ChromaDB,           etc)
 
 ### 1. **Clone the repository**
 ```sh
-git clone https://github.com/yessur3808/curie00.git
-cd curie00
+git clone https://github.com/yessur3808/curie-ai.git
+cd curie-ai
 ```
 
 
