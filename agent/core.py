@@ -606,14 +606,6 @@ class Agent:
             "  \"overall_clarification_needed\": false,\n"
             "  \"overall_suggested_questions\": []\n"
             "}\n"
-            "User: Latest iPhone price in Tokyo?\n"
-            "{\n"
-            "  \"intents\": [\n"
-            "    {\"action\": \"find_info\", \"description\": \"Find the current iPhone price in Tokyo from multiple sources.\", \"confidence\": 0.95, \"parameters\": {\"product\": \"iPhone\", \"location\": \"Tokyo\"}, \"reasoning\": \"The user wants the latest price info from the web.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"productivity\", \"language\": \"en\"}\n"
-            "  ],\n"
-            "  \"overall_clarification_needed\": false,\n"
-            "  \"overall_suggested_questions\": []\n"
-            "}\n"
         )
         result = manager.ask_llm(prompt, temperature=0, max_tokens=2048)
 
