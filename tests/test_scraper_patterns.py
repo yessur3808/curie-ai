@@ -2,7 +2,6 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from datetime import datetime
 from memory.scraper_patterns import ScraperPatternManager
 
 
