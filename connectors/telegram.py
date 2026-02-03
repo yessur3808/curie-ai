@@ -3,8 +3,6 @@
 import datetime
 import random
 import os
-import time
-from collections import OrderedDict
 from dotenv import load_dotenv
 
 from telegram import Update
@@ -20,6 +18,7 @@ from utils.session import (
     clear_user_busy,
     small_talk_chance,
 )
+from utils.dedupe import DedupeCache
 
 from memory import UserManager, ConversationManager
 from llm.manager import clean_assistant_reply
@@ -32,11 +31,9 @@ user_persona_map = {}
 # Maps telegram user_id to internal_id for this session
 user_session_map = {}
 
-# Deduplication cache: stores (user_id, update_id) -> timestamp
-# Using OrderedDict for efficient FIFO cleanup
-processed_updates = OrderedDict()
-MAX_CACHE_SIZE = 1000
-CACHE_EXPIRY_SECONDS = 300  # 5 minutes
+# Thread-safe deduplication cache: TTL of 5 minutes, max 2000 entries
+# Using DedupeCache for thread-safe duplicate update detection
+processed_updates = DedupeCache(ttl_seconds=300, max_size=2000)
 
 
 
@@ -50,45 +47,56 @@ SMALL_TALK_QUESTIONS = [
     "C'est intéressant! Do you have any hobbies you love?",
 ]
 
-def _cleanup_update_cache():
-    """Remove expired entries from the processed updates cache."""
-    current_time = time.time()
-    # Remove entries older than CACHE_EXPIRY_SECONDS
-    keys_to_remove = [
-        key for key, timestamp in processed_updates.items()
-        if current_time - timestamp > CACHE_EXPIRY_SECONDS
-    ]
-    for key in keys_to_remove:
-        del processed_updates[key]
+def _build_update_key(update: Update) -> str | None:
+    """
+    Build a unique key for a Telegram update.
     
-    # Also limit cache size (FIFO)
-    while len(processed_updates) > MAX_CACHE_SIZE:
-        processed_updates.popitem(last=False)
+    This follows openclaw's approach of creating a composite key that uniquely
+    identifies an update for deduplication purposes.
+    
+    Args:
+        update: The Telegram update object
+        
+    Returns:
+        A unique string key, or None if the update cannot be identified
+    """
+    if not update or not update.update_id:
+        return None
+    
+    # Use update_id as the primary identifier
+    update_id = update.update_id
+    
+    # Also include user_id for additional uniqueness in case of race conditions
+    user_id = None
+    if update.message and update.message.from_user:
+        user_id = update.message.from_user.id
+    
+    if user_id:
+        return f"update:{update_id}:user:{user_id}"
+    return f"update:{update_id}"
 
 def _is_duplicate_update(update: Update) -> bool:
     """
     Check if this update has already been processed.
-    Returns True if duplicate, False otherwise.
+    
+    This uses a thread-safe deduplication cache to prevent duplicate processing
+    of the same update, which can occur when multiple handlers are called
+    concurrently in python-telegram-bot.
+    
+    Args:
+        update: The Telegram update to check
+        
+    Returns:
+        True if duplicate (already processed), False if new
     """
-    if not update or not update.update_id or not update.message:
+    key = _build_update_key(update)
+    if not key:
         return False
     
-    user_id = update.message.from_user.id if update.message.from_user else None
-    if not user_id:
-        return False
-    
-    cache_key = (user_id, update.update_id)
-    
-    # Clean up old entries periodically
-    _cleanup_update_cache()
-    
-    # Check if already processed
-    if cache_key in processed_updates:
-        return True
-    
-    # Mark as processed
-    processed_updates[cache_key] = time.time()
-    return False
+    # The DedupeCache.check() method is thread-safe and returns:
+    # - True if the key was already in the cache (duplicate)
+    # - False if the key is new (first time seeing it)
+    return processed_updates.check(key)
 
 async def handle_identify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
