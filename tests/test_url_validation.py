@@ -2,6 +2,8 @@
 
 import sys
 import os
+from unittest.mock import patch
+import socket
 
 # Add parent directory to path to import agent modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -125,9 +127,12 @@ def test_url_length_limits():
 
 def test_dns_resolution_failures():
     """Test that URLs that fail DNS resolution are blocked"""
-    # These should fail DNS resolution in sandboxed environment
-    assert is_safe_url("http://this-domain-does-not-exist-12345.com") == False
-    assert is_safe_url("http://invalid.invalid") == False
+    # Mock socket.getaddrinfo in the find_info module to simulate DNS resolution failure
+    with patch('agent.skills.find_info.socket.getaddrinfo') as mock_getaddrinfo:
+        mock_getaddrinfo.side_effect = socket.gaierror("Name or service not known")
+        
+        assert is_safe_url("http://this-domain-does-not-exist-12345.com") == False
+        assert is_safe_url("http://invalid.invalid") == False
 
 
 if __name__ == "__main__":
