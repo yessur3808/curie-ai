@@ -215,7 +215,7 @@ async def scrape_url(url, pattern=None):
     try:
         # Disable automatic redirects and handle them manually with validation
         # This prevents redirect-based SSRF attacks
-        async with httpx.AsyncClient(timeout=10, follow_redirects=False, max_redirects=0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0), follow_redirects=False, max_redirects=0) as client:
             resp = await client.get(url)
             
             # Handle redirects manually with security validation
