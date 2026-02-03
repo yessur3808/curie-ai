@@ -99,14 +99,14 @@ async def cross_reference_llm(query, snippets):
     # Limit number of sources to prevent context overflow
     limited_snippets = snippets[:MAX_SOURCES]
     
-    # Truncate each snippet to max chars (conservative token estimate)
-    truncated_snippets = []
-    for snippet in limited_snippets:
-        if len(snippet) > MAX_SNIPPET_CHARS:
-            truncated = snippet[:MAX_SNIPPET_CHARS] + "... [truncated]"
-        else:
-            truncated = snippet
-        truncated_snippets.append(truncated)
+    # Truncate each snippet to max chars (accounting for truncation suffix)
+    truncation_suffix = "... [truncated]"
+    truncated_snippets = [
+        snippet[:MAX_SNIPPET_CHARS - len(truncation_suffix)] + truncation_suffix
+        if len(snippet) > MAX_SNIPPET_CHARS
+        else snippet
+        for snippet in limited_snippets
+    ]
     
     joined = "\n---\n".join(truncated_snippets)
     prompt = (
@@ -117,7 +117,8 @@ async def cross_reference_llm(query, snippets):
     )
     
     # Early validation: check if prompt is reasonable
-    # Rough estimate: 4 chars per token on average
+    # Conservative estimate: 4 chars per token (varies by tokenizer and language)
+    # This is an approximation; actual token count may differ depending on the LLM's tokenizer
     estimated_prompt_tokens = len(prompt) / 4
     if estimated_prompt_tokens > (manager.MODEL_CONTEXT_SIZE - INFO_SEARCH_MAX_TOKENS - manager.CONTEXT_BUFFER_TOKENS):
         logger.warning(f"Prompt estimated at {estimated_prompt_tokens} tokens, may exceed context window")
