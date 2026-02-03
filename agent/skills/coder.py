@@ -88,7 +88,7 @@ def summarize_change_for_pr(goal, changes, model_name):
         f"Provide a concise PR title and a detailed PR body in Markdown. "
         f"Title should be a single line. Body should explain what was improved or fixed and why."
     )
-    result = llm.manager.ask_llm(prompt, model_name=model_name, max_tokens=2048)
+    result = llm.manager.ask_llm(prompt, model_name=model_name, max_tokens=512)
     if "\n" in result:
         title, body = result.split("\n", 1)
     else:
