@@ -63,12 +63,14 @@ def is_safe_url(url: str) -> bool:
             logger.warning(f"Blocked URL with no hostname: {url}")
             return False
         
-        # Block localhost variations
+        # Block localhost variations (pre-check before DNS resolution)
+        # Note: DNS resolution below will catch additional loopback addresses
         if hostname.lower() in ('localhost', '0.0.0.0', '127.0.0.1', '::1'):
             logger.warning(f"Blocked localhost URL: {url}")
             return False
         
-        # Resolve hostname to IP address
+        # Resolve hostname to IP address and validate ALL resolved IPs
+        # If ANY resolved IP is unsafe, reject the URL (prevents DNS rebinding attacks)
         try:
             # Use socket.getaddrinfo to resolve hostname
             addr_info = socket.getaddrinfo(hostname, None)
