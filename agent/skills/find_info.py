@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 from datetime import datetime
 import json
 import logging
+import ipaddress
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,128 @@ INFO_SEARCH_MAX_TOKENS = _get_int_env("INFO_SEARCH_MAX_TOKENS", 512)  # Reduced 
 MAX_SOURCES = _get_int_env("INFO_SEARCH_MAX_SOURCES", 3)  # Limit number of sources to prevent context overflow
 MAX_SNIPPET_CHARS = _get_int_env("INFO_SEARCH_MAX_SNIPPET_CHARS", 400)  # Max chars per snippet (conservative estimate: ~100 tokens)
 
+def is_safe_url(url: str) -> bool:
+    """
+    Validates URL to prevent SSRF attacks.
+    
+    Returns True if the URL is safe to fetch, False otherwise.
+    Blocks:
+    - Non-http/https schemes
+    - localhost and loopback addresses
+    - Private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+    - Link-local addresses (169.254.0.0/16)
+    - Cloud metadata endpoints (169.254.169.254)
+    - Reserved/unspecified addresses
+    - Multicast addresses
+    - URLs exceeding maximum length
+    - Suspicious ports
+    """
+    try:
+        # Check URL length to prevent DoS
+        MAX_URL_LENGTH = 2048
+        if len(url) > MAX_URL_LENGTH:
+            logger.warning(f"Blocked URL exceeding max length ({len(url)} > {MAX_URL_LENGTH}): {url[:100]}...")
+            return False
+        
+        parsed = urlparse(url)
+        
+        # Only allow http and https schemes
+        if parsed.scheme not in ('http', 'https'):
+            logger.warning(f"Blocked URL with invalid scheme: {url}")
+            return False
+        
+        # Get hostname
+        hostname = parsed.hostname
+        if not hostname:
+            logger.warning(f"Blocked URL with no hostname: {url}")
+            return False
+        
+        # Check hostname length
+        if len(hostname) > 253:  # Max DNS hostname length
+            logger.warning(f"Blocked URL with excessively long hostname: {url}")
+            return False
+        
+        # Block localhost variations (pre-check before DNS resolution)
+        # Note: DNS resolution below will catch additional loopback addresses
+        if hostname.lower() in ('localhost', '0.0.0.0', '127.0.0.1', '::1', '::'):
+            logger.warning(f"Blocked localhost URL: {url}")
+            return False
+        
+        # Check for suspicious ports (optional but recommended)
+        # Block common internal service ports to prevent port scanning
+        BLOCKED_PORTS = {
+            22,    # SSH
+            23,    # Telnet
+            25,    # SMTP
+            135,   # Windows RPC
+            139,   # NetBIOS
+            445,   # SMB
+            1433,  # MSSQL
+            3306,  # MySQL
+            3389,  # RDP
+            5432,  # PostgreSQL
+            5900,  # VNC
+            6379,  # Redis
+            8080,  # Common internal HTTP
+            9200,  # Elasticsearch
+            27017, # MongoDB
+        }
+        
+        port = parsed.port
+        if port and port in BLOCKED_PORTS:
+            logger.warning(f"Blocked URL with suspicious port {port}: {url}")
+            return False
+        
+        # Resolve hostname to IP address and validate ALL resolved IPs
+        # If ANY resolved IP is unsafe, reject the URL (prevents DNS rebinding attacks)
+        try:
+            # Use socket.getaddrinfo to resolve hostname
+            addr_info = socket.getaddrinfo(hostname, None)
+            for family, _, _, _, sockaddr in addr_info:
+                ip_str = sockaddr[0]
+                ip = ipaddress.ip_address(ip_str)
+                
+                # Block unspecified addresses (0.0.0.0, ::)
+                if hasattr(ip, 'is_unspecified') and ip.is_unspecified:
+                    logger.warning(f"Blocked unspecified address: {url} -> {ip}")
+                    return False
+                
+                # Block loopback addresses
+                if ip.is_loopback:
+                    logger.warning(f"Blocked loopback address: {url} -> {ip}")
+                    return False
+                
+                # Block private addresses
+                if ip.is_private:
+                    logger.warning(f"Blocked private address: {url} -> {ip}")
+                    return False
+                
+                # Block link-local addresses (including 169.254.169.254)
+                if ip.is_link_local:
+                    logger.warning(f"Blocked link-local address: {url} -> {ip}")
+                    return False
+                
+                # Block multicast addresses
+                if ip.is_multicast:
+                    logger.warning(f"Blocked multicast address: {url} -> {ip}")
+                    return False
+                
+                # Block reserved addresses (future use, broadcast, etc.)
+                if ip.is_reserved:
+                    logger.warning(f"Blocked reserved address: {url} -> {ip}")
+                    return False
+        
+        except (socket.gaierror, socket.herror, ValueError) as e:
+            # DNS resolution failed or invalid IP
+            logger.warning(f"Could not resolve hostname for URL validation: {url} - {e}")
+            return False
+        
+        return True
+    
+    except Exception as e:
+        logger.error(f"Error validating URL {url}: {e}")
+        return False
+
 async def search_sources_llm(query):
     prompt = (
         f"Suggest 3 to 5 reputable web sources (with full URLs) where I can find up-to-date information for the following request:\n"
@@ -45,7 +169,11 @@ async def search_sources_llm(query):
     )
     response = await asyncio.to_thread(manager.ask_llm, prompt, temperature=INFO_SEARCH_TEMPERATURE, max_tokens=INFO_SEARCH_MAX_TOKENS)
     urls = [line.strip() for line in response.splitlines() if line.strip().startswith("http")]
-    return urls
+    # Filter URLs to only include safe ones (SSRF protection)
+    safe_urls = [url for url in urls if is_safe_url(url)]
+    if len(safe_urls) < len(urls):
+        logger.warning(f"Filtered out {len(urls) - len(safe_urls)} unsafe URLs from LLM response")
+    return safe_urls
 
 def load_scraper_pattern(url):
     patterns = ScraperPatternManager.load_by_url(url)
@@ -66,9 +194,45 @@ def save_scraper_pattern(url, domain, query_type, content_pattern, success=True,
     )
 
 async def scrape_url(url, pattern=None):
+    # Validate URL to prevent SSRF attacks
+    if not is_safe_url(url):
+        logger.error(f"Blocked unsafe URL in scrape_url: {url}")
+        return f"Error scraping {url}: URL blocked for security reasons"
+    
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        # Disable automatic redirects and handle them manually with validation
+        # This prevents redirect-based SSRF attacks
+        async with httpx.AsyncClient(timeout=10, follow_redirects=False, max_redirects=0) as client:
             resp = await client.get(url)
+            
+            # Handle redirects manually with security validation
+            redirect_count = 0
+            MAX_REDIRECTS = 5
+            
+            while resp.status_code in (301, 302, 303, 307, 308) and redirect_count < MAX_REDIRECTS:
+                redirect_url = resp.headers.get('Location')
+                if not redirect_url:
+                    break
+                
+                # Make redirect URL absolute if it's relative
+                if not redirect_url.startswith('http'):
+                    from urllib.parse import urljoin
+                    redirect_url = urljoin(url, redirect_url)
+                
+                # Validate redirect target
+                if not is_safe_url(redirect_url):
+                    logger.error(f"Blocked unsafe redirect from {url} to {redirect_url}")
+                    return f"Error scraping {url}: Redirect to unsafe location blocked"
+                
+                logger.info(f"Following redirect from {url} to {redirect_url}")
+                url = redirect_url
+                resp = await client.get(url)
+                redirect_count += 1
+            
+            if redirect_count >= MAX_REDIRECTS:
+                logger.warning(f"Too many redirects for {url}")
+                return f"Error scraping {url}: Too many redirects"
+            
             resp.raise_for_status()
             html = resp.text
 
