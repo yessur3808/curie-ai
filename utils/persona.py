@@ -66,7 +66,7 @@ def load_persona(filename=None, assets_dir='assets/personality') -> Dict:
     
     # If no filename provided, check .env or ask user
     if not filename:
-        filename = os.getenv('DEFAULT_PERSONA')
+        filename = os.getenv('PERSONA_FILE')
         if not filename:
             filename = select_persona()
     

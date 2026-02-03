@@ -223,7 +223,7 @@ def clean_assistant_reply(reply: str) -> str:
 
     # Build speaker tag pattern including custom persona name from environment
     speaker_tags = ["Curie", "Assistant", "AI", "System"]
-    custom_persona_name = os.getenv("DEFAULT_PERSONA_NAME")
+    custom_persona_name = os.getenv("ASSISTANT_NAME")
     if custom_persona_name and custom_persona_name not in speaker_tags:
         speaker_tags.append(custom_persona_name)
 
