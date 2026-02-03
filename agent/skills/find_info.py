@@ -99,10 +99,10 @@ class AdaptiveScraper:
 
     async def analyze_webpage(self, url: str, query: str):
         # Try to load an existing scraper pattern for this URL, if any.
-        pattern = load_scraper_pattern(url)
+        pattern = await asyncio.to_thread(load_scraper_pattern, url)
         return await scrape_url(url, pattern=pattern)
 
-    def save_scraper_pattern(
+    async def save_scraper_pattern(
         self,
         url,
         domain,
@@ -111,7 +111,8 @@ class AdaptiveScraper:
         success: bool = True,
         error_msg: str | None = None,
     ):
-        return save_scraper_pattern(
+        return await asyncio.to_thread(
+            save_scraper_pattern,
             url=url,
             domain=domain,
             query_type=query_type,
@@ -141,16 +142,16 @@ async def find_info(query):
             if "Error scraping" not in data:
                 # Save the pattern (for demo, use main_selector=body or enhance with LLM)
                 example_pattern = {"main_selector": "body"}
-                adaptive.save_scraper_pattern(
+                await adaptive.save_scraper_pattern(
                     url, domain, query_type=query, content_pattern=example_pattern, success=True
                 )
             else:
-                adaptive.save_scraper_pattern(
+                await adaptive.save_scraper_pattern(
                     url, domain, query_type=query, content_pattern=None, success=False, error_msg=data
                 )
             return data
         except Exception as e:
-            adaptive.save_scraper_pattern(
+            await adaptive.save_scraper_pattern(
                 url, domain, query_type=query, content_pattern=None, success=False, error_msg=str(e)
             )
             return f"Error scraping {url}: {e}"
