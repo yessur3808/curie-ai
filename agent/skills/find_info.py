@@ -13,9 +13,27 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _get_float_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def _get_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
 # Info search task-specific configuration from environment variables
-INFO_SEARCH_TEMPERATURE = float(os.getenv("INFO_SEARCH_TEMPERATURE", "0.2"))
-INFO_SEARCH_MAX_TOKENS = int(os.getenv("INFO_SEARCH_MAX_TOKENS", "2048"))
+INFO_SEARCH_TEMPERATURE = _get_float_env("INFO_SEARCH_TEMPERATURE", 0.2)
+INFO_SEARCH_MAX_TOKENS = _get_int_env("INFO_SEARCH_MAX_TOKENS", 2048)
 
 async def search_sources_llm(query):
     prompt = (
