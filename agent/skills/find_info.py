@@ -33,9 +33,9 @@ def _get_int_env(name: str, default: int) -> int:
 
 # Info search task-specific configuration from environment variables
 INFO_SEARCH_TEMPERATURE = _get_float_env("INFO_SEARCH_TEMPERATURE", 0.2)
-INFO_SEARCH_MAX_TOKENS = _get_int_env("INFO_SEARCH_MAX_TOKENS", 2048)
+INFO_SEARCH_MAX_TOKENS = _get_int_env("INFO_SEARCH_MAX_TOKENS", 512)  # Reduced default to leave room for prompt
 MAX_SOURCES = _get_int_env("INFO_SEARCH_MAX_SOURCES", 3)  # Limit number of sources to prevent context overflow
-MAX_SNIPPET_CHARS = _get_int_env("INFO_SEARCH_MAX_SNIPPET_CHARS", 800)  # Max chars per snippet (conservative estimate: ~200 tokens)
+MAX_SNIPPET_CHARS = _get_int_env("INFO_SEARCH_MAX_SNIPPET_CHARS", 400)  # Max chars per snippet (conservative estimate: ~100 tokens)
 
 async def search_sources_llm(query):
     prompt = (
