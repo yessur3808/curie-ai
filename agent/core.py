@@ -87,7 +87,9 @@ class Agent:
                 validated_facts = {}
                 for key, value in facts.items():
                     # Skip facts that are too vague or uncertain
-                    if value and not any(uncertain in str(value).lower() for uncertain in self.UNCERTAIN_KEYWORDS):
+                    if value is not None and value != "" and not any(
+                        uncertain in str(value).lower() for uncertain in self.UNCERTAIN_KEYWORDS
+                    ):
                         validated_facts[key] = value
                 return validated_facts
         except Exception:
