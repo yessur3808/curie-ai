@@ -2,6 +2,7 @@
 
 import sys
 import os
+import asyncio
 
 # Add parent directory to path to import agent modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -9,123 +10,122 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from agent.skills.find_info import is_safe_url
 
 
-def test_block_localhost():
+async def test_block_localhost():
     """Test that localhost and loopback addresses are blocked"""
-    assert is_safe_url("http://localhost:8000") == False
-    assert is_safe_url("http://127.0.0.1") == False
-    assert is_safe_url("http://127.0.0.1:8080") == False
-    assert is_safe_url("http://[::1]") == False
-    assert is_safe_url("http://0.0.0.0") == False
-    assert is_safe_url("http://[::]") == False  # IPv6 unspecified
+    assert await is_safe_url("http://localhost:8000") == False
+    assert await is_safe_url("http://127.0.0.1") == False
+    assert await is_safe_url("http://127.0.0.1:8080") == False
+    assert await is_safe_url("http://[::1]") == False
+    assert await is_safe_url("http://0.0.0.0") == False
+    assert await is_safe_url("http://[::]") == False  # IPv6 unspecified
     
     # Additional loopback address variations in 127.0.0.0/8 range
-    assert is_safe_url("http://127.0.0.2") == False
-    assert is_safe_url("http://127.1") == False  # Short form of 127.0.0.1
-    assert is_safe_url("http://127.255.255.255") == False
+    assert await is_safe_url("http://127.0.0.2") == False
+    assert await is_safe_url("http://127.1") == False  # Short form of 127.0.0.1
+    assert await is_safe_url("http://127.255.255.255") == False
 
 
-def test_block_private_ips():
+async def test_block_private_ips():
     """Test that private IP ranges are blocked"""
     # 10.0.0.0/8
-    assert is_safe_url("http://10.0.0.1") == False
-    assert is_safe_url("http://10.255.255.255") == False
+    assert await is_safe_url("http://10.0.0.1") == False
+    assert await is_safe_url("http://10.255.255.255") == False
     
     # 172.16.0.0/12
-    assert is_safe_url("http://172.16.0.1") == False
-    assert is_safe_url("http://172.31.255.255") == False
+    assert await is_safe_url("http://172.16.0.1") == False
+    assert await is_safe_url("http://172.31.255.255") == False
     
     # 192.168.0.0/16
-    assert is_safe_url("http://192.168.1.1") == False
-    assert is_safe_url("http://192.168.0.100:3000") == False
-    assert is_safe_url("http://192.168.255.255") == False
+    assert await is_safe_url("http://192.168.1.1") == False
+    assert await is_safe_url("http://192.168.0.100:3000") == False
+    assert await is_safe_url("http://192.168.255.255") == False
 
 
-def test_block_link_local():
+async def test_block_link_local():
     """Test that link-local addresses (including cloud metadata endpoints) are blocked"""
-    assert is_safe_url("http://169.254.169.254") == False
-    assert is_safe_url("http://169.254.1.1") == False
-    assert is_safe_url("http://169.254.0.0") == False
-    assert is_safe_url("http://169.254.255.255") == False
+    assert await is_safe_url("http://169.254.169.254") == False
+    assert await is_safe_url("http://169.254.1.1") == False
+    assert await is_safe_url("http://169.254.0.0") == False
+    assert await is_safe_url("http://169.254.255.255") == False
 
 
-def test_block_reserved_addresses():
+async def test_block_reserved_addresses():
     """Test that reserved and broadcast addresses are blocked"""
     # Broadcast address
-    assert is_safe_url("http://255.255.255.255") == False
+    assert await is_safe_url("http://255.255.255.255") == False
     # Reserved for future use (Class E)
-    assert is_safe_url("http://240.0.0.1") == False
+    assert await is_safe_url("http://240.0.0.1") == False
 
 
-def test_block_suspicious_ports():
+async def test_block_suspicious_ports():
     """Test that suspicious internal service ports are blocked"""
-    assert is_safe_url("http://example.com:22") == False   # SSH
-    assert is_safe_url("http://example.com:3306") == False # MySQL
-    assert is_safe_url("http://example.com:5432") == False # PostgreSQL
-    assert is_safe_url("http://example.com:6379") == False # Redis
-    assert is_safe_url("http://example.com:27017") == False # MongoDB
+    assert await is_safe_url("http://example.com:22") == False   # SSH
+    assert await is_safe_url("http://example.com:3306") == False # MySQL
+    assert await is_safe_url("http://example.com:5432") == False # PostgreSQL
+    assert await is_safe_url("http://example.com:6379") == False # Redis
+    assert await is_safe_url("http://example.com:27017") == False # MongoDB
 
 
-def test_block_invalid_schemes():
+async def test_block_invalid_schemes():
     """Test that non-http/https schemes are blocked"""
-    assert is_safe_url("file:///etc/passwd") == False
-    assert is_safe_url("ftp://example.com") == False
-    assert is_safe_url("javascript:alert(1)") == False
-    assert is_safe_url("data:text/html,<script>alert(1)</script>") == False
-    assert is_safe_url("gopher://example.com") == False
+    assert await is_safe_url("file:///etc/passwd") == False
+    assert await is_safe_url("ftp://example.com") == False
+    assert await is_safe_url("javascript:alert(1)") == False
+    assert await is_safe_url("data:text/html,<script>alert(1)</script>") == False
+    assert await is_safe_url("gopher://example.com") == False
 
 
-def test_block_missing_hostname():
+async def test_block_missing_hostname():
     """Test that URLs without hostnames are blocked"""
-    assert is_safe_url("http://") == False
-    assert is_safe_url("https://") == False
+    assert await is_safe_url("http://") == False
+    assert await is_safe_url("https://") == False
 
 
-def test_url_length_limits():
+async def test_url_length_limits():
     """Test that excessively long URLs are blocked"""
     # URL exceeding maximum length
     long_url = "http://example.com/" + "a" * 3000
-    assert is_safe_url(long_url) == False
+    assert await is_safe_url(long_url) == False
     
     # Hostname exceeding maximum DNS length
     long_hostname = "http://" + "a" * 300 + ".com"
-    assert is_safe_url(long_hostname) == False
+    assert await is_safe_url(long_hostname) == False
 
 
-def test_dns_resolution_failures():
+async def test_dns_resolution_failures():
     """Test that URLs that fail DNS resolution are blocked"""
     # These should fail DNS resolution in sandboxed environment
-    assert is_safe_url("http://this-domain-does-not-exist-12345.com") == False
-    assert is_safe_url("http://invalid.invalid") == False
+    assert await is_safe_url("http://this-domain-does-not-exist-12345.com") == False
+    assert await is_safe_url("http://invalid.invalid") == False
 
 
-if __name__ == "__main__":
-    # Run tests manually
-    
-    test_block_localhost()
+async def run_all_tests():
+    """Run all tests asynchronously"""
+    await test_block_localhost()
     print("✓ test_block_localhost passed")
     
-    test_block_private_ips()
+    await test_block_private_ips()
     print("✓ test_block_private_ips passed")
     
-    test_block_link_local()
+    await test_block_link_local()
     print("✓ test_block_link_local passed")
     
-    test_block_reserved_addresses()
+    await test_block_reserved_addresses()
     print("✓ test_block_reserved_addresses passed")
     
-    test_block_suspicious_ports()
+    await test_block_suspicious_ports()
     print("✓ test_block_suspicious_ports passed")
     
-    test_block_invalid_schemes()
+    await test_block_invalid_schemes()
     print("✓ test_block_invalid_schemes passed")
     
-    test_block_missing_hostname()
+    await test_block_missing_hostname()
     print("✓ test_block_missing_hostname passed")
     
-    test_url_length_limits()
+    await test_url_length_limits()
     print("✓ test_url_length_limits passed")
     
-    test_dns_resolution_failures()
+    await test_dns_resolution_failures()
     print("✓ test_dns_resolution_failures passed")
     
     print("\nAll tests passed!")
@@ -133,5 +133,10 @@ if __name__ == "__main__":
     print("are not included because they require DNS resolution, which is not available")
     print("in this sandboxed environment. In production with DNS access, legitimate")
     print("public URLs that resolve to non-private IPs will pass validation.")
+
+
+if __name__ == "__main__":
+    # Run tests using asyncio
+    asyncio.run(run_all_tests())
 
 

@@ -11,7 +11,6 @@ from datetime import datetime
 import json
 import logging
 import ipaddress
-import socket
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +38,9 @@ INFO_SEARCH_MAX_TOKENS = _get_int_env("INFO_SEARCH_MAX_TOKENS", 512)  # Reduced 
 MAX_SOURCES = _get_int_env("INFO_SEARCH_MAX_SOURCES", 3)  # Limit number of sources to prevent context overflow
 MAX_SNIPPET_CHARS = _get_int_env("INFO_SEARCH_MAX_SNIPPET_CHARS", 400)  # Max chars per snippet (conservative estimate: ~100 tokens)
 
-def is_safe_url(url: str) -> bool:
+async def is_safe_url(url: str) -> bool:
     """
-    Validates URL to prevent SSRF attacks.
+    Validates URL to prevent SSRF attacks using async DNS resolution.
     
     Returns True if the URL is safe to fetch, False otherwise.
     Blocks:
@@ -113,9 +112,11 @@ def is_safe_url(url: str) -> bool:
         
         # Resolve hostname to IP address and validate ALL resolved IPs
         # If ANY resolved IP is unsafe, reject the URL (prevents DNS rebinding attacks)
+        # Use asyncio.get_event_loop().getaddrinfo for non-blocking DNS resolution
         try:
-            # Use socket.getaddrinfo to resolve hostname
-            addr_info = socket.getaddrinfo(hostname, None)
+            loop = asyncio.get_event_loop()
+            # Use asyncio's getaddrinfo to perform async DNS resolution
+            addr_info = await loop.getaddrinfo(hostname, None)
             for family, _, _, _, sockaddr in addr_info:
                 ip_str = sockaddr[0]
                 ip = ipaddress.ip_address(ip_str)
@@ -150,8 +151,9 @@ def is_safe_url(url: str) -> bool:
                     logger.warning(f"Blocked reserved address: {url} -> {ip}")
                     return False
         
-        except (socket.gaierror, socket.herror, ValueError) as e:
+        except (OSError, ValueError) as e:
             # DNS resolution failed or invalid IP
+            # OSError covers socket.gaierror and socket.herror
             logger.warning(f"Could not resolve hostname for URL validation: {url} - {e}")
             return False
         
@@ -170,7 +172,9 @@ async def search_sources_llm(query):
     response = await asyncio.to_thread(manager.ask_llm, prompt, temperature=INFO_SEARCH_TEMPERATURE, max_tokens=INFO_SEARCH_MAX_TOKENS)
     urls = [line.strip() for line in response.splitlines() if line.strip().startswith("http")]
     # Filter URLs to only include safe ones (SSRF protection)
-    safe_urls = [url for url in urls if is_safe_url(url)]
+    # Batch validation using asyncio.gather for efficient async DNS resolution
+    validation_results = await asyncio.gather(*[is_safe_url(url) for url in urls]) if urls else []
+    safe_urls = [url for url, is_safe in zip(urls, validation_results) if is_safe]
     if len(safe_urls) < len(urls):
         logger.warning(f"Filtered out {len(urls) - len(safe_urls)} unsafe URLs from LLM response")
     return safe_urls
@@ -195,7 +199,7 @@ def save_scraper_pattern(url, domain, query_type, content_pattern, success=True,
 
 async def scrape_url(url, pattern=None):
     # Validate URL to prevent SSRF attacks
-    if not is_safe_url(url):
+    if not await is_safe_url(url):
         logger.error(f"Blocked unsafe URL in scrape_url: {url}")
         return f"Error scraping {url}: URL blocked for security reasons"
     
@@ -220,7 +224,7 @@ async def scrape_url(url, pattern=None):
                     redirect_url = urljoin(url, redirect_url)
                 
                 # Validate redirect target
-                if not is_safe_url(redirect_url):
+                if not await is_safe_url(redirect_url):
                     logger.error(f"Blocked unsafe redirect from {url} to {redirect_url}")
                     return f"Error scraping {url}: Redirect to unsafe location blocked"
                 
