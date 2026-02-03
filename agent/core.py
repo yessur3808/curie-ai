@@ -352,6 +352,8 @@ class Agent:
             "show_project",
             "project_help",
             "find_info",
+            "scrape_info",
+            "multi_source_info",
             "list_directories"
         }
 
