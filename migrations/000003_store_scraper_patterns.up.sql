@@ -11,5 +11,5 @@ CREATE TABLE IF NOT EXISTS scraper_patterns (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_scraper_patterns_domain ON scraper_patterns(domain);
-CREATE INDEX idx_scraper_patterns_url ON scraper_patterns(url);
+CREATE INDEX IF NOT EXISTS idx_scraper_patterns_domain ON scraper_patterns(domain);
+CREATE INDEX IF NOT EXISTS idx_scraper_patterns_url ON scraper_patterns(url);
