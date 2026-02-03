@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from psycopg2.extras import Json
+from psycopg2 import sql
 from .database import get_pg_conn
 
 # Allowlist of columns that can be updated to prevent SQL injection
@@ -60,18 +61,27 @@ class ScraperPatternManager:
     def update_pattern(id, **fields):
         if not fields:
             return False
+        # Filter fields to only allowed columns
+        allowed_fields = {k: v for k, v in fields.items() if k in ALLOWED_UPDATE_COLUMNS}
+        if not allowed_fields:
+            return False
         # Wrap content_pattern with Json() if present
-        if 'content_pattern' in fields and fields['content_pattern'] is not None:
-            fields['content_pattern'] = Json(fields['content_pattern'])
-        set_clause = ", ".join([f"{k} = %s" for k in fields.keys()])
-        values = list(fields.values())
+        if 'content_pattern' in allowed_fields and allowed_fields['content_pattern'] is not None:
+            allowed_fields['content_pattern'] = Json(allowed_fields['content_pattern'])
+        # Use psycopg2.sql.Identifier for column names to prevent SQL injection
+        set_clause = sql.SQL(", ").join([
+            sql.SQL("{} = %s").format(sql.Identifier(k))
+            for k in allowed_fields.keys()
+        ])
+        values = list(allowed_fields.values())
         values.append(datetime.utcnow())
         values.append(id)
         with get_pg_conn() as conn:
             cur = conn.cursor()
-            cur.execute(f"""
-                UPDATE scraper_patterns SET {set_clause}, updated_at = %s WHERE id = %s
-            """, values)
+            query = sql.SQL("""
+                UPDATE scraper_patterns SET {}, updated_at = %s WHERE id = %s
+            """).format(set_clause)
+            cur.execute(query, values)
             conn.commit()
             return cur.rowcount > 0
 
