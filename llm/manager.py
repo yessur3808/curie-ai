@@ -1,7 +1,10 @@
 # llm/manager.py
 
 import os
+import logging
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 try:
     from llama_cpp import Llama
@@ -41,7 +44,7 @@ def _get_int_env(key, default):
     try:
         return int(os.getenv(key, default))
     except (ValueError, TypeError):
-        print(f"Warning: Invalid value for {key}, using default {default}")
+        logger.warning(f"Invalid value '{os.getenv(key)}' for {key}, using default {default}")
         return default
 
 
