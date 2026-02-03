@@ -107,7 +107,8 @@ def init_pg():
                             last_error TEXT,
                             reliability_score FLOAT DEFAULT 0.5,
                             created_at TIMESTAMPTZ DEFAULT NOW(),
-                            updated_at TIMESTAMPTZ DEFAULT NOW()
+                            updated_at TIMESTAMPTZ DEFAULT NOW(),
+                            UNIQUE (url, query_type)
                         );
                     """)
                     cur.execute("CREATE INDEX IF NOT EXISTS idx_scraper_patterns_domain ON scraper_patterns(domain);")
