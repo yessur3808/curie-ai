@@ -232,6 +232,7 @@ def clean_assistant_reply(reply: str) -> str:
 
     # Remove common meta-note patterns
     meta_patterns = [
+        # Bracketed meta-notes
         r"\[Note:.*?\]",  # [Note: ...]
         r"\(Note:.*?\)",  # (Note: ...)
         r"\[System:.*?\]",  # [System: ...]
@@ -239,9 +240,46 @@ def clean_assistant_reply(reply: str) -> str:
         r"\[Internal:.*?\]",  # [Internal: ...]
         r"\[DEBUG:.*?\]",  # [DEBUG: ...]
         r"\[Reasoning:.*?\]",  # [Reasoning: ...]
+        r"\[Thought:.*?\]",  # [Thought: ...]
+        r"\[Thinking:.*?\]",  # [Thinking: ...]
+        r"\[Analysis:.*?\]",  # [Analysis: ...]
+        r"\[Context:.*?\]",  # [Context: ...]
+        r"\[Info:.*?\]",  # [Info: ...]
+        r"\[Warning:.*?\]",  # [Warning: ...]
+        r"\[Error:.*?\]",  # [Error: ...]
+        r"\[Response:.*?\]",  # [Response: ...]
+        r"\[Output:.*?\]",  # [Output: ...]
+        # Parenthetical meta-notes
+        r"\(System:.*?\)",  # (System: ...)
+        r"\(Meta:.*?\)",  # (Meta: ...)
+        r"\(Internal:.*?\)",  # (Internal: ...)
+        r"\(Thinking:.*?\)",  # (Thinking: ...)
+        r"\(Thought:.*?\)",  # (Thought: ...)
+        # XML-style thinking tags
         r"<think>.*?</think>",  # <think>...</think>
-        r"\[INST\].*?\[/INST\]",  # Instruction markers
-        r"<<SYS>>.*?<</SYS>>",  # System markers
+        r"<thinking>.*?</thinking>",  # <thinking>...</thinking>
+        r"<thought>.*?</thought>",  # <thought>...</thought>
+        r"<reasoning>.*?</reasoning>",  # <reasoning>...</reasoning>
+        r"<analysis>.*?</analysis>",  # <analysis>...</analysis>
+        r"<internal>.*?</internal>",  # <internal>...</internal>
+        r"<meta>.*?</meta>",  # <meta>...</meta>
+        r"<context>.*?</context>",  # <context>...</context>
+        # Instruction markers (various formats)
+        r"\[INST\].*?\[/INST\]",  # [INST]...[/INST]
+        r"<<INST>>.*?<</INST>>",  # <<INST>>...</INST>>
+        r"<\|im_start\|>.*?<\|im_end\|>",  # ChatML format
+        r"\[SYSTEM\].*?\[/SYSTEM\]",  # [SYSTEM]...[/SYSTEM]
+        r"<<SYS>>.*?<</SYS>>",  # <<SYS>>...</SYS>>
+        r"<s>.*?</s>",  # Special tokens
+        r"###\s*Instruction:.*?###",  # ### Instruction: ... ###
+        r"###\s*System:.*?###",  # ### System: ... ###
+        # Common prefixes that indicate meta-commentary
+        r"^\*\*Note:\*\*.*?$",  # **Note:** at start of line
+        r"^\*\*System:\*\*.*?$",  # **System:** at start of line
+        r"^\*\*Meta:\*\*.*?$",  # **Meta:** at start of line
+        r"^Note:.*?$",  # Note: at start of line
+        r"^System:.*?$",  # System: at start of line
+        r"^Meta:.*?$",  # Meta: at start of line
     ]
     for pattern in meta_patterns:
         reply = re.sub(pattern, "", reply, flags=re.IGNORECASE | re.DOTALL)
@@ -255,16 +293,61 @@ def clean_assistant_reply(reply: str) -> str:
         if any(
             marker in lower_line
             for marker in [
+                # Identity/role instructions
                 "you are an",
+                "you are a",
+                "you are the",
                 "your name is",
+                "your role is",
                 "you must",
+                "you should",
+                "you will",
+                "you have to",
+                "you need to",
+                # System/instruction markers
                 "system:",
                 "instruction:",
+                "instructions:",
+                "assistant:",
+                "user:",
+                "human:",
+                # Behavioral directives
                 "respond as",
                 "act as",
                 "roleplay as",
+                "pretend to be",
+                "behave as",
+                "speak as",
+                "reply as",
+                "answer as",
+                # Rule/guideline indicators
                 "here are the rules",
                 "follow these guidelines",
+                "follow these rules",
+                "follow these instructions",
+                "according to the rules",
+                "as per the guidelines",
+                "you must follow",
+                "remember to",
+                "make sure to",
+                "always remember",
+                "never forget",
+                # Meta-commentary about response
+                "i am programmed to",
+                "i am designed to",
+                "i am an ai",
+                "i am a language model",
+                "as an ai",
+                "as a language model",
+                "my programming",
+                "my instructions",
+                # Prompt leakage indicators
+                "in this scenario",
+                "in this roleplay",
+                "for this conversation",
+                "in this context",
+                "based on my prompt",
+                "according to my prompt",
             ]
         ):
             continue
