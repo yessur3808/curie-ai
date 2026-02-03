@@ -140,7 +140,7 @@ async def find_info(query):
                 data = f"Error scraping {url}: unexpected response type {type(data).__name__}"
             if "Error scraping" not in data:
                 # Save the pattern (for demo, use main_selector=body or enhance with LLM)
-                example_pattern = '{"main_selector": "body"}'
+                example_pattern = {"main_selector": "body"}
                 adaptive.save_scraper_pattern(
                     url, domain, query_type=query, content_pattern=example_pattern, success=True
                 )
