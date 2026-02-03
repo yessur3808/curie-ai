@@ -118,37 +118,46 @@ def is_safe_url(url: str) -> bool:
             addr_info = socket.getaddrinfo(hostname, None)
             for family, _, _, _, sockaddr in addr_info:
                 ip_str = sockaddr[0]
-                ip = ipaddress.ip_address(ip_str)
+                ip_obj = ipaddress.ip_address(ip_str)
                 
-                # Block unspecified addresses (0.0.0.0, ::)
-                if hasattr(ip, 'is_unspecified') and ip.is_unspecified:
-                    logger.warning(f"Blocked unspecified address: {url} -> {ip}")
-                    return False
+                # Also validate any IPv4 address mapped into IPv6 (e.g. ::ffff:127.0.0.1)
+                ips_to_check = [ip_obj]
+                if isinstance(ip_obj, ipaddress.IPv6Address):
+                    ipv4_mapped = getattr(ip_obj, "ipv4_mapped", None)
+                    if ipv4_mapped is not None:
+                        # Check the mapped IPv4 address first
+                        ips_to_check.insert(0, ipv4_mapped)
                 
-                # Block loopback addresses
-                if ip.is_loopback:
-                    logger.warning(f"Blocked loopback address: {url} -> {ip}")
-                    return False
-                
-                # Block private addresses
-                if ip.is_private:
-                    logger.warning(f"Blocked private address: {url} -> {ip}")
-                    return False
-                
-                # Block link-local addresses (including 169.254.169.254)
-                if ip.is_link_local:
-                    logger.warning(f"Blocked link-local address: {url} -> {ip}")
-                    return False
-                
-                # Block multicast addresses
-                if ip.is_multicast:
-                    logger.warning(f"Blocked multicast address: {url} -> {ip}")
-                    return False
-                
-                # Block reserved addresses (future use, broadcast, etc.)
-                if ip.is_reserved:
-                    logger.warning(f"Blocked reserved address: {url} -> {ip}")
-                    return False
+                for ip in ips_to_check:
+                    # Block unspecified addresses (0.0.0.0, ::)
+                    if hasattr(ip, 'is_unspecified') and ip.is_unspecified:
+                        logger.warning(f"Blocked unspecified address: {url} -> {ip}")
+                        return False
+                    
+                    # Block loopback addresses
+                    if ip.is_loopback:
+                        logger.warning(f"Blocked loopback address: {url} -> {ip}")
+                        return False
+                    
+                    # Block private addresses
+                    if ip.is_private:
+                        logger.warning(f"Blocked private address: {url} -> {ip}")
+                        return False
+                    
+                    # Block link-local addresses (including 169.254.169.254)
+                    if ip.is_link_local:
+                        logger.warning(f"Blocked link-local address: {url} -> {ip}")
+                        return False
+                    
+                    # Block multicast addresses
+                    if ip.is_multicast:
+                        logger.warning(f"Blocked multicast address: {url} -> {ip}")
+                        return False
+                    
+                    # Block reserved addresses (future use, broadcast, etc.)
+                    if ip.is_reserved:
+                        logger.warning(f"Blocked reserved address: {url} -> {ip}")
+                        return False
         
         except (socket.gaierror, socket.herror, ValueError) as e:
             # DNS resolution failed or invalid IP
