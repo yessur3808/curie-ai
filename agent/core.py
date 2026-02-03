@@ -196,7 +196,7 @@ class Agent:
             prompt += f"{role.capitalize()}: {msg}\n"
         prompt += "Curie (small talk, be natural, caring, attentive, and friendly, don't repeat topics already discussed):"
 
-        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=1024)
+        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=256)
         return small_talk.strip()
     
     async def get_weather_info(self, city: str, unit: str = "metric"):
