@@ -87,13 +87,13 @@ def test_dedupe_cache_empty_key():
 def test_dedupe_cache_invalid_params():
     """Test that invalid parameters raise ValueError."""
     try:
-        cache = DedupeCache(ttl_seconds=-1, max_size=100)
+        DedupeCache(ttl_seconds=-1, max_size=100)
         assert False, "Should have raised ValueError for negative ttl_seconds"
     except ValueError as e:
         assert "ttl_seconds must be >= 0" in str(e)
     
     try:
-        cache = DedupeCache(ttl_seconds=10, max_size=-1)
+        DedupeCache(ttl_seconds=10, max_size=-1)
         assert False, "Should have raised ValueError for negative max_size"
     except ValueError as e:
         assert "max_size must be >= 0" in str(e)
