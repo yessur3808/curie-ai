@@ -33,10 +33,20 @@ class DedupeCache:
         
         Args:
             ttl_seconds: Time to live for cache entries in seconds (default: 300)
+                        Must be >= 0. Values < 0 will raise ValueError.
             max_size: Maximum number of entries in the cache (default: 1000)
+                     Must be >= 0. Values < 0 will raise ValueError.
+        
+        Raises:
+            ValueError: If ttl_seconds or max_size is negative
         """
-        self.ttl_seconds = max(0, ttl_seconds)
-        self.max_size = max(0, int(max_size))
+        if ttl_seconds < 0:
+            raise ValueError(f"ttl_seconds must be >= 0, got {ttl_seconds}")
+        if max_size < 0:
+            raise ValueError(f"max_size must be >= 0, got {max_size}")
+        
+        self.ttl_seconds = ttl_seconds
+        self.max_size = int(max_size)
         self._cache: dict[str, float] = {}
         self._lock = threading.Lock()
     

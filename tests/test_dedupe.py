@@ -84,6 +84,23 @@ def test_dedupe_cache_empty_key():
     print("✓ test_dedupe_cache_empty_key passed")
 
 
+def test_dedupe_cache_invalid_params():
+    """Test that invalid parameters raise ValueError."""
+    try:
+        cache = DedupeCache(ttl_seconds=-1, max_size=100)
+        assert False, "Should have raised ValueError for negative ttl_seconds"
+    except ValueError as e:
+        assert "ttl_seconds must be >= 0" in str(e)
+    
+    try:
+        cache = DedupeCache(ttl_seconds=10, max_size=-1)
+        assert False, "Should have raised ValueError for negative max_size"
+    except ValueError as e:
+        assert "max_size must be >= 0" in str(e)
+    
+    print("✓ test_dedupe_cache_invalid_params passed")
+
+
 def test_dedupe_cache_clear():
     """Test cache clear functionality."""
     cache = DedupeCache(ttl_seconds=10, max_size=100)
@@ -201,6 +218,7 @@ def run_all_tests():
         test_dedupe_cache_ttl_expiration,
         test_dedupe_cache_size_limit,
         test_dedupe_cache_empty_key,
+        test_dedupe_cache_invalid_params,
         test_dedupe_cache_clear,
         test_dedupe_cache_thread_safety,
         test_dedupe_cache_concurrent_same_key,
