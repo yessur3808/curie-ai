@@ -34,6 +34,8 @@ def _get_int_env(name: str, default: int) -> int:
 # Info search task-specific configuration from environment variables
 INFO_SEARCH_TEMPERATURE = _get_float_env("INFO_SEARCH_TEMPERATURE", 0.2)
 INFO_SEARCH_MAX_TOKENS = _get_int_env("INFO_SEARCH_MAX_TOKENS", 2048)
+MAX_SOURCES = _get_int_env("INFO_SEARCH_MAX_SOURCES", 3)  # Limit number of sources to prevent context overflow
+MAX_SNIPPET_CHARS = _get_int_env("INFO_SEARCH_MAX_SNIPPET_CHARS", 800)  # Max chars per snippet (conservative estimate: ~200 tokens)
 
 async def search_sources_llm(query):
     prompt = (
@@ -85,18 +87,41 @@ async def scrape_url(url, pattern=None):
                 # This exception is non-fatal and is logged for debugging purposes.
                 logger.warning(f"Pattern-based scraping failed for {url}: {e}", exc_info=True)
         text = soup.get_text(separator="\n", strip=True)
-        return text[:2000]
+        return text[:MAX_SNIPPET_CHARS]
     except Exception as e:
         return f"Error scraping {url}: {e}"
 
 async def cross_reference_llm(query, snippets):
-    joined = "\n---\n".join(snippets)
+    """
+    Cross-references multiple source snippets to answer a query.
+    Implements token-aware truncation to prevent exceeding LLM context window.
+    """
+    # Limit number of sources to prevent context overflow
+    limited_snippets = snippets[:MAX_SOURCES]
+    
+    # Truncate each snippet to max chars (conservative token estimate)
+    truncated_snippets = []
+    for snippet in limited_snippets:
+        if len(snippet) > MAX_SNIPPET_CHARS:
+            truncated = snippet[:MAX_SNIPPET_CHARS] + "... [truncated]"
+        else:
+            truncated = snippet
+        truncated_snippets.append(truncated)
+    
+    joined = "\n---\n".join(truncated_snippets)
     prompt = (
         f"Given the following user request:\n{query}\n"
         "Here are snippets from multiple sources:\n"
         f"{joined}\n"
         "Based on these, answer the user's question in a concise, up-to-date summary. If information conflicts, mention the discrepancy."
     )
+    
+    # Early validation: check if prompt is reasonable
+    # Rough estimate: 4 chars per token on average
+    estimated_prompt_tokens = len(prompt) / 4
+    if estimated_prompt_tokens > (manager.MODEL_CONTEXT_SIZE - INFO_SEARCH_MAX_TOKENS - manager.CONTEXT_BUFFER_TOKENS):
+        logger.warning(f"Prompt estimated at {estimated_prompt_tokens} tokens, may exceed context window")
+    
     return await asyncio.to_thread(manager.ask_llm, prompt, temperature=INFO_SEARCH_TEMPERATURE, max_tokens=INFO_SEARCH_MAX_TOKENS)
 
 
