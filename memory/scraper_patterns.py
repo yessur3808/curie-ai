@@ -22,7 +22,9 @@ class ScraperPatternManager:
             created_at = created_at or now
             updated_at = updated_at or now
             # Use UPSERT (ON CONFLICT ... DO UPDATE) to prevent duplicate rows
-            # for the same (url, query_type) combination
+            # for the same (url, query_type) combination.
+            # On conflict, all fields except id and created_at are updated with new values.
+            # Callers should provide explicit values for all fields they want to update.
             cur.execute("""
                 INSERT INTO scraper_patterns
                 (url, domain, query_type, content_pattern, last_success, last_error,
