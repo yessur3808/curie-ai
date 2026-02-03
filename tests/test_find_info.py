@@ -15,8 +15,6 @@ from agent.skills.find_info import (
     DynamicScraper,
     AdaptiveScraper,
     find_info,
-    load_scraper_pattern,
-    save_scraper_pattern,
 )
 
 
