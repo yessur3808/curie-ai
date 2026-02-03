@@ -78,10 +78,30 @@ class Agent:
             "Extracted facts (JSON only, be conservative):"
         )
 
-        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=2048)
+        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=512)
 
         try:
-            facts = json.loads(result.strip())
+            # Robust JSON extraction: find JSON object even if surrounded by extra text
+            # Use brace matching to handle arbitrary nesting depth
+            json_str = None
+            start_idx = result.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                for i in range(start_idx, len(result)):
+                    if result[i] == '{':
+                        brace_count += 1
+                    elif result[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_str = result[start_idx:i+1]
+                            break
+            
+            if json_str:
+                facts = json.loads(json_str)
+            else:
+                # Fallback to simple strip if no JSON found
+                facts = json.loads(result.strip())
+            
             if isinstance(facts, dict):
                 # Validate facts - only keep those with clear evidence
                 validated_facts = {}
