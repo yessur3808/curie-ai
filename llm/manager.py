@@ -217,9 +217,18 @@ def clean_assistant_reply(reply: str) -> str:
     """
     # Remove leading speaker tag (Curie:, Assistant:, etc.) if present
     reply = reply.strip()
-    reply = re.sub(
-        r"^(Curie:|Assistant:|AI:|System:)\s*", "", reply, flags=re.IGNORECASE
+
+    # Build speaker tag pattern including custom persona name from environment
+    speaker_tags = ["Curie", "Assistant", "AI", "System"]
+    custom_persona_name = os.getenv("DEFAULT_PERSONA_NAME")
+    if custom_persona_name and custom_persona_name not in speaker_tags:
+        speaker_tags.append(custom_persona_name)
+
+    # Create regex pattern with all speaker tags
+    speaker_pattern = (
+        r"^(" + "|".join(re.escape(tag) + ":" for tag in speaker_tags) + r")\s*"
     )
+    reply = re.sub(speaker_pattern, "", reply, flags=re.IGNORECASE)
 
     # Remove common meta-note patterns
     meta_patterns = [
