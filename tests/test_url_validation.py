@@ -56,6 +56,38 @@ def test_block_reserved_addresses():
     assert is_safe_url("http://240.0.0.1") == False
 
 
+def test_block_ipv6_mapped_ipv4():
+    """Test that IPv6-mapped IPv4 addresses are properly validated
+    
+    IPv6-mapped IPv4 addresses (e.g., ::ffff:127.0.0.1) can bypass validation
+    because they don't report as loopback/private when checked as IPv6 addresses.
+    This test ensures we detect and validate the mapped IPv4 address.
+    """
+    # IPv6-mapped loopback addresses
+    assert is_safe_url("http://[::ffff:127.0.0.1]") == False
+    assert is_safe_url("http://[::ffff:127.0.0.2]") == False
+    assert is_safe_url("http://[::ffff:127.255.255.255]") == False
+    
+    # IPv6-mapped private addresses (10.0.0.0/8)
+    assert is_safe_url("http://[::ffff:10.0.0.1]") == False
+    assert is_safe_url("http://[::ffff:10.255.255.255]") == False
+    
+    # IPv6-mapped private addresses (172.16.0.0/12)
+    assert is_safe_url("http://[::ffff:172.16.0.1]") == False
+    assert is_safe_url("http://[::ffff:172.31.255.255]") == False
+    
+    # IPv6-mapped private addresses (192.168.0.0/16)
+    assert is_safe_url("http://[::ffff:192.168.1.1]") == False
+    assert is_safe_url("http://[::ffff:192.168.0.100]") == False
+    
+    # IPv6-mapped link-local addresses (AWS/cloud metadata)
+    assert is_safe_url("http://[::ffff:169.254.169.254]") == False
+    assert is_safe_url("http://[::ffff:169.254.1.1]") == False
+    
+    # IPv6-mapped unspecified address
+    assert is_safe_url("http://[::ffff:0.0.0.0]") == False
+
+
 def test_block_suspicious_ports():
     """Test that suspicious internal service ports are blocked"""
     assert is_safe_url("http://example.com:22") == False   # SSH
@@ -112,6 +144,9 @@ if __name__ == "__main__":
     
     test_block_reserved_addresses()
     print("✓ test_block_reserved_addresses passed")
+    
+    test_block_ipv6_mapped_ipv4()
+    print("✓ test_block_ipv6_mapped_ipv4 passed")
     
     test_block_suspicious_ports()
     print("✓ test_block_suspicious_ports passed")
