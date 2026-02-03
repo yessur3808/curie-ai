@@ -78,10 +78,18 @@ class Agent:
             "Extracted facts (JSON only, be conservative):"
         )
 
-        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=2048)
+        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=512)
 
         try:
-            facts = json.loads(result.strip())
+            # Robust JSON extraction: find JSON object even if surrounded by extra text
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', result, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                facts = json.loads(json_str)
+            else:
+                # Fallback to simple strip if no JSON found via regex
+                facts = json.loads(result.strip())
+            
             if isinstance(facts, dict):
                 # Validate facts - only keep those with clear evidence
                 validated_facts = {}
