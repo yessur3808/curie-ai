@@ -87,7 +87,8 @@ async def is_safe_url(url: str) -> bool:
         
         # Check for suspicious ports (optional but recommended)
         # Block common internal service ports to prevent port scanning
-        BLOCKED_PORTS = {
+        # These ports are blocked unconditionally regardless of IP
+        ALWAYS_BLOCKED_PORTS = {
             22,    # SSH
             23,    # Telnet
             25,    # SMTP
@@ -100,13 +101,19 @@ async def is_safe_url(url: str) -> bool:
             5432,  # PostgreSQL
             5900,  # VNC
             6379,  # Redis
-            8080,  # Common internal HTTP
             9200,  # Elasticsearch
             27017, # MongoDB
         }
         
+        # Ports that are only blocked if they resolve to private/internal IPs
+        # Port 8080 is commonly used for legitimate public services (Jenkins, Tomcat, etc.)
+        # but should be blocked for internal services to prevent SSRF
+        CONDITIONAL_BLOCKED_PORTS = {
+            8080,  # Common internal HTTP (allowed for public IPs)
+        }
+        
         port = parsed.port
-        if port and port in BLOCKED_PORTS:
+        if port and port in ALWAYS_BLOCKED_PORTS:
             logger.warning(f"Blocked URL with suspicious port {port}: {url}")
             return False
         
@@ -130,6 +137,21 @@ async def is_safe_url(url: str) -> bool:
                         ips_to_check.insert(0, ipv4_mapped)
                 
                 for ip in ips_to_check:
+                    # Check if IP is internal/private
+                    is_internal_ip = (
+                        (hasattr(ip, 'is_unspecified') and ip.is_unspecified) or
+                        ip.is_loopback or
+                        ip.is_private or
+                        ip.is_link_local or
+                        ip.is_multicast or
+                        ip.is_reserved
+                    )
+                    
+                    # Block conditional ports (like 8080) only for internal IPs
+                    if is_internal_ip and port and port in CONDITIONAL_BLOCKED_PORTS:
+                        logger.warning(f"Blocked URL with port {port} on internal/private IP: {url} -> {ip}")
+                        return False
+                    
                     # Block unspecified addresses (0.0.0.0, ::)
                     if hasattr(ip, 'is_unspecified') and ip.is_unspecified:
                         logger.warning(f"Blocked unspecified address: {url} -> {ip}")

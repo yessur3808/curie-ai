@@ -30,15 +30,18 @@ async def test_block_private_ips():
     # 10.0.0.0/8
     assert await is_safe_url("http://10.0.0.1") == False
     assert await is_safe_url("http://10.255.255.255") == False
+    assert await is_safe_url("http://10.0.0.1:8080") == False  # Port 8080 blocked on private IP
     
     # 172.16.0.0/12
     assert await is_safe_url("http://172.16.0.1") == False
     assert await is_safe_url("http://172.31.255.255") == False
+    assert await is_safe_url("http://172.16.0.1:8080") == False  # Port 8080 blocked on private IP
     
     # 192.168.0.0/16
     assert await is_safe_url("http://192.168.1.1") == False
     assert await is_safe_url("http://192.168.0.100:3000") == False
     assert await is_safe_url("http://192.168.255.255") == False
+    assert await is_safe_url("http://192.168.1.1:8080") == False  # Port 8080 blocked on private IP
 
 
 async def test_block_link_local():
@@ -47,6 +50,7 @@ async def test_block_link_local():
     assert await is_safe_url("http://169.254.1.1") == False
     assert await is_safe_url("http://169.254.0.0") == False
     assert await is_safe_url("http://169.254.255.255") == False
+    assert await is_safe_url("http://169.254.169.254:8080") == False  # Port 8080 blocked on link-local IP
 
 
 async def test_block_reserved_addresses():
@@ -90,7 +94,12 @@ async def test_block_ipv6_mapped_ipv4():
 
 
 async def test_block_suspicious_ports():
-    """Test that suspicious internal service ports are blocked"""
+    """Test that suspicious internal service ports are blocked
+    
+    Note: Port 8080 is conditionally blocked - it's blocked for private/internal IPs
+    but allowed for public IPs. Test for port 8080 blocking is in test_block_localhost
+    with 127.0.0.1:8080, which correctly blocks since 127.0.0.1 is an internal IP.
+    """
     assert await is_safe_url("http://example.com:22") == False   # SSH
     assert await is_safe_url("http://example.com:3306") == False # MySQL
     assert await is_safe_url("http://example.com:5432") == False # PostgreSQL
