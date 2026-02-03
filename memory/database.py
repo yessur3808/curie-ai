@@ -19,7 +19,7 @@ def get_pg_conn():
         return conn
     except OperationalError as e:
         logger.error(f"Failed to connect to Postgres: {e}")
-        raise RuntimeError(f"Failed to connect to Postgres: {e}")
+        raise RuntimeError(f"Failed to connect to Postgres: {e}") from e
 
 def _init_mongo_connection():
     """Initialize MongoDB connection. Called lazily on first access. Thread-safe."""
@@ -42,7 +42,7 @@ def _init_mongo_connection():
             logger.info("MongoDB connection established successfully.")
         except mongo_errors.PyMongoError as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
-            raise RuntimeError(f"Failed to connect to MongoDB: {e}")
+            raise RuntimeError(f"Failed to connect to MongoDB: {e}") from e
 
 class _MongoDBProxy:
     """Proxy class that lazily initializes MongoDB connection on first access."""
@@ -117,10 +117,10 @@ def init_pg():
                 except DatabaseError as e:
                     conn.rollback()
                     logger.error(f"Error initializing Postgres tables: {e}")
-                    raise RuntimeError(f"Error initializing Postgres tables: {e}")
+                    raise RuntimeError(f"Error initializing Postgres tables: {e}") from e
     except Error as e:
         logger.error(f"Error in init_pg: {e}")
-        raise RuntimeError(f"Error in init_pg: {e}")
+        raise RuntimeError(f"Error in init_pg: {e}") from e
 
 def init_mongo():
     try:
@@ -129,7 +129,7 @@ def init_mongo():
         logger.info("MongoDB indexes created successfully.")
     except mongo_errors.PyMongoError as e:
         logger.error(f"Error creating MongoDB indexes: {e}")
-        raise RuntimeError(f"Error creating MongoDB indexes: {e}")
+        raise RuntimeError(f"Error creating MongoDB indexes: {e}") from e
 
 def init_databases():
     try:
