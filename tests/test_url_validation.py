@@ -16,6 +16,7 @@ def test_block_localhost():
     assert is_safe_url("http://127.0.0.1:8080") == False
     assert is_safe_url("http://[::1]") == False
     assert is_safe_url("http://0.0.0.0") == False
+    assert is_safe_url("http://[::]") == False  # IPv6 unspecified
     
     # Additional loopback address variations in 127.0.0.0/8 range
     assert is_safe_url("http://127.0.0.2") == False
@@ -47,6 +48,23 @@ def test_block_link_local():
     assert is_safe_url("http://169.254.255.255") == False
 
 
+def test_block_reserved_addresses():
+    """Test that reserved and broadcast addresses are blocked"""
+    # Broadcast address
+    assert is_safe_url("http://255.255.255.255") == False
+    # Reserved for future use (Class E)
+    assert is_safe_url("http://240.0.0.1") == False
+
+
+def test_block_suspicious_ports():
+    """Test that suspicious internal service ports are blocked"""
+    assert is_safe_url("http://example.com:22") == False   # SSH
+    assert is_safe_url("http://example.com:3306") == False # MySQL
+    assert is_safe_url("http://example.com:5432") == False # PostgreSQL
+    assert is_safe_url("http://example.com:6379") == False # Redis
+    assert is_safe_url("http://example.com:27017") == False # MongoDB
+
+
 def test_block_invalid_schemes():
     """Test that non-http/https schemes are blocked"""
     assert is_safe_url("file:///etc/passwd") == False
@@ -60,6 +78,17 @@ def test_block_missing_hostname():
     """Test that URLs without hostnames are blocked"""
     assert is_safe_url("http://") == False
     assert is_safe_url("https://") == False
+
+
+def test_url_length_limits():
+    """Test that excessively long URLs are blocked"""
+    # URL exceeding maximum length
+    long_url = "http://example.com/" + "a" * 3000
+    assert is_safe_url(long_url) == False
+    
+    # Hostname exceeding maximum DNS length
+    long_hostname = "http://" + "a" * 300 + ".com"
+    assert is_safe_url(long_hostname) == False
 
 
 def test_dns_resolution_failures():
@@ -81,11 +110,20 @@ if __name__ == "__main__":
     test_block_link_local()
     print("✓ test_block_link_local passed")
     
+    test_block_reserved_addresses()
+    print("✓ test_block_reserved_addresses passed")
+    
+    test_block_suspicious_ports()
+    print("✓ test_block_suspicious_ports passed")
+    
     test_block_invalid_schemes()
     print("✓ test_block_invalid_schemes passed")
     
     test_block_missing_hostname()
     print("✓ test_block_missing_hostname passed")
+    
+    test_url_length_limits()
+    print("✓ test_url_length_limits passed")
     
     test_dns_resolution_failures()
     print("✓ test_dns_resolution_failures passed")

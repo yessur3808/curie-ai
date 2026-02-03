@@ -48,8 +48,18 @@ def is_safe_url(url: str) -> bool:
     - Private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
     - Link-local addresses (169.254.0.0/16)
     - Cloud metadata endpoints (169.254.169.254)
+    - Reserved/unspecified addresses
+    - Multicast addresses
+    - URLs exceeding maximum length
+    - Suspicious ports
     """
     try:
+        # Check URL length to prevent DoS
+        MAX_URL_LENGTH = 2048
+        if len(url) > MAX_URL_LENGTH:
+            logger.warning(f"Blocked URL exceeding max length ({len(url)} > {MAX_URL_LENGTH}): {url[:100]}...")
+            return False
+        
         parsed = urlparse(url)
         
         # Only allow http and https schemes
@@ -63,10 +73,40 @@ def is_safe_url(url: str) -> bool:
             logger.warning(f"Blocked URL with no hostname: {url}")
             return False
         
+        # Check hostname length
+        if len(hostname) > 253:  # Max DNS hostname length
+            logger.warning(f"Blocked URL with excessively long hostname: {url}")
+            return False
+        
         # Block localhost variations (pre-check before DNS resolution)
         # Note: DNS resolution below will catch additional loopback addresses
-        if hostname.lower() in ('localhost', '0.0.0.0', '127.0.0.1', '::1'):
+        if hostname.lower() in ('localhost', '0.0.0.0', '127.0.0.1', '::1', '::'):
             logger.warning(f"Blocked localhost URL: {url}")
+            return False
+        
+        # Check for suspicious ports (optional but recommended)
+        # Block common internal service ports to prevent port scanning
+        BLOCKED_PORTS = {
+            22,    # SSH
+            23,    # Telnet
+            25,    # SMTP
+            135,   # Windows RPC
+            139,   # NetBIOS
+            445,   # SMB
+            1433,  # MSSQL
+            3306,  # MySQL
+            3389,  # RDP
+            5432,  # PostgreSQL
+            5900,  # VNC
+            6379,  # Redis
+            8080,  # Common internal HTTP
+            9200,  # Elasticsearch
+            27017, # MongoDB
+        }
+        
+        port = parsed.port
+        if port and port in BLOCKED_PORTS:
+            logger.warning(f"Blocked URL with suspicious port {port}: {url}")
             return False
         
         # Resolve hostname to IP address and validate ALL resolved IPs
@@ -77,6 +117,11 @@ def is_safe_url(url: str) -> bool:
             for family, _, _, _, sockaddr in addr_info:
                 ip_str = sockaddr[0]
                 ip = ipaddress.ip_address(ip_str)
+                
+                # Block unspecified addresses (0.0.0.0, ::)
+                if hasattr(ip, 'is_unspecified') and ip.is_unspecified:
+                    logger.warning(f"Blocked unspecified address: {url} -> {ip}")
+                    return False
                 
                 # Block loopback addresses
                 if ip.is_loopback:
@@ -96,6 +141,11 @@ def is_safe_url(url: str) -> bool:
                 # Block multicast addresses
                 if ip.is_multicast:
                     logger.warning(f"Blocked multicast address: {url} -> {ip}")
+                    return False
+                
+                # Block reserved addresses (future use, broadcast, etc.)
+                if ip.is_reserved:
+                    logger.warning(f"Blocked reserved address: {url} -> {ip}")
                     return False
         
         except (socket.gaierror, socket.herror, ValueError) as e:
@@ -148,8 +198,39 @@ async def scrape_url(url, pattern=None):
         return f"Error scraping {url}: URL blocked for security reasons"
     
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        # Disable automatic redirects and handle them manually with validation
+        # This prevents redirect-based SSRF attacks
+        async with httpx.AsyncClient(timeout=10, follow_redirects=False, max_redirects=0) as client:
             resp = await client.get(url)
+            
+            # Handle redirects manually with security validation
+            redirect_count = 0
+            MAX_REDIRECTS = 5
+            
+            while resp.status_code in (301, 302, 303, 307, 308) and redirect_count < MAX_REDIRECTS:
+                redirect_url = resp.headers.get('Location')
+                if not redirect_url:
+                    break
+                
+                # Make redirect URL absolute if it's relative
+                if not redirect_url.startswith('http'):
+                    from urllib.parse import urljoin
+                    redirect_url = urljoin(url, redirect_url)
+                
+                # Validate redirect target
+                if not is_safe_url(redirect_url):
+                    logger.error(f"Blocked unsafe redirect from {url} to {redirect_url}")
+                    return f"Error scraping {url}: Redirect to unsafe location blocked"
+                
+                logger.info(f"Following redirect from {url} to {redirect_url}")
+                url = redirect_url
+                resp = await client.get(url)
+                redirect_count += 1
+            
+            if redirect_count >= MAX_REDIRECTS:
+                logger.warning(f"Too many redirects for {url}")
+                return f"Error scraping {url}: Too many redirects"
+            
             resp.raise_for_status()
             html = resp.text
 
