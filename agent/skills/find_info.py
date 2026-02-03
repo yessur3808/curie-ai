@@ -112,9 +112,9 @@ async def is_safe_url(url: str) -> bool:
         
         # Resolve hostname to IP address and validate ALL resolved IPs
         # If ANY resolved IP is unsafe, reject the URL (prevents DNS rebinding attacks)
-        # Use asyncio.get_event_loop().getaddrinfo for non-blocking DNS resolution
+        # Use asyncio.get_running_loop().getaddrinfo for non-blocking DNS resolution
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             # Use asyncio's getaddrinfo to perform async DNS resolution
             addr_info = await loop.getaddrinfo(hostname, None)
             for family, _, _, _, sockaddr in addr_info:
