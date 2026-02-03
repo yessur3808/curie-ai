@@ -448,7 +448,7 @@ async def test_find_info_handles_unexpected_response_type():
         # Mock cross-reference
         mock_cross_ref.return_value = "Answer"
         
-        result = await find_info("test query")
+        await find_info("test query")
         
         # Should save pattern with error
         assert mock_adaptive.save_scraper_pattern.called
