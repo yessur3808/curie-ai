@@ -137,7 +137,7 @@ async def is_safe_url(url: str) -> bool:
                         ips_to_check.insert(0, ipv4_mapped)
                 
                 for ip in ips_to_check:
-                    # Check if IP is internal/private
+                    # Check if IP is internal/private (used for conditional port blocking)
                     is_internal_ip = (
                         (hasattr(ip, 'is_unspecified') and ip.is_unspecified) or
                         ip.is_loopback or
@@ -148,9 +148,13 @@ async def is_safe_url(url: str) -> bool:
                     )
                     
                     # Block conditional ports (like 8080) only for internal IPs
+                    # This allows public services on these ports while preventing SSRF
                     if is_internal_ip and port and port in CONDITIONAL_BLOCKED_PORTS:
                         logger.warning(f"Blocked URL with port {port} on internal/private IP: {url} -> {ip}")
                         return False
+                    
+                    # Block all internal/private IPs regardless of port
+                    # (Note: These checks are explicit for clarity and better logging)
                     
                     # Block unspecified addresses (0.0.0.0, ::)
                     if hasattr(ip, 'is_unspecified') and ip.is_unspecified:
