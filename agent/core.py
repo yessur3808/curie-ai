@@ -158,7 +158,7 @@ class Agent:
         
         
 
-        response = manager.ask_llm(conversation)
+        response = manager.ask_llm(conversation, max_tokens=512)
         
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
@@ -196,7 +196,7 @@ class Agent:
             prompt += f"{role.capitalize()}: {msg}\n"
         prompt += "Curie (small talk, be natural, caring, attentive, and friendly, don't repeat topics already discussed):"
 
-        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=1024)
+        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=256)
         return small_talk.strip()
     
     async def get_weather_info(self, city: str, unit: str = "metric"):
@@ -283,7 +283,7 @@ class Agent:
             f"User's question: {user_question}\n"
             "Advise or help the user based on their project files and structure."
         )
-        response = manager.ask_llm(prompt)
+        response = manager.ask_llm(prompt, max_tokens=512)
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
 
