@@ -67,6 +67,7 @@ async def scrape_url(url, pattern=None):
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(url)
+            resp.raise_for_status()
             html = resp.text
 
         soup = BeautifulSoup(html, "html.parser")
