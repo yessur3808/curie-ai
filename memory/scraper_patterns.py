@@ -26,6 +26,14 @@ class ScraperPatternManager:
                 (url, domain, query_type, content_pattern, last_success, last_error,
                  reliability_score, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (url, query_type)
+                DO UPDATE SET
+                    domain = EXCLUDED.domain,
+                    content_pattern = EXCLUDED.content_pattern,
+                    last_success = EXCLUDED.last_success,
+                    last_error = EXCLUDED.last_error,
+                    reliability_score = EXCLUDED.reliability_score,
+                    updated_at = EXCLUDED.updated_at
                 RETURNING id
             """, (
                 url, domain, query_type, Json(content_pattern) if content_pattern is not None else None,
