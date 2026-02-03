@@ -82,12 +82,24 @@ class Agent:
 
         try:
             # Robust JSON extraction: find JSON object even if surrounded by extra text
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', result, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
+            # Use brace matching to handle arbitrary nesting depth
+            json_str = None
+            start_idx = result.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                for i in range(start_idx, len(result)):
+                    if result[i] == '{':
+                        brace_count += 1
+                    elif result[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_str = result[start_idx:i+1]
+                            break
+            
+            if json_str:
                 facts = json.loads(json_str)
             else:
-                # Fallback to simple strip if no JSON found via regex
+                # Fallback to simple strip if no JSON found
                 facts = json.loads(result.strip())
             
             if isinstance(facts, dict):
