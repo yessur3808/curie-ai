@@ -5,6 +5,7 @@ import os
 import threading
 import sys
 import json
+import logging
 
 from connectors.telegram import start_telegram_bot
 from connectors.api import app as fastapi_app
@@ -15,6 +16,35 @@ import uvicorn
 from agent.core import Agent
 from utils.persona import load_persona, list_available_personas
 import asyncio
+
+
+def configure_logging():
+    """
+    Configure logging for the application at startup.
+    
+    Sets up logging to capture all log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    with a consistent format across all modules. This ensures that important logs,
+    including security-related messages from URL validation, are properly captured.
+    """
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_format = os.getenv(
+        "LOG_FORMAT",
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    
+    # Configure root logger
+    logging.basicConfig(
+        level=log_level,
+        format=log_format,
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    # Log the configuration for verification
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging configured with level: {log_level}")
 
 
 def load_all_agents():
@@ -187,6 +217,9 @@ def validate_coder_batch_params(goal, files_to_edit, repo_path, branch_name):
 
 # --- Main Orchestration ---
 def main():
+    # Configure logging first thing to capture all logs
+    configure_logging()
+    
     args = parse_args()
     run_telegram_flag, run_api_flag, run_coder_flag, run_coder_batch_flag = determine_what_to_run(args)
     init_llm_and_memory(args.no_init)
