@@ -629,7 +629,7 @@ class Agent:
             f"User: {user_message}\n"
             "JSON:\n"
         )
-        result = manager.ask_llm(prompt, temperature=0, max_tokens=2048)
+        result = manager.ask_llm(prompt, temperature=0, max_tokens=512)
 
         import json
         try:
