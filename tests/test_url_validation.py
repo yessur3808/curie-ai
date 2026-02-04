@@ -3,6 +3,9 @@
 import sys
 import os
 import asyncio
+from unittest.mock import AsyncMock, patch
+import socket
+import pytest
 
 # Add parent directory to path to import agent modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -10,6 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from agent.skills.find_info import is_safe_url
 
 
+@pytest.mark.asyncio
 async def test_block_localhost():
     """Test that localhost and loopback addresses are blocked"""
     assert await is_safe_url("http://localhost:8000") == False
@@ -25,6 +29,7 @@ async def test_block_localhost():
     assert await is_safe_url("http://127.255.255.255") == False
 
 
+@pytest.mark.asyncio
 async def test_block_private_ips():
     """Test that private IP ranges are blocked"""
     # 10.0.0.0/8
@@ -44,6 +49,7 @@ async def test_block_private_ips():
     assert await is_safe_url("http://192.168.1.1:8080") == False  # Port 8080 blocked on private IP
 
 
+@pytest.mark.asyncio
 async def test_block_link_local():
     """Test that link-local addresses (including cloud metadata endpoints) are blocked"""
     assert await is_safe_url("http://169.254.169.254") == False
@@ -53,6 +59,7 @@ async def test_block_link_local():
     assert await is_safe_url("http://169.254.169.254:8080") == False  # Port 8080 blocked on link-local IP
 
 
+@pytest.mark.asyncio
 async def test_block_reserved_addresses():
     """Test that reserved and broadcast addresses are blocked"""
     # Broadcast address
@@ -61,6 +68,7 @@ async def test_block_reserved_addresses():
     assert await is_safe_url("http://240.0.0.1") == False
 
 
+@pytest.mark.asyncio
 async def test_block_ipv6_mapped_ipv4():
     """Test that IPv6-mapped IPv4 addresses are properly validated
     
@@ -93,6 +101,7 @@ async def test_block_ipv6_mapped_ipv4():
     assert await is_safe_url("http://[::ffff:0.0.0.0]") == False
 
 
+@pytest.mark.asyncio
 async def test_block_suspicious_ports():
     """Test that suspicious internal service ports are blocked
     
@@ -107,6 +116,7 @@ async def test_block_suspicious_ports():
     assert await is_safe_url("http://example.com:27017") == False # MongoDB
 
 
+@pytest.mark.asyncio
 async def test_block_invalid_schemes():
     """Test that non-http/https schemes are blocked"""
     assert await is_safe_url("file:///etc/passwd") == False
@@ -116,12 +126,14 @@ async def test_block_invalid_schemes():
     assert await is_safe_url("gopher://example.com") == False
 
 
+@pytest.mark.asyncio
 async def test_block_missing_hostname():
     """Test that URLs without hostnames are blocked"""
     assert await is_safe_url("http://") == False
     assert await is_safe_url("https://") == False
 
 
+@pytest.mark.asyncio
 async def test_url_length_limits():
     """Test that excessively long URLs are blocked"""
     # URL exceeding maximum length
@@ -133,11 +145,32 @@ async def test_url_length_limits():
     assert await is_safe_url(long_hostname) == False
 
 
+@pytest.mark.asyncio
 async def test_dns_resolution_failures():
-    """Test that URLs that fail DNS resolution are blocked"""
-    # These should fail DNS resolution in sandboxed environment
-    assert await is_safe_url("http://this-domain-does-not-exist-12345.com") == False
-    assert await is_safe_url("http://invalid.invalid") == False
+    """Test that URLs that fail DNS resolution are blocked
+    
+    This test mocks DNS resolution to ensure deterministic behavior across
+    different environments (corporate networks, VPNs, etc. may have wildcard
+    DNS resolution that would cause these tests to be flaky).
+    
+    Note: 'invalid.invalid' is a reserved TLD per RFC 6761 and should always
+    fail in real environments, but we mock it for consistency.
+    """
+    # Mock DNS resolution to raise OSError (which covers socket.gaierror)
+    # This simulates DNS lookup failure
+    async def mock_getaddrinfo_failure(hostname, port, *args, **kwargs):
+        raise socket.gaierror(-5, "No address associated with hostname")
+    
+    # Test with mocked DNS failures
+    with patch('asyncio.get_running_loop') as mock_loop:
+        mock_event_loop = AsyncMock()
+        mock_event_loop.getaddrinfo = mock_getaddrinfo_failure
+        mock_loop.return_value = mock_event_loop
+        
+        # These should fail DNS resolution
+        assert await is_safe_url("http://this-domain-does-not-exist-12345.com") == False
+        assert await is_safe_url("http://invalid.invalid") == False
+        assert await is_safe_url("http://nonexistent-domain-xyz.test") == False
 
 
 async def run_all_tests():
