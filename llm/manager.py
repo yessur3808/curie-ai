@@ -2,6 +2,11 @@
 
 import os
 import logging
+import hashlib
+import time
+import gc
+from collections import OrderedDict
+from threading import Lock
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -36,6 +41,160 @@ llm_config = {
 
 # Cache for loaded llama models
 llama_models_cache = {}
+
+# Response cache: {prompt_hash: (response, timestamp)}
+# TTL: 300 seconds (5 minutes), max_size: 100 entries
+_response_cache = OrderedDict()
+_response_cache_ttl = 300
+_response_cache_max_size = 100
+_response_cache_lock = Lock()
+_response_cache_hits = 0
+_response_cache_misses = 0
+
+# Memory management configuration
+MAX_MODELS_IN_CACHE = 1  # Only keep one model in memory at a time
+_last_gc_time = 0
+_gc_interval = 300  # Run garbage collection every 5 minutes
+
+
+def _trigger_garbage_collection():
+    """Periodically trigger garbage collection to free memory."""
+    global _last_gc_time
+    current_time = time.time()
+    if current_time - _last_gc_time > _gc_interval:
+        gc.collect()
+        _last_gc_time = current_time
+        logger.debug("Triggered garbage collection")
+
+
+def _cleanup_excess_models():
+    """
+    Keep only the most recently used model in cache.
+    Prevents unbounded memory growth from loading multiple models.
+    """
+    global llama_models_cache
+    if len(llama_models_cache) > MAX_MODELS_IN_CACHE:
+        # Keep only the first (most recent) model
+        excess_models = list(llama_models_cache.keys())[1:]
+        for model_name in excess_models:
+            logger.info(f"Unloading excess model from cache: {model_name}")
+            del llama_models_cache[model_name]
+        gc.collect()
+        _trigger_garbage_collection()
+
+
+class ResponseCache:
+    """Simple TTL-based cache for LLM responses."""
+    
+    @staticmethod
+    def _make_key(prompt: str, temperature: float, max_tokens: int) -> str:
+        """Create a hash key from prompt + parameters."""
+        key_str = f"{prompt}||{temperature}||{max_tokens}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
+    @staticmethod
+    def get(prompt: str, temperature: float, max_tokens: int) -> str | None:
+        """Get cached response if available and not expired."""
+        global _response_cache_hits, _response_cache_misses
+        
+        key = ResponseCache._make_key(prompt, temperature, max_tokens)
+        with _response_cache_lock:
+            if key in _response_cache:
+                response, timestamp = _response_cache[key]
+                if time.time() - timestamp < _response_cache_ttl:
+                    _response_cache_hits += 1
+                    logger.debug(f"Response cache hit (key={key[:8]}...)")
+                    return response
+                else:
+                    # Expired, remove it
+                    del _response_cache[key]
+            _response_cache_misses += 1
+        return None
+    
+    @staticmethod
+    def set(prompt: str, temperature: float, max_tokens: int, response: str):
+        """Cache a response."""
+        key = ResponseCache._make_key(prompt, temperature, max_tokens)
+        with _response_cache_lock:
+            _response_cache[key] = (response, time.time())
+            # FIFO eviction when exceeding max size
+            while len(_response_cache) > _response_cache_max_size:
+                _response_cache.popitem(last=False)
+    
+    @staticmethod
+    def stats() -> dict:
+        """Return cache statistics."""
+        total = _response_cache_hits + _response_cache_misses
+        hit_rate = (_response_cache_hits / total * 100) if total > 0 else 0
+        return {
+            "hits": _response_cache_hits,
+            "misses": _response_cache_misses,
+            "hit_rate_percent": round(hit_rate, 1),
+            "size": len(_response_cache)
+        }
+
+
+def _select_available_model(preferred: str | None = None) -> str | None:
+    candidates = []
+    if preferred:
+        candidates.append(preferred)
+    candidates.extend(AVAILABLE_MODELS)
+
+    seen = set()
+    for model_name in candidates:
+        if not model_name or model_name in seen:
+            continue
+        seen.add(model_name)
+        model_path = os.path.join("models", model_name)
+        if os.path.exists(model_path):
+            return model_name
+    return None
+
+
+def _load_model_with_fallback(preferred: str | None = None) -> tuple[Llama | None, str | None]:
+    """
+    Attempts to load a model, trying fallbacks if the preferred model fails.
+    Returns (loaded_model, model_name) or (None, None) if all models fail.
+    """
+    if Llama is None:
+        logger.error("llama_cpp is not installed")
+        return None, None
+
+    # Build candidate list
+    candidates = []
+    if preferred:
+        candidates.append(preferred)
+    candidates.extend(AVAILABLE_MODELS)
+
+    # Try each candidate in order
+    seen = set()
+    n_threads = _get_int_env("LLM_THREADS", 18)
+    
+    for model_name in candidates:
+        if not model_name or model_name in seen:
+            continue
+        seen.add(model_name)
+        
+        model_path = os.path.join("models", model_name)
+        if not os.path.exists(model_path):
+            logger.warning(f"Model file not found: {model_path}")
+            continue
+
+        logger.info(f"Attempting to load model: {model_name}")
+        try:
+            model = Llama(
+                model_path=model_path,
+                n_ctx=MODEL_CONTEXT_SIZE,
+                n_threads=n_threads,
+            )
+            logger.info(f"Successfully loaded model: {model_name}")
+            return model, model_name
+        except Exception as e:
+            logger.error(f"Failed to load {model_name}: {e}")
+            continue
+
+    logger.error("All model loading attempts failed")
+    return None, None
 
 
 # Context window and token management configuration from environment variables
@@ -74,25 +233,27 @@ def preload_llama_model():
     if provider != "llama.cpp":
         return  # Only preload local Llama models
 
-    selected_model = llm_config.get("model_path") or DEFAULT_LLAMA_MODEL
-    if selected_model not in AVAILABLE_MODELS:
-        raise RuntimeError(f"Model {selected_model} not in AVAILABLE_MODELS")
-    model_path = os.path.join("models", selected_model)
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found: {model_path}")
+    if Llama is None:
+        raise RuntimeError("llama_cpp is not installed")
 
-    if selected_model not in llama_models_cache:
-        llama_models_cache[selected_model] = Llama(
-            model_path=model_path,
-            n_ctx=MODEL_CONTEXT_SIZE,
-            n_threads=18,  # Adjust to your CPU
-        )
+    preferred_model = llm_config.get("model_path") or DEFAULT_LLAMA_MODEL
+    logger.info(f"Preloading LLM model (preferred: {preferred_model})")
+    
+    model, model_name = _load_model_with_fallback(preferred_model)
+    if model is None or model_name is None:
+        raise RuntimeError("Failed to load any available LLM model")
+    
+    llama_models_cache[model_name] = model
+    logger.info(f"Preloaded model: {model_name}")
 
 
 def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
     # Use environment-configured default if max_tokens not specified
     if max_tokens is None:
         max_tokens = DEFAULT_MAX_TOKENS
+
+    # Periodically trigger garbage collection
+    _trigger_garbage_collection()
 
     provider = llm_config.get("provider", "llama.cpp")
 
@@ -101,26 +262,46 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
 
     elif provider == "llama.cpp":
 
+        if Llama is None:
+            return "[Error: llama_cpp not installed]"
+
+        # Check response cache first
+        cached_response = ResponseCache.get(prompt, temperature, max_tokens)
+        if cached_response:
+            return cached_response
+
         # Decide which model filename to use
-        selected_model = (
+        preferred_model = (
             model_name or llm_config.get("model_path") or DEFAULT_LLAMA_MODEL
         )
-        if selected_model not in AVAILABLE_MODELS:
-            return f"[Model not found in AVAILABLE_MODELS: {selected_model}]"
-        model_path = os.path.join("models", selected_model)
 
-        if not os.path.exists(model_path):
-            return f"[Model file not found: {model_path}]"
-
-        # Lazy-load and cache each model separately
-        if selected_model not in llama_models_cache:
-            try:
-                llama_models_cache[selected_model] = Llama(
-                    model_path=model_path, n_ctx=MODEL_CONTEXT_SIZE, n_threads=18
-                )
-            except Exception as e:
-                return f"[Error loading model: {e}]"
-        llama_model = llama_models_cache[selected_model]
+        # Try to use cached model first
+        selected_model = None
+        llama_model = None
+        
+        # Check if preferred model is already cached
+        if preferred_model in llama_models_cache:
+            selected_model = preferred_model
+            llama_model = llama_models_cache[preferred_model]
+        else:
+            # Check if any model is cached
+            for cached_name in llama_models_cache:
+                selected_model = cached_name
+                llama_model = llama_models_cache[cached_name]
+                logger.info(f"Using cached model: {cached_name}")
+                break
+        
+        # Lazy-load with fallback if no cached model available
+        if llama_model is None:
+            logger.info(f"No cached model, attempting to load with fallback (preferred: {preferred_model})")
+            model, model_name_loaded = _load_model_with_fallback(preferred_model)
+            if model is None or model_name_loaded is None:
+                return "[Error: Failed to load any available model]"
+            llama_models_cache[model_name_loaded] = model
+            llama_model = model
+            selected_model = model_name_loaded
+            # Clean up excess models to prevent memory bloat
+            _cleanup_excess_models()
 
         # Dynamically cap max_tokens to avoid exceeding context window
         # Calculate prompt tokens and ensure prompt_tokens + max_tokens <= n_ctx
@@ -158,7 +339,12 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                 raw_response = str(result)
 
             # Apply sanity filter
-            return _sanity_filter_response(raw_response)
+            response = _sanity_filter_response(raw_response)
+            
+            # Cache response
+            ResponseCache.set(prompt, temperature, max_tokens, response)
+            
+            return response
         except Exception as e:
             return f"[Error during inference: {e}]"
     else:

@@ -1,102 +1,88 @@
 # connectors/telegram.py
+"""
+Telegram connector - transport-only concerns.
+Receives Telegram events, normalizes to standard format, calls ChatWorkflow.
+"""
 
 import datetime
-import random
 import os
 from dotenv import load_dotenv
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
-from agent.core import Agent
+from agent.chat_workflow import ChatWorkflow
 
-from utils.busy import detect_busy_intent, detect_resume_intent
 from utils.persona import load_persona
-from utils.weather import get_weather, extract_city_from_message, get_hko_typhoon_signal
-from utils.session import (
-    set_busy_temporarily,
-    is_user_busy,
-    clear_user_busy,
-    small_talk_chance,
-)
-from utils.dedupe import DedupeCache
-
-from memory import UserManager, ConversationManager
-from llm.manager import clean_assistant_reply
+from utils.session import set_busy_temporarily, clear_user_busy
+from memory import UserManager
 
 load_dotenv()
 
-MASTER_USER_ID = os.getenv("MASTER_USER_ID")
-user_weather_alerts = {}
+# Shared ChatWorkflow instance (initialized in main.py)
+_workflow = None
 user_persona_map = {}
-# Maps telegram user_id to internal_id for this session
 user_session_map = {}
 
-# Thread-safe deduplication cache: TTL of 5 minutes, max 2000 entries
-# Using DedupeCache for thread-safe duplicate update detection
-processed_updates = DedupeCache(ttl_seconds=300, max_size=2000)
+
+def set_workflow(workflow: ChatWorkflow):
+    """Set the shared ChatWorkflow instance (called from main.py)."""
+    global _workflow
+    _workflow = workflow
 
 
+async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _workflow:
+        await update.message.reply_text("❌ System not initialized.")
+        return
+    
+    greeting = _workflow.persona.get("greeting", "Hello!")
+    await update.message.reply_text(f"{greeting}")
 
-# Small talk prompts for Curie
-SMALL_TALK_QUESTIONS = [
-    "By the way, what do you enjoy doing in your free time?",
-    "Is there something new you've learned recently, mon ami?",
-    "Do you have a favorite book or movie?",
-    "What are you curious about these days?",
-    "If you could travel anywhere, where would you go?",
-    "C'est intéressant! Do you have any hobbies you love?",
-]
 
-def _build_update_key(update: Update) -> str | None:
+async def handle_busy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tg_user_id = update.message.from_user.id
+    set_busy_temporarily(tg_user_id)
+    await update.message.reply_text(
+        "D'accord! I'll let you focus for a while. I'll check in again later, mon ami."
+    )
+
+
+async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tg_user_id = update.message.from_user.id
+    clear_user_busy(tg_user_id)
+    await update.message.reply_text(
+        "Bienvenue! I'm here and ready to chat again. 😊"
+    )
+
+
+async def handle_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Build a unique key for a Telegram update.
-    
-    This follows openclaw's approach of creating a composite key that uniquely
-    identifies an update for deduplication purposes.
-    
-    Args:
-        update: The Telegram update object
-        
-    Returns:
-        A unique string key, or None if the update cannot be identified
+    Explicit remember command: /remember <key> <value>
+    Example: /remember favorite_food pizza
     """
-    if not update or not update.update_id:
-        return None
+    tg_user_id = update.message.from_user.id
+    args = context.args if hasattr(context, 'args') else []
     
-    # Use update_id as the primary identifier
-    update_id = update.update_id
+    if len(args) < 2:
+        await update.message.reply_text("Usage: /remember <key> <value>\nExample: /remember favorite_food pizza")
+        return
     
-    # Also include user_id for additional uniqueness in case of race conditions
-    user_id = None
-    if update.message and update.message.from_user:
-        user_id = update.message.from_user.id
+    key = args[0]
+    value = " ".join(args[1:])
     
-    if user_id:
-        return f"update:{update_id}:user:{user_id}"
-    return f"update:{update_id}"
+    # Get internal ID
+    telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
+    internal_id = UserManager.get_or_create_user_internal_id(
+        channel='telegram',
+        external_id=tg_user_id,
+        secret_username=telegram_username,
+        updated_by='telegram_bot'
+    )
+    
+    # Save fact
+    UserManager.update_user_profile(internal_id, {key: value})
+    await update.message.reply_text(f"✅ Remembered: {key} = {value}")
 
-def _is_duplicate_update(update: Update) -> bool:
-    """
-    Check if this update has already been processed.
-    
-    This uses a thread-safe deduplication cache to prevent duplicate processing
-    of the same update, which can occur when multiple handlers are called
-    concurrently in python-telegram-bot.
-    
-    Args:
-        update: The Telegram update to check
-        
-    Returns:
-        True if duplicate (already processed), False if new
-    """
-    key = _build_update_key(update)
-    if not key:
-        return False
-    
-    # The DedupeCache.check() method is thread-safe and returns:
-    # - True if the key was already in the cache (duplicate)
-    # - False if the key is new (first time seeing it)
-    return processed_updates.check(key)
 
 async def handle_identify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
@@ -113,89 +99,11 @@ async def handle_identify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ No user found with that secret_username.")
 
-def get_agent_for_user(update, context):
-    agents = context.bot_data['agents']
-    default_agent_name = context.bot_data['default_agent_name']
-    user_id = update.message.from_user.id
-    persona_name = user_persona_map.get(user_id, default_agent_name)
-    if persona_name not in agents:
-        persona_name = default_agent_name
-        user_persona_map[user_id] = persona_name
-    return agents[persona_name]
-
-async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    agent = get_agent_for_user(update, context)
-    greeting = agent.persona.get("greeting", "Hello!")
-    agents = context.bot_data['agents']
-    persona_list = "\n".join(f"- {name}" for name in agents)
-    await update.message.reply_text(
-        f"{greeting}\n\nYou can change my style anytime with /persona <name>.\nAvailable personas:\n{persona_list}"
-    )
-
-async def handle_busy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_user_id = update.message.from_user.id
-    set_busy_temporarily(tg_user_id)
-    await update.message.reply_text(
-        "D'accord! I'll let you focus for a while. I'll check in again later, mon ami."
-    )
-    
-
-async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_user_id = update.message.from_user.id
-    clear_user_busy(tg_user_id)
-    await update.message.reply_text(
-        "Bienvenue! I'm here and ready to chat again. 😊"
-    )
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Deduplicate: Skip if we've already processed this update
-    if _is_duplicate_update(update):
-        return
-    
-    user_message = update.message.text
-    tg_user_id = update.message.from_user.id
-    agent = get_agent_for_user(update, context)
-    telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
-    
-    # Get or create stable internal_id for this session
-    if tg_user_id in user_session_map:
-        internal_id = user_session_map[tg_user_id]
-    else:
-        internal_id = agent.get_or_create_internal_id(
-            external_id=tg_user_id,
-            channel='telegram',
-            secret_username=telegram_username
-        )
-        user_session_map[tg_user_id] = internal_id
-
-    # --- Proactive weather heads-up (call only at right time) ---
-    now = datetime.datetime.now()
-    if 6 <= now.hour <= 8:
-        last_alert = user_weather_alerts.get(internal_id)
-        if last_alert != now.date():
-            heads_up = await agent.proactive_weather_heads_up(internal_id)
-            await update.message.reply_text(heads_up)
-            user_weather_alerts[internal_id] = now.date()
-
-    # --- All main business logic handled by agent.route_message ---
-    handled, response = await agent.route_message(user_message, internal_id)
-    if handled:
-        await update.message.reply_text(response)
-        return
-
-    # --- Otherwise, normal conversation (LLM chat) ---
-    agent_response = agent.handle_message(user_message, internal_id=internal_id)
-    agent_response = clean_assistant_reply(agent_response)
-    await update.message.reply_text(agent_response)
-
-    if random.random() < small_talk_chance(internal_id):
-        small_talk = agent.generate_small_talk(internal_id)
-        if small_talk:
-            small_talk = clean_assistant_reply(small_talk)
-            await update.message.reply_text(small_talk)
-            
 
 async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from memory import ConversationManager
+    from utils.db import is_master_user
+    
     tg_user_id = update.message.from_user.id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
     internal_id = UserManager.get_or_create_user_internal_id(
@@ -205,12 +113,10 @@ async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE
         updated_by='telegram_bot'
     )
 
-    # Only allow master user
-    from utils.db import is_master_user
     if not is_master_user(internal_id):
         await update.message.reply_text("❌ You are not authorized to use this command.")
         return
-    # Check for optional argument to clear all memory
+    
     args = context.args if hasattr(context, 'args') else []
     if args and args[0] == "all":
         ConversationManager.clear_conversation()
@@ -220,123 +126,54 @@ async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🧹 Your conversational memory has been cleared.")
 
 
-async def handle_index_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    agent = get_agent_for_user(update, context)
-    tg_user_id = update.message.from_user.id
-    telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
-
-    internal_id = agent.get_or_create_internal_id(
-        external_id=tg_user_id,
-        channel='telegram',
-        secret_username=telegram_username
-    )
-
-    # Allow: /indexproject [optional path]
-    args = context.args if hasattr(context, 'args') else []
-    path = args[0] if args else None
-    try:
-        agent.set_project_dir(internal_id, path)
-        md = agent.get_project_markdown(internal_id)
-        # Telegram message cap is 4096 chars
-        await update.message.reply_text(md[:4000] if md else "Project indexed, but nothing to show.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error indexing project: {e}")
-
-async def handle_new_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    agent = get_agent_for_user(update, context)
-    tg_user_id = update.message.from_user.id
-    telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
-
-    internal_id = agent.get_or_create_internal_id(
-        external_id=tg_user_id,
-        channel='telegram',
-        secret_username=telegram_username
-    )
-
-    args = context.args if hasattr(context, 'args') else []
-    if not args:
-        await update.message.reply_text("Usage: /newproject <project_name>")
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Main message handler - normalize and process through ChatWorkflow."""
+    if not _workflow:
+        await update.message.reply_text("❌ System not initialized.")
         return
-    project_name = args[0]
-    try:
-        new_path, md_path = agent.create_new_project(internal_id, project_name)
-        await update.message.reply_text(f"✅ Created new project at `{new_path}` with starter README.md.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error creating project: {e}")
-
-async def handle_project_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    agent = get_agent_for_user(update, context)
+    
+    user_message = update.message.text
     tg_user_id = update.message.from_user.id
+    message_id = update.message.message_id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
+    
+    # Normalize to standard ChatWorkflow format
+    normalized_input = {
+        'platform': 'telegram',
+        'external_user_id': tg_user_id,
+        'external_chat_id': update.message.chat_id,
+        'message_id': message_id,
+        'text': user_message,
+        'timestamp': datetime.datetime.utcnow()
+    }
+    
+    # Process through workflow
+    result = await _workflow.process_message(normalized_input)
+    
+    # Send response
+    response_text = result.get('text', '[Error: No response]')
+    await update.message.reply_text(response_text)
 
-    internal_id = agent.get_or_create_internal_id(
-        external_id=tg_user_id,
-        channel='telegram',
-        secret_username=telegram_username
-    )
 
-    # Allow: /projecthelp <question>
-    args = context.args if hasattr(context, 'args') else []
-    if not args:
-        await update.message.reply_text("Usage: /projecthelp <your question>")
-        return
-    question = " ".join(args)
-    try:
-        answer = agent.project_help(internal_id, question)
-        await update.message.reply_text(answer)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
-
-async def handle_persona(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    agents = context.bot_data['agents']
-    user_id = update.message.from_user.id
-    args = context.args
-    if not args or args[0] not in agents:
-        choices = "\n".join(f"- {name}" for name in agents)
-        await update.message.reply_text(
-            "Usage: /persona <name>\nAvailable personas:\n" + choices
-        )
-        return
-    persona_name = args[0]
-    user_persona_map[user_id] = persona_name
-    persona_desc = agents[persona_name].persona.get("description", "")
-    await update.message.reply_text(f"Persona set to {persona_name}!\n\n{persona_desc}")
-        
-
-def start_telegram_bot(agents):
+def start_telegram_bot(workflow: ChatWorkflow):
+    """Start Telegram bot with shared ChatWorkflow."""
+    global _workflow
+    _workflow = workflow
+    
     telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not telegram_token:
         raise RuntimeError("Telegram bot token not found in .env file or environment variables.")
 
     app = ApplicationBuilder().token(telegram_token).build()
     
-    # Handle both single-agent and multi-agent mode
-    if isinstance(agents, dict):
-        default_agent_name = os.getenv("ASSISTANT_NAME") or next(iter(agents))
-        default_agent = agents[default_agent_name]
-        app.bot_data['agents'] = agents
-        app.bot_data['default_agent_name'] = default_agent_name
-        app.bot_data['default_agent'] = default_agent
-        print(f"🤖 Telegram bot is running in multi-persona mode. Default: {default_agent_name}")
-    else:
-        # Single agent mode
-        default_agent = agents
-        app.bot_data['agents'] = {'default': default_agent}
-        app.bot_data['default_agent_name'] = 'default'
-        app.bot_data['default_agent'] = default_agent
-        print(f"🤖 Telegram bot is running in single-persona mode. Current: {default_agent}")
-
+    # Register handlers
     app.add_handler(CommandHandler("start", handle_start))
-    app.add_handler(CommandHandler("persona", handle_persona))
     app.add_handler(CommandHandler("identify", handle_identify))
     app.add_handler(CommandHandler("busy", handle_busy))
     app.add_handler(CommandHandler("resume", handle_resume))
+    app.add_handler(CommandHandler("remember", handle_remember))
     app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
-    
-    app.add_handler(CommandHandler("indexproject", handle_index_project))
-    app.add_handler(CommandHandler("newproject", handle_new_project))
-    app.add_handler(CommandHandler("projecthelp", handle_project_help))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("🤖 Telegram bot is running...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)

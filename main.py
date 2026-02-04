@@ -7,16 +7,18 @@ import sys
 import json
 import logging
 
-from connectors.telegram import start_telegram_bot
-from connectors.api import app as fastapi_app
+from connectors.telegram import start_telegram_bot, set_workflow as set_telegram_workflow
+from connectors.api import app as fastapi_app, set_workflow as set_api_workflow
 from memory import init_memory
 from llm import manager
 import uvicorn
 
 from agent.core import Agent
+from agent.chat_workflow import ChatWorkflow
 from utils.persona import load_persona, list_available_personas
 import asyncio
 
+logger = logging.getLogger(__name__)
 
 def configure_logging():
     """
@@ -73,7 +75,7 @@ def find_all_files(repo_path, exts=None):
 # --- Connector Runners ---
 
 
-def run_telegram(agents):
+def run_telegram(workflow: ChatWorkflow):
     print("Starting Telegram connector...")
 
     try:
@@ -82,7 +84,7 @@ def run_telegram(agents):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-    start_telegram_bot(agents)
+    start_telegram_bot(workflow)
 
 
 
@@ -154,7 +156,14 @@ def determine_what_to_run(args):
 def init_llm_and_memory(no_init):
     if not no_init:
         print("Initializing model and memory...")
-        manager.preload_llama_model()
+        try:
+            manager.preload_llama_model()
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"⚠️  LLM model unavailable: {e}")
+            logger.warning("Continuing without LLM - text responses will be placeholders")
+        except Exception as e:
+            logger.warning(f"⚠️  Unexpected LLM error: {e}")
+            logger.warning("Continuing without LLM")
         init_memory()
 
 # --- Coder Batch Mode Helpers ---
@@ -224,20 +233,20 @@ def main():
     run_telegram_flag, run_api_flag, run_coder_flag, run_coder_batch_flag = determine_what_to_run(args)
     init_llm_and_memory(args.no_init)
     
-    # Decide agent(s) based on persona argument/env
+    # Load persona and initialize ChatWorkflow
     persona_arg = getattr(args, "persona", None)
-    if (persona_arg and persona_arg.strip().lower() == "all") or (
-        not persona_arg and os.getenv("PERSONA_FILE", "").strip().lower() == "all"
-    ):
-        agents = load_all_agents()
-        agent_or_agents = agents
-    else:
-        agent = load_default_agent(persona_arg)
-        agent_or_agents = agent
+    persona = load_persona(filename=persona_arg)
+    workflow = ChatWorkflow(persona=persona, max_history=5, enable_small_talk=False)
+    logger.info(f"✅ ChatWorkflow initialized with persona: {workflow.persona.get('name')}")
+    
+    # Share workflow with connectors
+    if run_telegram_flag or run_api_flag:
+        set_telegram_workflow(workflow)
+        set_api_workflow(workflow)
 
     threads = []
     if run_telegram_flag:
-        run_telegram(agent_or_agents) 
+        run_telegram(workflow) 
 
     if run_api_flag:
         t = threading.Thread(target=run_api, daemon=True)

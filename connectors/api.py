@@ -1,83 +1,86 @@
 import os
+import datetime
+import uuid
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
-from agent.core import Agent
-from utils.busy import detect_busy_intent, detect_resume_intent
-from utils.persona import load_persona
-from utils.session import small_talk_chance
-from memory import UserManager, ConversationManager
-from llm.manager import clean_assistant_reply
-import random
+from agent.chat_workflow import ChatWorkflow
 
 load_dotenv()
 
 app = FastAPI(title="Curie AI API")
-persona = load_persona()
-agent = Agent(persona=persona)
+
+# Shared workflow instance (set by main.py)
+_workflow = None
+
+
+def set_workflow(workflow: ChatWorkflow):
+    """Set the shared ChatWorkflow instance (called from main.py)."""
+    global _workflow
+    _workflow = workflow
+
 
 class MessageRequest(BaseModel):
     user_id: str
-    username: str = None
     message: str
+    idempotency_key: str = None  # Optional: for idempotency
+
 
 class MessageResponse(BaseModel):
-    response: str
-    small_talk: str = None
-    intent: str = None
-    pr_url: str = None  # For future code/PR skills
+    text: str
+    timestamp: str
+    model_used: str
+    processing_time_ms: float
 
-def get_internal_id(user_id, username=None):
-    # Maps external user_id to internal_id
-    return agent.get_or_create_internal_id(
-        external_id=user_id,
-        channel='api',
-        secret_username=username or f"api_{user_id}"
-    )
 
 @app.post("/chat", response_model=MessageResponse)
 async def chat_api(req: MessageRequest):
-    user_id = req.user_id
-    username = req.username
-    message = req.message
-
-    internal_id = get_internal_id(user_id, username)
-
-    # Busy/resume detection
-    message_lc = message.lower().strip()
-    if detect_busy_intent(message_lc):
-        response = agent.handle_busy(internal_id)
-        return MessageResponse(response=response, intent="busy")
-
-    if detect_resume_intent(message_lc):
-        response = agent.handle_resume(internal_id)
-        return MessageResponse(response=response, intent="resume")
-
-    # LLM-based intent detection fallback
-    intent = agent.classify_intent_llm(message)
-    if intent == "busy":
-        response = agent.handle_busy(internal_id)
-        return MessageResponse(response=response, intent="busy")
-    elif intent == "resume":
-        response = agent.handle_resume(internal_id)
-        return MessageResponse(response=response, intent="resume")
-
-    # Main conversation
-    agent_response = agent.handle_message(message, internal_id=internal_id)
-    agent_response = clean_assistant_reply(agent_response)
-
-    # Small talk suggestion
-    small_talk = None
-    if random.random() < small_talk_chance(internal_id):
-        small_talk = agent.generate_small_talk(internal_id)
-        if small_talk:
-            small_talk = clean_assistant_reply(small_talk)
-
+    """
+    Main chat endpoint - normalized interface using ChatWorkflow.
+    
+    Example request:
+    {
+        "user_id": "user123",
+        "message": "Hello, how are you?",
+        "idempotency_key": "optional-uuid-for-dedup"
+    }
+    """
+    if not _workflow:
+        raise HTTPException(status_code=500, detail="System not initialized")
+    
+    # Generate or use provided idempotency key
+    message_id = req.idempotency_key or str(uuid.uuid4())
+    
+    # Normalize to standard ChatWorkflow format
+    normalized_input = {
+        'platform': 'api',
+        'external_user_id': req.user_id,
+        'external_chat_id': req.user_id,  # For API, use user_id as chat_id
+        'message_id': message_id,
+        'text': req.message,
+        'timestamp': datetime.datetime.utcnow()
+    }
+    
+    # Process through workflow
+    result = await _workflow.process_message(normalized_input)
+    
     return MessageResponse(
-        response=agent_response,
-        small_talk=small_talk,
-        intent="chat"
+        text=result['text'],
+        timestamp=result['timestamp'].isoformat(),
+        model_used=result['model_used'],
+        processing_time_ms=result['processing_time_ms']
     )
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "workflow_initialized": _workflow is not None,
+        "cache_stats": _workflow.get_cache_stats() if _workflow else {}
+    }
+
 
 
 @app.post("/clear_memory")

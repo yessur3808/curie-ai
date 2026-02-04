@@ -117,15 +117,14 @@ class Agent:
         return {}
 
     def handle_message(self, message, internal_id=None, chat_context=None):
+        """
+        Legacy method kept for backward compatibility.
+        New code should use ChatWorkflow.process_message() instead.
+        """
         if not internal_id:
             raise ValueError("internal_id is required for conversation tracking.")
 
         ConversationManager.save_conversation(internal_id, "user", message)
-
-        # --- Extract and store user facts in MongoDB ---
-        facts = self.extract_user_facts(message)
-        if facts:
-            UserManager.update_user_profile(internal_id, facts)
 
         # Load recent user profile from MongoDB
         user_profile = UserManager.get_user_profile(internal_id)
@@ -155,8 +154,6 @@ class Agent:
             else:
                 conversation += f"Curie: {msg}\n"
         conversation += f"User: {message}\nCurie:"
-        
-        
 
         response = manager.ask_llm(conversation, max_tokens=512)
         

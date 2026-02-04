@@ -12,8 +12,15 @@ logger = logging.getLogger(__name__)
 _mongo_client = None
 _mongo_db = None
 _mongo_lock = threading.Lock()
+_postgres_available = True
+
+
+def is_postgres_available() -> bool:
+    return _postgres_available
 
 def get_pg_conn():
+    if not _postgres_available:
+        raise RuntimeError("Postgres is disabled due to startup connection failure")
     try:
         conn = psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
         return conn
@@ -116,20 +123,28 @@ def init_mongo():
         raise RuntimeError(f"Error creating MongoDB indexes: {e}") from e
 
 def init_databases():
+    """Initialize databases with graceful degradation on connection failure."""
+    global _postgres_available
+    postgres_available = False
+    
+    # Try PostgreSQL
     try:
         init_pg()
+        postgres_available = True
+        _postgres_available = True
+        logger.info("✅ PostgreSQL initialized successfully")
     except Exception as e:
-        logger.error(f"Failed to initialize Postgres DB: {e}")
-        if isinstance(e, RuntimeError):
-            raise
-        raise RuntimeError(f"Failed to initialize Postgres DB: {e}") from e
+        _postgres_available = False
+        logger.warning(f"⚠️  PostgreSQL unavailable: {e}")
+        logger.warning("Continuing without PostgreSQL - in-memory operations only")
+    
+    # Try MongoDB
     try:
         # Eagerly initialize MongoDB connection at startup to catch configuration
         # or connectivity issues early, rather than deferring until first use
         _init_mongo_connection()
         init_mongo()
+        logger.info("✅ MongoDB initialized successfully")
     except Exception as e:
-        logger.error(f"Failed to initialize MongoDB: {e}")
-        if isinstance(e, RuntimeError):
-            raise
-        raise RuntimeError(f"Failed to initialize MongoDB: {e}") from e
+        logger.warning(f"⚠️  MongoDB unavailable: {e}")
+        logger.warning("Continuing without MongoDB - in-memory operations only")

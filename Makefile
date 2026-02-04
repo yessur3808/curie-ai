@@ -1,3 +1,4 @@
+SHELL := /bin/bash
 
 .PHONY: run start test migrate migrate-down lint format shell
 
@@ -16,10 +17,10 @@ format:  ## Format code with black
 	black src/ tests/
 
 migrate:  ## Apply all SQL up migrations
-	python scripts/apply_migrations.py
+	set -a && source .env && set +a && python scripts/apply_migrations.py
 
 migrate-down:  ## Revert all migrations (dangerous!)
-	python scripts/down_migrations.py
+	set -a && source .env && set +a && python scripts/down_migrations.py
 
 shell:  ## Open a Python shell with project imported
 	python -i main.py
