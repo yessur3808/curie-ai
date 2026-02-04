@@ -158,7 +158,7 @@ async def test_dns_resolution_failures():
     """
     # Mock DNS resolution to raise OSError (which covers socket.gaierror)
     # This simulates DNS lookup failure
-    async def mock_getaddrinfo_failure(hostname, port, *args, **kwargs):
+    async def mock_getaddrinfo_failure(_hostname, _port, *args, **kwargs):
         raise socket.gaierror(-5, "No address associated with hostname")
     
     # Test with mocked DNS failures
