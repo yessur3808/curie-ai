@@ -131,7 +131,7 @@ def ai_project_idea_suggestions(goal, files_to_edit, repo_path, model_name):
         "For each idea, give a short summary and explain why it would be valuable. "
         "Output as a markdown list. Avoid duplicating what's already in the project."
     )
-    return llm.manager.ask_llm(prompt, model_name=model_name, max_tokens=2048)
+    return llm.manager.ask_llm(prompt, model_name=model_name, max_tokens=1024)
 
 def comment_ai_suggestions(pr, suggestions_md):
     suggestion_comment = (
