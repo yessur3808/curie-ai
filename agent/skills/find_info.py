@@ -290,7 +290,17 @@ async def scrape_url(url, pattern=None):
                 logger.warning(f"Pattern-based scraping failed for {url}: {e}", exc_info=True)
         text = soup.get_text(separator="\n", strip=True)
         return text[:MAX_SNIPPET_CHARS]
+    except httpx.TimeoutException as e:
+        logger.error(f"Timeout while scraping {url}: {e}", exc_info=True)
+        return f"Error scraping {url}: request to {url} timed out ({e})"
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP status error while scraping {url}: {e}", exc_info=True)
+        return f"Error scraping {url}: HTTP error from server ({e})"
+    except httpx.NetworkError as e:
+        logger.error(f"Network error while scraping {url}: {e}", exc_info=True)
+        return f"Error scraping {url}: network error ({e})"
     except Exception as e:
+        logger.error(f"Unexpected error while scraping {url}: {e}", exc_info=True)
         return f"Error scraping {url}: {e}"
 
 async def cross_reference_llm(query, snippets):
