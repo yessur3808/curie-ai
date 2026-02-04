@@ -12,9 +12,13 @@ PyGithub==2.6.1
 fastapi==0.115.12
 uvicorn==0.34.3
 black==25.1.0
+pytest==8.3.4
 
 python-weather==2.1.0
 
 duckduckgo-search==8.0.4
+
+httpx==0.28.1
+beautifulsoup4==4.12.3
 
 icrawler==0.6.10

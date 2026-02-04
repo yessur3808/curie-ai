@@ -18,6 +18,7 @@ from utils.session import (
     clear_user_busy,
     small_talk_chance,
 )
+from utils.dedupe import DedupeCache
 
 from memory import UserManager, ConversationManager
 from llm.manager import clean_assistant_reply
@@ -30,6 +31,10 @@ user_persona_map = {}
 # Maps telegram user_id to internal_id for this session
 user_session_map = {}
 
+# Thread-safe deduplication cache: TTL of 5 minutes, max 2000 entries
+# Using DedupeCache for thread-safe duplicate update detection
+processed_updates = DedupeCache(ttl_seconds=300, max_size=2000)
+
 
 
 # Small talk prompts for Curie
@@ -41,6 +46,57 @@ SMALL_TALK_QUESTIONS = [
     "If you could travel anywhere, where would you go?",
     "C'est intéressant! Do you have any hobbies you love?",
 ]
+
+def _build_update_key(update: Update) -> str | None:
+    """
+    Build a unique key for a Telegram update.
+    
+    This follows openclaw's approach of creating a composite key that uniquely
+    identifies an update for deduplication purposes.
+    
+    Args:
+        update: The Telegram update object
+        
+    Returns:
+        A unique string key, or None if the update cannot be identified
+    """
+    if not update or not update.update_id:
+        return None
+    
+    # Use update_id as the primary identifier
+    update_id = update.update_id
+    
+    # Also include user_id for additional uniqueness in case of race conditions
+    user_id = None
+    if update.message and update.message.from_user:
+        user_id = update.message.from_user.id
+    
+    if user_id:
+        return f"update:{update_id}:user:{user_id}"
+    return f"update:{update_id}"
+
+def _is_duplicate_update(update: Update) -> bool:
+    """
+    Check if this update has already been processed.
+    
+    This uses a thread-safe deduplication cache to prevent duplicate processing
+    of the same update, which can occur when multiple handlers are called
+    concurrently in python-telegram-bot.
+    
+    Args:
+        update: The Telegram update to check
+        
+    Returns:
+        True if duplicate (already processed), False if new
+    """
+    key = _build_update_key(update)
+    if not key:
+        return False
+    
+    # The DedupeCache.check() method is thread-safe and returns:
+    # - True if the key was already in the cache (duplicate)
+    # - False if the key is new (first time seeing it)
+    return processed_updates.check(key)
 
 async def handle_identify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
@@ -92,15 +148,25 @@ async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Deduplicate: Skip if we've already processed this update
+    if _is_duplicate_update(update):
+        return
+    
     user_message = update.message.text
     tg_user_id = update.message.from_user.id
     agent = get_agent_for_user(update, context)
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
-    internal_id = agent.get_or_create_internal_id(
-        external_id=tg_user_id,
-        channel='telegram',
-        secret_username=telegram_username
-    )
+    
+    # Get or create stable internal_id for this session
+    if tg_user_id in user_session_map:
+        internal_id = user_session_map[tg_user_id]
+    else:
+        internal_id = agent.get_or_create_internal_id(
+            external_id=tg_user_id,
+            channel='telegram',
+            secret_username=telegram_username
+        )
+        user_session_map[tg_user_id] = internal_id
 
     # --- Proactive weather heads-up (call only at right time) ---
     now = datetime.datetime.now()
@@ -246,7 +312,7 @@ def start_telegram_bot(agents):
     
     # Handle both single-agent and multi-agent mode
     if isinstance(agents, dict):
-        default_agent_name = os.getenv("DEFAULT_PERSONA_NAME") or next(iter(agents))
+        default_agent_name = os.getenv("ASSISTANT_NAME") or next(iter(agents))
         default_agent = agents[default_agent_name]
         app.bot_data['agents'] = agents
         app.bot_data['default_agent_name'] = default_agent_name

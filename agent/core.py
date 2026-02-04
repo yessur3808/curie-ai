@@ -5,6 +5,7 @@ from utils.busy import detect_busy_intent, detect_resume_intent
 from utils.project_indexer import index_project_dir, project_index_markdown, classify_project_intent
 from utils.weather import get_weather, extract_city_from_message, get_hko_typhoon_signal
 from utils.search import web_search, image_search, crawl_google_images
+from agent.skills.find_info import find_info as find_info_skill
 from llm import manager
 import asyncio
 import json
@@ -18,6 +19,15 @@ class Agent:
         init_memory()
         self.user_projects = dict()
         
+
+    async def handle_find_info(self, user_message):
+        "Handles info-finding using the new skill."
+        # Optionally show progress messages if you have a streaming/chat UI
+        return await find_info_skill(user_message)
+
+    # Keywords indicating uncertain or unconfirmed facts
+    UNCERTAIN_KEYWORDS = ['maybe', 'might', 'perhaps', 'unsure', 'not sure', 'possibly', 'probably']
+
         
     def recall_conversation_history(self, internal_id, limit=20):
         """
@@ -55,19 +65,53 @@ class Agent:
     def extract_user_facts(self, user_message):
         """
         Use LLM to extract preferences, interests, traits, etc. from user input.
-        Returns a dict of facts.
+        Returns a dict of validated facts (key–value pairs) without explicit confidence scores.
+        Only stores facts when there is clear evidence in the message and filters out uncertain or vague statements.
         """
         prompt = (
             "Extract any preferences, likes, interests, or personality traits about the user from the following message. "
-            "Return them as a JSON dictionary of key:value pairs. If nothing can be extracted, return {}.\n"
+            "IMPORTANT: Only extract facts that are explicitly stated or clearly implied. Do NOT make assumptions. "
+            "If the user says 'I like pizza', extract {\"likes_food\": \"pizza\"}. "
+            "If the user says 'maybe I'll try pizza', do NOT extract anything - there's no commitment. "
+            "Return them as a JSON dictionary of key:value pairs. If nothing can be confidently extracted, return {}.\n"
             f"User message: {user_message}\n"
-            "Extracted (JSON):"
+            "Extracted facts (JSON only, be conservative):"
         )
-        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=100)
+
+        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=512)
+
         try:
-            facts = json.loads(result.strip())
+            # Robust JSON extraction: find JSON object even if surrounded by extra text
+            # Use brace matching to handle arbitrary nesting depth
+            json_str = None
+            start_idx = result.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                for i in range(start_idx, len(result)):
+                    if result[i] == '{':
+                        brace_count += 1
+                    elif result[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_str = result[start_idx:i+1]
+                            break
+            
+            if json_str:
+                facts = json.loads(json_str)
+            else:
+                # Fallback to simple strip if no JSON found
+                facts = json.loads(result.strip())
+            
             if isinstance(facts, dict):
-                return facts
+                # Validate facts - only keep those with clear evidence
+                validated_facts = {}
+                for key, value in facts.items():
+                    # Skip facts that are too vague or uncertain
+                    if value is not None and value != "" and not any(
+                        uncertain in str(value).lower() for uncertain in self.UNCERTAIN_KEYWORDS
+                    ):
+                        validated_facts[key] = value
+                return validated_facts
         except Exception:
             pass
         return {}
@@ -91,12 +135,19 @@ class Agent:
         conversation = ""
         if self.persona and self.persona.get("system_prompt"):
             conversation += self.persona["system_prompt"] + "\n"
+            conversation += (
+                "IMPORTANT RULES:\n"
+                "- If you don't know something, say so. Don't make up facts or information.\n"
+                "- When uncertain, ask clarifying questions instead of guessing.\n"
+                "- Only make claims you can support with evidence from the conversation or known facts.\n"
+                "- Stay in character but prioritize accuracy over creativity.\n\n"
+            )
             # --- Inject user facts into the persona prompt ---
             if user_profile:
-                conversation += "Here are some things I know about the user so far:\n"
+                conversation += "Here are verified facts I know about you (based on our conversations):\n"
                 for k, v in user_profile.items():
                     conversation += f"- {k}: {v}\n"
-                conversation += "Use these facts to make your response more personal and relevant.\n"
+                conversation += "I will use these facts to personalize my responses, but I will not make up new facts about you.\n\n"
 
         for role, msg in history:
             if role == "user":
@@ -104,8 +155,11 @@ class Agent:
             else:
                 conversation += f"Curie: {msg}\n"
         conversation += f"User: {message}\nCurie:"
+        
+        
 
-        response = manager.ask_llm(conversation)
+        response = manager.ask_llm(conversation, max_tokens=512)
+        
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
 
@@ -129,19 +183,20 @@ class Agent:
             "You are in a friendly conversation. "
             "Generate only a brief, friendly, and natural small talk question or comment (no notes, explanations, or instructions), "
             "in the style of Curie (occasionally using simple French phrases), that helps get to know the user. "
+            "IMPORTANT: Base your question on what you already know OR ask something new. Do NOT make assumptions. "
             "Do not repeat previous questions. Be creative and context-aware. "
             "Reply only with what Curie would say. Do NOT include notes, explanations, or any meta-commentary.\n"
         )
         if user_profile:
-            prompt += "Here are some things you know about the user:\n"
+            prompt += "Here are verified facts you know about the user:\n"
             for k, v in user_profile.items():
                 prompt += f"- {k}: {v}\n"
         prompt += "Here is the recent chat history (user and assistant):\n"
         for role, msg in recent_history:
             prompt += f"{role.capitalize()}: {msg}\n"
-        prompt += "Curie (small talk):"
+        prompt += "Curie (small talk, be natural, caring, attentive, and friendly, don't repeat topics already discussed):"
 
-        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=60)
+        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=256)
         return small_talk.strip()
     
     async def get_weather_info(self, city: str, unit: str = "metric"):
@@ -228,7 +283,7 @@ class Agent:
             f"User's question: {user_question}\n"
             "Advise or help the user based on their project files and structure."
         )
-        response = manager.ask_llm(prompt)
+        response = manager.ask_llm(prompt, max_tokens=512)
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
 
@@ -316,6 +371,9 @@ class Agent:
             "create_project",
             "show_project",
             "project_help",
+            "find_info",
+            "scrape_info",
+            "multi_source_info",
             "list_directories"
         }
 
@@ -355,6 +413,9 @@ class Agent:
                     for r in results:
                         reply += f"[{r['title']}]({r['href']})\n{r['body']}\n\n"
                     responses.append(reply)
+            elif action in ("find_info", "scrape_info", "multi_source_info"):
+                reply = await find_info_skill(user_message)
+                responses.append(reply)
 
             elif action == "image_search":
                 query = params.get("query") or user_message
@@ -557,10 +618,18 @@ class Agent:
             "  \"overall_clarification_needed\": true,\n"
             "  \"overall_suggested_questions\": [\"Please upload the file you'd like me to analyze.\"]\n"
             "}\n"
+            "User: What's happening in the NBA right now?\n"
+            "{\n"
+            "  \"intents\": [\n"
+            "    {\"action\": \"find_info\", \"description\": \"Find real-time NBA news and scores from multiple sources.\", \"confidence\": 0.97, \"parameters\": {\"topic\": \"NBA\", \"time\": \"now\"}, \"reasoning\": \"The user wants current NBA info from the web.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"news\", \"language\": \"en\"}\n"
+            "  ],\n"
+            "  \"overall_clarification_needed\": false,\n"
+            "  \"overall_suggested_questions\": []\n"
+            "}\n"
             f"User: {user_message}\n"
             "JSON:\n"
         )
-        result = manager.ask_llm(prompt, temperature=0, max_tokens=256)
+        result = manager.ask_llm(prompt, temperature=0, max_tokens=512)
 
         import json
         try:
