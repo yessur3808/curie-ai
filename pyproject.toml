@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "C.U.R.I.E. - Clever Understanding and Reasoning Intelligent Entity"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = {file = "LICENSE"}
 authors = [
     {name = "yessur3808"}
 ]
