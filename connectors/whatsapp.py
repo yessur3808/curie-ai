@@ -70,9 +70,10 @@ async def handle_voice_message(message) -> Optional[str]:
     Returns:
         Transcribed text or None if transcription fails
     """
+    audio_file = None
     try:
         # Import voice utilities
-        from utils.voice import transcribe_audio
+        from utils.voice import transcribe_audio, get_voice_config_from_persona
         
         # Download voice message
         audio_file = await message.download_media()
@@ -80,17 +81,28 @@ async def handle_voice_message(message) -> Optional[str]:
             logger.error("Failed to download voice message")
             return None
         
-        # Transcribe audio to text
-        transcribed_text = await transcribe_audio(audio_file)
+        # Get voice config from persona for accent-aware transcription
+        persona = _workflow.persona if _workflow else None
+        voice_config = get_voice_config_from_persona(persona) if persona else {}
+        accent = voice_config.get('accent')
+        language = voice_config.get('language', 'en')
         
-        # Clean up temporary file
-        if os.path.exists(audio_file):
-            os.remove(audio_file)
+        # Transcribe audio to text with accent awareness
+        transcribed_text = await transcribe_audio(
+            audio_file,
+            language=language,
+            accent=accent,
+            auto_detect=True
+        )
         
         return transcribed_text
     except Exception as e:
         logger.error(f"Error processing voice message: {e}")
         return None
+    finally:
+        # Clean up temporary file regardless of success or failure
+        if audio_file and os.path.exists(audio_file):
+            os.remove(audio_file)
 
 
 async def handle_message(message):

@@ -306,10 +306,6 @@ def main():
 
     threads = []
     
-    # Start Telegram bot (blocking)
-    if run_telegram_flag:
-        run_telegram(workflow) 
-    
     # Start Discord bot in thread
     if run_discord_flag:
         if DISCORD_AVAILABLE:
@@ -345,8 +341,13 @@ def main():
         validate_coder_batch_params(goal, files_to_edit, repo_path, branch_name)
         run_coder_batch(goal, files_to_edit, repo_path, branch_name)
 
-    for t in threads:
-        t.join()
+    # Start Telegram bot last (blocking) - keeps main thread alive
+    if run_telegram_flag:
+        run_telegram(workflow)
+    else:
+        # If Telegram is not running, join other threads to prevent main from exiting
+        for t in threads:
+            t.join()
         
         
 if __name__ == "__main__":

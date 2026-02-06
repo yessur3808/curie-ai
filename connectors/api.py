@@ -217,6 +217,10 @@ async def transcribe_audio_api(
             detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
         )
     
+    # Enforce file size limit (25MB)
+    MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB in bytes
+    
+    temp_path = None
     try:
         from utils.voice import transcribe_audio
         
@@ -224,9 +228,17 @@ async def transcribe_audio_api(
         safe_filename = f"upload_{uuid.uuid4()}{file_ext}"
         temp_path = os.path.join("/tmp", safe_filename)
         
+        # Read file in chunks and enforce size limit
+        total_size = 0
         with open(temp_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+            while chunk := await file.read(8192):  # Read in 8KB chunks
+                total_size += len(chunk)
+                if total_size > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum size is 25MB"
+                    )
+                f.write(chunk)
         
         # Transcribe
         transcribed_text = await transcribe_audio(
@@ -236,10 +248,6 @@ async def transcribe_audio_api(
             auto_detect=True
         )
         
-        # Clean up
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        
         if not transcribed_text:
             raise HTTPException(status_code=400, detail="Failed to transcribe audio")
         
@@ -248,9 +256,16 @@ async def transcribe_audio_api(
             "language": language
         }
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         logger.error(f"Transcription error: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        # Clean up temporary file regardless of success or failure
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 @app.get("/audio/{filename}")
