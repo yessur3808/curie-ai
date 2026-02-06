@@ -225,6 +225,7 @@ class ChatWorkflow:
             }
         
         # Get internal user ID for persistence
+<<<<<<< copilot/sub-pr-3-92cb8c06-6fa8-48df-8750-575717d3346a
         # If internal_id is provided (e.g., via /identify), use it; otherwise lookup/create
         internal_id = normalized_input.get('internal_id')
         if not internal_id:
@@ -233,6 +234,14 @@ class ChatWorkflow:
                 external_id=str(external_user_id),
                 secret_username=f"{platform}_{external_user_id}"
             )
+=======
+        internal_id = UserManager.get_or_create_user_internal_id(
+            channel=platform,
+            external_id=str(external_user_id),
+            secret_username=f"{platform}_{external_user_id}",
+            updated_by="chat_workflow",
+        )
+>>>>>>> Yessur/info-agent
         
         # Check deduplication cache
         cached_response = self.dedupe_cache.get(platform, str(external_chat_id), message_id)
@@ -298,7 +307,7 @@ class ChatWorkflow:
         Batch-load user profile and conversation history in parallel.
         Reduces from 4+ sequential queries to 2 parallel queries.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         # Run blocking DB calls in thread pool
         user_profile_task = loop.run_in_executor(None, UserManager.get_user_profile, internal_id)

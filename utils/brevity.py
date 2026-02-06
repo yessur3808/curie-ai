@@ -1,6 +1,5 @@
 # === Anti-repetition & brevity helpers (drop-in) ===
 import re
-from typing import List
 
 def _cleanup_role_prefixes(text: str) -> str:
     # Remove leading role labels like "Curie:" or "Assistant:"

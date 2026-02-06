@@ -3,10 +3,12 @@
 
 set -e
 
-PROJECT_DIR="/home/curlycoffee3808/Desktop/server/assistant/curie00"
+# Dynamically determine project directory (script's parent directory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
-echo "� Stopping all PM2 processes..."
+echo "🛑 Stopping all PM2 processes..."
 pm2 kill 2>/dev/null || echo "  No PM2 daemon running"
 sleep 2
 

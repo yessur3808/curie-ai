@@ -108,8 +108,11 @@ class DedupeCache:
                     # Don't update timestamp - maintain strict FIFO order
                     self._prune(now)
                     return True
+                # Key exists but is expired - delete it to maintain FIFO order
+                # (reassigning doesn't move key to end in Python dicts)
+                del self._cache[key]
             
-            # New key or expired - add/update it
+            # New key or expired (after deletion) - add it
             self._cache[key] = now
             self._prune(now)
             return False
