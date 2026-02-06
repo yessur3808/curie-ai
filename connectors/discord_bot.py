@@ -62,13 +62,14 @@ def get_internal_id(discord_user_id: int, discord_username: str, platform: str =
     )
 
 
-async def handle_voice_attachment(attachment) -> Optional[str]:
+async def handle_voice_attachment(attachment, persona) -> Optional[str]:
     """
     Handle voice/audio attachment from Discord.
-    Downloads the audio and converts it to text using speech recognition.
+    Downloads the audio and converts it to text using speech recognition with persona-aware accent configuration.
     
     Args:
         attachment: Discord attachment object
+        persona: Persona object containing voice configuration
         
     Returns:
         Transcribed text or None if transcription fails
@@ -78,13 +79,23 @@ async def handle_voice_attachment(attachment) -> Optional[str]:
     audio_path = f"/tmp/discord_audio_{attachment.id}{ext}"
     try:
         # Import voice utilities
-        from utils.voice import transcribe_audio
+        from utils.voice import transcribe_audio, get_voice_config_from_persona
         
         # Download audio file
         await attachment.save(audio_path)
         
-        # Transcribe audio to text
-        transcribed_text = await transcribe_audio(audio_path)
+        # Get voice config from persona
+        voice_config = get_voice_config_from_persona(persona)
+        accent = voice_config.get('accent')
+        language = voice_config.get('language', 'en')
+        
+        # Transcribe audio to text with accent awareness
+        transcribed_text = await transcribe_audio(
+            audio_path,
+            language=language,
+            accent=accent,
+            auto_detect=True
+        )
         
         return transcribed_text
     except Exception as e:
@@ -150,7 +161,7 @@ class DiscordBot(commands.Bot):
             if message.attachments:
                 for attachment in message.attachments:
                     if attachment.content_type and 'audio' in attachment.content_type:
-                        transcribed = await handle_voice_attachment(attachment)
+                        transcribed = await handle_voice_attachment(attachment, self.workflow.persona)
                         if transcribed:
                             user_message += f"\n[Voice message transcribed]: {transcribed}"
                             await message.channel.send(f"🎤 I heard: {transcribed}")
