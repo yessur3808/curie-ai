@@ -44,7 +44,7 @@ API                   ChromaDB,           etc)
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - PostgreSQL
 - MongoDB
 - Docker (optional but preferred)
@@ -79,11 +79,21 @@ pip install -r requirements.txt
 
 ### 4. **Create a `.env` file in the project root**
 
+See the [Environment Variables](#-environment-variables) section below for a complete list of available configuration options.
+
+Minimal example:
+
 ```env
 TELEGRAM_BOT_TOKEN=your_telegram_token
 LLM_MODELS=Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
-POSTGRES_URL=postgresql://user:pass@localhost:5432/curie
-MONGO_URL=mongodb://localhost:27017/curie
+MASTER_USER_ID=123456789
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=assistant_db
+POSTGRES_USER=your_pg_user
+POSTGRES_PASSWORD=your_pg_password
+MONGODB_URI=mongodb://localhost:27017/
+MONGODB_DB=assistant_db
 ```
 You can list multiple GGUF model files (comma-separated) if you want to support switching later.
 
@@ -124,6 +134,59 @@ Using Docker:
 
 docker-compose up
 ```
+
+## 🔧 Environment Variables
+
+Curie uses environment variables for configuration. Copy `.env.example` to `.env` and configure the following variables:
+
+### Required Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `TELEGRAM_BOT_TOKEN` | Your Telegram bot token from BotFather | `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11` |
+| `LLM_MODELS` | Comma-separated list of GGUF model filenames | `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` |
+| `MASTER_USER_ID` | Telegram user ID with admin privileges | `123456789` |
+| `POSTGRES_HOST` | PostgreSQL database host | `localhost` |
+| `POSTGRES_PORT` | PostgreSQL database port | `5432` |
+| `POSTGRES_DB` | PostgreSQL database name | `assistant_db` |
+| `POSTGRES_USER` | PostgreSQL username | `your_pg_user` |
+| `POSTGRES_PASSWORD` | PostgreSQL password | `your_pg_password` |
+| `MONGODB_URI` | MongoDB connection URI | `mongodb://localhost:27017/` |
+| `MONGODB_DB` | MongoDB database name | `assistant_db` |
+
+### Optional Variables
+
+| Variable | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `CODING_MODEL_NAME` | GGUF model for coding tasks | None | `codellama-34b-instruct.Q4_K_M.gguf` |
+| `ASSISTANT_NAME` | Display name of your AI assistant (used for speaker tag removal) | None | `jarvis` |
+| `PERSONA_FILE` | Persona configuration filename (set to "all" for multi-persona mode) | None | `personality.json` |
+| `GITHUB_TOKEN` | GitHub personal access token for code operations | None | `ghp_***` |
+| `MAIN_REPO` | Main repository URL for code operations | None | `https://github.com/user/repo` |
+| `MAIN_REVIEWER` | Default code reviewer username | None | `MainCoder` |
+| `RUN_TELEGRAM` | Enable/disable Telegram bot | `true` | `true` or `false` |
+| `RUN_API` | Enable/disable API server | `true` | `true` or `false` |
+| `RUN_CODER` | Enable/disable coding agent | `false` | `true` or `false` |
+| `PROJECTS_ROOT` | Root directory for projects | None | `/var/projects` |
+
+### LLM Context Window Configuration (Advanced)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LLM_CONTEXT_SIZE` | Total context window size | `2048` |
+| `LLM_CONTEXT_BUFFER` | Buffer reserved for system tokens | `16` |
+| `LLM_MIN_TOKENS` | Minimum tokens required for a response | `64` |
+| `LLM_FALLBACK_MAX_TOKENS` | Fallback max_tokens if tokenization fails | `512` |
+| `LLM_DEFAULT_MAX_TOKENS` | Default max_tokens for ask_llm() | `128` |
+
+### Info Search Task Configuration (Advanced)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `INFO_SEARCH_TEMPERATURE` | Temperature for info search LLM calls (lower = more deterministic) | `0.2` |
+| `INFO_SEARCH_MAX_TOKENS` | Maximum tokens for info search responses | `512` |
+| `INFO_SEARCH_MAX_SOURCES` | Maximum number of sources to process (prevents context overflow) | `3` |
+| `INFO_SEARCH_MAX_SNIPPET_CHARS` | Maximum characters per snippet (~100 tokens) | `400` |
 
 ## 🛠️ Development Phases
 ### Phase 1: Core Functionality ✅

@@ -1,58 +1,150 @@
-# memory/database.py
-
 import psycopg2
 from psycopg2.extras import DictCursor
-from pymongo import MongoClient
+from psycopg2 import OperationalError, DatabaseError, Error
+from pymongo import MongoClient, errors as mongo_errors
+import logging
+import threading
 from .config import PG_CONN_INFO, MONGODB_URI, MONGODB_DB
 
-# Postgres setup
+logger = logging.getLogger(__name__)
+
+# MongoDB client and database instances (lazy initialization)
+_mongo_client = None
+_mongo_db = None
+_mongo_lock = threading.Lock()
+_postgres_available = True
+
+
+def is_postgres_available() -> bool:
+    return _postgres_available
+
 def get_pg_conn():
-    return psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
+    if not _postgres_available:
+        raise RuntimeError("Postgres is disabled due to startup connection failure")
+    try:
+        conn = psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
+        return conn
+    except OperationalError as e:
+        logger.error(f"Failed to connect to Postgres: {e}")
+        raise RuntimeError(f"Failed to connect to Postgres: {e}") from e
 
-# MongoDB setup
-mongo_client = MongoClient(MONGODB_URI)
-mongo_db = mongo_client[MONGODB_DB]
+def _init_mongo_connection():
+    """Initialize MongoDB connection. Called lazily on first access. Thread-safe."""
+    global _mongo_client, _mongo_db
+    
+    with _mongo_lock:
+        # Double-check pattern to avoid multiple initializations
+        if _mongo_client is not None:
+            return
+        
+        if not MONGODB_URI or not MONGODB_DB:
+            raise RuntimeError(
+                "MongoDB configuration is missing. Please set MONGODB_URI and MONGODB_DB environment variables."
+            )
+        
+        try:
+            _mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=3000)
+            _mongo_db = _mongo_client[MONGODB_DB]
+            _mongo_client.admin.command('ping')
+            logger.info("MongoDB connection established successfully.")
+        except mongo_errors.PyMongoError as e:
+            logger.error(f"Failed to connect to MongoDB: {e}")
+            raise RuntimeError(f"Failed to connect to MongoDB: {e}") from e
 
-# --- Database Initialization ---
+class _MongoDBProxy:
+    """Proxy class that lazily initializes MongoDB connection on first access."""
+    def __getattr__(self, name):
+        if _mongo_db is None:
+            _init_mongo_connection()
+        return getattr(_mongo_db, name)
+
+class _MongoClientProxy:
+    """Proxy class that lazily initializes MongoDB client on first access."""
+    def __getattr__(self, name):
+        if _mongo_client is None:
+            _init_mongo_connection()
+        return getattr(_mongo_client, name)
+
+# Module-level instances that will initialize lazily
+mongo_db = _MongoDBProxy()
+mongo_client = _MongoClientProxy()
+
 def init_pg():
-    with get_pg_conn() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                internal_id UUID UNIQUE DEFAULT gen_random_uuid(),
-                telegram_id TEXT,
-                slack_id TEXT,
-                whatsapp_id TEXT,
-                signal_id TEXT,
-                phone_number TEXT,
-                email TEXT,
-                secret_username TEXT NOT NULL,
-                is_master BOOLEAN NOT NULL DEFAULT FALSE,
-                roles TEXT[] DEFAULT ARRAY[]::TEXT[],
-                created_at TIMESTAMPTZ DEFAULT now(),
-                updated_at TIMESTAMPTZ DEFAULT now(),
-                updated_by TEXT NOT NULL
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS conversation_memory (
-                id SERIAL PRIMARY KEY,
-                user_internal_id UUID NOT NULL,
-                timestamp TIMESTAMPTZ NOT NULL,
-                role TEXT NOT NULL,
-                message TEXT NOT NULL,
-                FOREIGN KEY (user_internal_id) REFERENCES users(internal_id) ON DELETE CASCADE
-            );
-        """)
-        conn.commit()
+    try:
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                try:
+                    cur.execute("""
+                        CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+                        CREATE TABLE IF NOT EXISTS users (
+                            id SERIAL PRIMARY KEY,
+                            internal_id UUID UNIQUE DEFAULT gen_random_uuid(),
+                            telegram_id TEXT,
+                            slack_id TEXT,
+                            whatsapp_id TEXT,
+                            signal_id TEXT,
+                            phone_number TEXT,
+                            email TEXT,
+                            secret_username TEXT NOT NULL,
+                            is_master BOOLEAN NOT NULL DEFAULT FALSE,
+                            roles TEXT[] DEFAULT ARRAY[]::TEXT[],
+                            created_at TIMESTAMPTZ DEFAULT now(),
+                            updated_at TIMESTAMPTZ DEFAULT now(),
+                            updated_by TEXT NOT NULL
+                        );
+                    """)
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS conversation_memory (
+                            id SERIAL PRIMARY KEY,
+                            user_internal_id UUID NOT NULL,
+                            timestamp TIMESTAMPTZ NOT NULL,
+                            role TEXT NOT NULL,
+                            message TEXT NOT NULL,
+                            FOREIGN KEY (user_internal_id) REFERENCES users(internal_id) ON DELETE CASCADE
+                        );
+                    """)
+                    conn.commit()
+                    logger.info("Postgres tables initialized successfully.")
+                except DatabaseError as e:
+                    conn.rollback()
+                    logger.error(f"Error initializing Postgres tables: {e}")
+                    raise RuntimeError(f"Error initializing Postgres tables: {e}") from e
+    except Error as e:
+        logger.error(f"Error in init_pg: {e}")
+        raise RuntimeError(f"Error in init_pg: {e}") from e
 
 def init_mongo():
-    mongo_db.research_memory.create_index([('topic', 1)])
-    mongo_db.research_memory.create_index([('user_id', 1)])
-    
-    
+    try:
+        mongo_db.research_memory.create_index([('topic', 1)])
+        mongo_db.research_memory.create_index([('user_id', 1)])
+        logger.info("MongoDB indexes created successfully.")
+    except mongo_errors.PyMongoError as e:
+        logger.error(f"Error creating MongoDB indexes: {e}")
+        raise RuntimeError(f"Error creating MongoDB indexes: {e}") from e
+
 def init_databases():
-    init_pg()
-    init_mongo()
+    """Initialize databases with graceful degradation on connection failure."""
+    global _postgres_available
+    postgres_available = False
+    
+    # Try PostgreSQL
+    try:
+        init_pg()
+        postgres_available = True
+        _postgres_available = True
+        logger.info("✅ PostgreSQL initialized successfully")
+    except Exception as e:
+        _postgres_available = False
+        logger.warning(f"⚠️  PostgreSQL unavailable: {e}")
+        logger.warning("Continuing without PostgreSQL - in-memory operations only")
+    
+    # Try MongoDB
+    try:
+        # Eagerly initialize MongoDB connection at startup to catch configuration
+        # or connectivity issues early, rather than deferring until first use
+        _init_mongo_connection()
+        init_mongo()
+        logger.info("✅ MongoDB initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  MongoDB unavailable: {e}")
+        logger.warning("Continuing without MongoDB - in-memory operations only")

@@ -5,6 +5,7 @@ from utils.busy import detect_busy_intent, detect_resume_intent
 from utils.project_indexer import index_project_dir, project_index_markdown, classify_project_intent
 from utils.weather import get_weather, extract_city_from_message, get_hko_typhoon_signal
 from utils.search import web_search, image_search, crawl_google_images
+from agent.skills.find_info import find_info as find_info_skill
 from llm import manager
 import asyncio
 import json
@@ -18,9 +19,15 @@ class Agent:
         init_memory()
         self.user_projects = dict()
         
+
+    async def handle_find_info(self, user_message):
+        "Handles info-finding using the new skill."
+        # Optionally show progress messages if you have a streaming/chat UI
+        return await find_info_skill(user_message)
+
     # Keywords indicating uncertain or unconfirmed facts
     UNCERTAIN_KEYWORDS = ['maybe', 'might', 'perhaps', 'unsure', 'not sure', 'possibly', 'probably']
-        
+
         
     def recall_conversation_history(self, internal_id, limit=20):
         """
@@ -58,8 +65,8 @@ class Agent:
     def extract_user_facts(self, user_message):
         """
         Use LLM to extract preferences, interests, traits, etc. from user input.
-        Returns a dict of facts with confidence scoring.
-        Only stores facts when there is clear evidence in the message.
+        Returns a dict of validated facts (key–value pairs) without explicit confidence scores.
+        Only stores facts when there is clear evidence in the message and filters out uncertain or vague statements.
         """
         prompt = (
             "Extract any preferences, likes, interests, or personality traits about the user from the following message. "
@@ -70,15 +77,39 @@ class Agent:
             f"User message: {user_message}\n"
             "Extracted facts (JSON only, be conservative):"
         )
-        result = manager.ask_llm(prompt, temperature=0.1, max_tokens=100)
+
+        result = manager.ask_llm(prompt, temperature=0.2, max_tokens=512)
+
         try:
-            facts = json.loads(result.strip())
+            # Robust JSON extraction: find JSON object even if surrounded by extra text
+            # Use brace matching to handle arbitrary nesting depth
+            json_str = None
+            start_idx = result.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                for i in range(start_idx, len(result)):
+                    if result[i] == '{':
+                        brace_count += 1
+                    elif result[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_str = result[start_idx:i+1]
+                            break
+            
+            if json_str:
+                facts = json.loads(json_str)
+            else:
+                # Fallback to simple strip if no JSON found
+                facts = json.loads(result.strip())
+            
             if isinstance(facts, dict):
                 # Validate facts - only keep those with clear evidence
                 validated_facts = {}
                 for key, value in facts.items():
                     # Skip facts that are too vague or uncertain
-                    if value and not any(uncertain in str(value).lower() for uncertain in self.UNCERTAIN_KEYWORDS):
+                    if value is not None and value != "" and not any(
+                        uncertain in str(value).lower() for uncertain in self.UNCERTAIN_KEYWORDS
+                    ):
                         validated_facts[key] = value
                 return validated_facts
         except Exception:
@@ -86,15 +117,14 @@ class Agent:
         return {}
 
     def handle_message(self, message, internal_id=None, chat_context=None):
+        """
+        Legacy method kept for backward compatibility.
+        New code should use ChatWorkflow.process_message() instead.
+        """
         if not internal_id:
             raise ValueError("internal_id is required for conversation tracking.")
 
         ConversationManager.save_conversation(internal_id, "user", message)
-
-        # --- Extract and store user facts in MongoDB ---
-        facts = self.extract_user_facts(message)
-        if facts:
-            UserManager.update_user_profile(internal_id, facts)
 
         # Load recent user profile from MongoDB
         user_profile = UserManager.get_user_profile(internal_id)
@@ -125,7 +155,8 @@ class Agent:
                 conversation += f"Curie: {msg}\n"
         conversation += f"User: {message}\nCurie:"
 
-        response = manager.ask_llm(conversation)
+        response = manager.ask_llm(conversation, max_tokens=512)
+        
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
 
@@ -162,7 +193,7 @@ class Agent:
             prompt += f"{role.capitalize()}: {msg}\n"
         prompt += "Curie (small talk, be natural, caring, attentive, and friendly, don't repeat topics already discussed):"
 
-        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=60)
+        small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=256)
         return small_talk.strip()
     
     async def get_weather_info(self, city: str, unit: str = "metric"):
@@ -249,7 +280,7 @@ class Agent:
             f"User's question: {user_question}\n"
             "Advise or help the user based on their project files and structure."
         )
-        response = manager.ask_llm(prompt)
+        response = manager.ask_llm(prompt, max_tokens=512)
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
 
@@ -337,6 +368,9 @@ class Agent:
             "create_project",
             "show_project",
             "project_help",
+            "find_info",
+            "scrape_info",
+            "multi_source_info",
             "list_directories"
         }
 
@@ -376,6 +410,9 @@ class Agent:
                     for r in results:
                         reply += f"[{r['title']}]({r['href']})\n{r['body']}\n\n"
                     responses.append(reply)
+            elif action in ("find_info", "scrape_info", "multi_source_info"):
+                reply = await find_info_skill(user_message)
+                responses.append(reply)
 
             elif action == "image_search":
                 query = params.get("query") or user_message
@@ -578,10 +615,18 @@ class Agent:
             "  \"overall_clarification_needed\": true,\n"
             "  \"overall_suggested_questions\": [\"Please upload the file you'd like me to analyze.\"]\n"
             "}\n"
+            "User: What's happening in the NBA right now?\n"
+            "{\n"
+            "  \"intents\": [\n"
+            "    {\"action\": \"find_info\", \"description\": \"Find real-time NBA news and scores from multiple sources.\", \"confidence\": 0.97, \"parameters\": {\"topic\": \"NBA\", \"time\": \"now\"}, \"reasoning\": \"The user wants current NBA info from the web.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"news\", \"language\": \"en\"}\n"
+            "  ],\n"
+            "  \"overall_clarification_needed\": false,\n"
+            "  \"overall_suggested_questions\": []\n"
+            "}\n"
             f"User: {user_message}\n"
             "JSON:\n"
         )
-        result = manager.ask_llm(prompt, temperature=0, max_tokens=256)
+        result = manager.ask_llm(prompt, temperature=0, max_tokens=512)
 
         import json
         try:
