@@ -347,31 +347,23 @@ def get_voice_config_from_persona(persona: Dict[str, Any]) -> Dict[str, Any]:
 
 def detect_accent_from_text(text: str) -> Optional[str]:
     """
-    Attempt to detect accent/dialect from text patterns.
-    This is a simple heuristic-based approach.
+    Attempt to detect language/dialect from text patterns.
+    This is a simple heuristic-based approach for language detection only.
+    Note: This provides hints but should not be relied upon for critical decisions.
+    The primary language detection should come from Whisper's built-in capabilities.
     
     Args:
         text: Text to analyze
         
     Returns:
-        Detected accent or None
+        Detected language hint or None
     """
     text_lower = text.lower()
     
-    # British English indicators
+    # British English spelling patterns
     british_words = ['colour', 'favour', 'honour', 'realise', 'organise', 'whilst', 'amongst']
     if any(word in text_lower for word in british_words):
         return 'british'
     
-    # Indian English indicators
-    indian_phrases = ['kindly', 'do the needful', 'prepone', 'revert back']
-    if any(phrase in text_lower for phrase in indian_phrases):
-        return 'indian'
-    
-    # Australian English indicators  
-    aussie_words = ['mate', 'arvo', 'barbie', 'servo']
-    if any(word in text_lower for word in aussie_words):
-        return 'australian'
-    
-    # Default to None (use persona settings)
+    # Default to None (use Whisper's auto-detection)
     return None

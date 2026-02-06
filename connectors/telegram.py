@@ -192,8 +192,6 @@ async def handle_voice_message(update: Update, persona: dict) -> str:
         
         return transcribed_text or ""
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"Error processing voice message: {e}")
         return ""
 

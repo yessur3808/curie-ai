@@ -198,11 +198,22 @@ async def transcribe_audio_api(
     if not _workflow:
         raise HTTPException(status_code=500, detail="System not initialized")
     
+    # Validate file extension
+    ALLOWED_EXTENSIONS = {'.mp3', '.wav', '.ogg', '.m4a', '.flac', '.opus'}
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+    
     try:
         from utils.voice import transcribe_audio
         
-        # Save uploaded file temporarily
-        temp_path = f"/tmp/upload_{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
+        # Save uploaded file temporarily with sanitized name
+        safe_filename = f"upload_{uuid.uuid4()}{file_ext}"
+        temp_path = os.path.join("/tmp", safe_filename)
         
         with open(temp_path, "wb") as f:
             content = await file.read()
@@ -244,10 +255,21 @@ async def get_audio_file(filename: str):
     Returns:
         Audio file as streaming response
     """
-    file_path = f"/tmp/{filename}"
+    # Sanitize filename to prevent path traversal
+    # Only allow alphanumeric, dash, underscore, and dot
+    import re
+    if not re.match(r'^[a-zA-Z0-9_\-]+\.(mp3|wav|ogg)$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    file_path = os.path.join("/tmp", filename)
     
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
+    
+    # Ensure the file is actually in /tmp (prevent path traversal)
+    real_path = os.path.realpath(file_path)
+    if not real_path.startswith("/tmp/"):
+        raise HTTPException(status_code=403, detail="Access denied")
     
     def iter_file():
         with open(file_path, "rb") as f:
