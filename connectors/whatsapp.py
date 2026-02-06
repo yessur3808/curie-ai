@@ -17,7 +17,6 @@ except ImportError:
     WhatsApp = None
 
 from agent.chat_workflow import ChatWorkflow
-from utils.persona import load_persona
 from utils.session import set_busy_temporarily, clear_user_busy
 from memory import UserManager
 
