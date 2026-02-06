@@ -213,7 +213,6 @@ class ChatWorkflow:
         external_chat_id = normalized_input.get('external_chat_id')
         message_id = str(normalized_input.get('message_id', ''))
         user_text = normalized_input.get('text', '').strip()
-        timestamp = normalized_input.get('timestamp', datetime.utcnow())
         
         if not all([external_user_id, external_chat_id, user_text]):
             logger.error(f"Invalid input: missing required fields. Input: {normalized_input}")
