@@ -74,7 +74,8 @@ async def handle_voice_attachment(attachment) -> Optional[str]:
         Transcribed text or None if transcription fails
     """
     # Prepare temporary audio file path
-    audio_path = f"/tmp/discord_audio_{attachment.id}.{attachment.filename.split('.')[-1]}"
+    _, ext = os.path.splitext(attachment.filename)
+    audio_path = f"/tmp/discord_audio_{attachment.id}{ext}"
     try:
         # Import voice utilities
         from utils.voice import transcribe_audio
