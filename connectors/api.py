@@ -4,7 +4,7 @@ import uuid
 import logging
 from typing import Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from agent.chat_workflow import ChatWorkflow
