@@ -295,7 +295,7 @@ class ChatWorkflow:
         Batch-load user profile and conversation history in parallel.
         Reduces from 4+ sequential queries to 2 parallel queries.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         # Run blocking DB calls in thread pool
         user_profile_task = loop.run_in_executor(None, UserManager.get_user_profile, internal_id)
