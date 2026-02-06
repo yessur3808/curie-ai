@@ -227,7 +227,8 @@ class ChatWorkflow:
         internal_id = UserManager.get_or_create_user_internal_id(
             channel=platform,
             external_id=str(external_user_id),
-            secret_username=f"{platform}_{external_user_id}"
+            secret_username=f"{platform}_{external_user_id}",
+            updated_by="chat_workflow",
         )
         
         # Check deduplication cache
