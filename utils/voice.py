@@ -120,16 +120,21 @@ async def transcribe_with_whisper(
     model_name = os.getenv("WHISPER_MODEL", "base")
     
     logger.info(f"Loading Whisper model: {model_name}")
-    model = whisper.load_model(model_name)
+    loop = asyncio.get_running_loop()
+    model = await loop.run_in_executor(None, whisper.load_model, model_name)
     
     # Transcribe with optional language hint
     logger.info(f"Transcribing audio: {audio_path}")
     if auto_detect:
         # Let Whisper auto-detect language and accent
-        result = model.transcribe(audio_path)
+        def _transcribe() -> dict:
+            return model.transcribe(audio_path)
+        result = await loop.run_in_executor(None, _transcribe)
         logger.info(f"Detected language: {result.get('language', 'unknown')}")
     else:
-        result = model.transcribe(audio_path, language=language)
+        def _transcribe_with_language() -> dict:
+            return model.transcribe(audio_path, language=language)
+        result = await loop.run_in_executor(None, _transcribe_with_language)
     
     return result["text"].strip()
 
