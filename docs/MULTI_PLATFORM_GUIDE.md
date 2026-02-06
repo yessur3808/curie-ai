@@ -63,10 +63,29 @@ Add a `voice` section to your persona JSON file:
     "accent": "british",
     "language": "en",
     "speed": "normal",
-    "pitch": "normal"
+    "pitch": "normal",
+    "code_switching": {
+      "enabled": true,
+      "percentage": 15,
+      "native_language": "fr"
+    }
   }
 }
 ```
+
+**Code-Switching Feature:**
+The `code_switching` option adds authentic cultural charm by mixing native language expressions into English responses. For example:
+- French speaker: "Oui, that makes sense! Let me explain..."
+- German speaker: "Natürlich! I can help with that..."
+- Arabic speaker: "Inshallah, we'll get this done..."
+- Spanish speaker: "¡Claro! Here's what I found..."
+
+**Configuration:**
+- `enabled` (boolean): Turn code-switching on/off
+- `percentage` (1-30): How frequently to insert native expressions (10-15 recommended for natural feel)
+- `native_language`: Language code (fr, de, es, it, ar, hi, pt, ru, ja, zh)
+
+This feature makes the assistant feel more culturally authentic and adds personality without compromising understanding.
 
 **Supported Accents:**
 - `american` - US English
@@ -382,40 +401,91 @@ For real-time voice streaming (future enhancement):
   "voice": {
     "accent": "british",
     "language": "en",
-    "speed": "normal"
+    "speed": "normal",
+    "code_switching": {
+      "enabled": false
+    }
   }
 }
 ```
 
-### Example 2: French Assistant
+### Example 2: French Assistant with Code-Switching
 
 ```json
 {
   "name": "Marie",
-  "system_prompt": "Tu es Marie, une assistante IA française...",
-  "language": "fr",
+  "system_prompt": "Tu es Marie, une assistante IA française qui parle anglais mais aime utiliser des expressions françaises...",
+  "language": "en",
   "voice": {
     "accent": "french",
-    "language": "fr",
-    "speed": "normal"
+    "language": "en",
+    "speed": "normal",
+    "code_switching": {
+      "enabled": true,
+      "percentage": 15,
+      "native_language": "fr"
+    }
   }
 }
 ```
 
-### Example 3: Multi-lingual Support
+**Marie's responses will include natural French expressions:**
+- "Bonjour! How can I help you today?"
+- "Ah, bien sûr! Let me check that for you..."
+- "C'est parfait! I found what you need..."
+- "Voilà! Here are the results, you see?"
+
+### Example 3: Arabic Assistant with Cultural Authenticity
 
 ```json
 {
-  "name": "Polyglot",
-  "system_prompt": "You are a multilingual assistant...",
+  "name": "Aisha",
+  "system_prompt": "You are Aisha, a helpful assistant who bridges cultures...",
   "language": "en",
   "voice": {
     "accent": "american",
     "language": "en",
-    "speed": "normal"
+    "speed": "normal",
+    "code_switching": {
+      "enabled": true,
+      "percentage": 12,
+      "native_language": "ar"
+    }
   }
 }
 ```
+
+**Aisha's responses feel culturally authentic:**
+- "Marhaba! Welcome, how may I assist you?"
+- "Inshallah, we'll have this resolved soon..."
+- "Mashallah! That's excellent progress..."
+- "Khalas, it's done now!"
+
+### Example 4: German Tech Assistant
+
+```json
+{
+  "name": "Klaus",
+  "system_prompt": "You are Klaus, a precise German engineering assistant...",
+  "language": "en",
+  "voice": {
+    "accent": "german",
+    "language": "en",
+    "speed": "normal",
+    "code_switching": {
+      "enabled": true,
+      "percentage": 10,
+      "native_language": "de"
+    }
+  }
+}
+```
+
+**Klaus sounds authentically German:**
+- "Ja, I can help with that technical issue..."
+- "Ach so! Now I understand the problem..."
+- "Wunderbar! The solution works perfectly..."
+- "Genau! That's exactly right..."
 
 ## Contributing
 
