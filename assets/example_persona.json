@@ -48,6 +48,12 @@
         "language": "en",
         "speed": "normal",
         "pitch": "normal",
+        "code_switching": {
+            "enabled": false,
+            "percentage": 10,
+            "native_language": "fr",
+            "_comment": "When enabled, mixes native language words into English responses for authenticity. Percentage (1-30) controls frequency. Examples: French speaker says 'Oui, bien sûr!', German says 'Ja, natürlich!', Arabic says 'Inshallah', etc."
+        },
         "_comment": "Supported accents: american, british, australian, indian, canadian, irish, french, german, spanish, mexican, italian, portuguese, brazilian, etc."
     },
     "_comment": "Customize this file by replacing placeholder text with your desired assistant personality. Save as 'persona.json' for use."

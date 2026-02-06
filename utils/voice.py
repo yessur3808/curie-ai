@@ -193,23 +193,32 @@ async def text_to_speech(
     voice_config: Optional[Dict[str, Any]] = None
 ) -> bool:
     """
-    Convert text to speech audio file with accent support.
+    Convert text to speech audio file with accent support and code-switching.
     
     Args:
         text: Text to convert
         output_path: Path to save audio file
-        voice_config: Voice configuration from persona (accent, language, speed, etc.)
+        voice_config: Voice configuration from persona (accent, language, speed, code-switching, etc.)
                      Format: {
                          'accent': 'british',  # or 'american', 'indian', etc.
                          'language': 'en',     # base language
                          'speed': 'normal',    # 'slow', 'normal', 'fast'
-                         'pitch': 'normal'     # future: pitch adjustment
+                         'pitch': 'normal',    # future: pitch adjustment
+                         'code_switching': {
+                             'enabled': True,
+                             'percentage': 15,
+                             'native_language': 'fr'
+                         }
                      }
         
     Returns:
         True if successful, False otherwise
     """
     try:
+        # Apply code-switching if enabled
+        if voice_config:
+            text = apply_code_switching(text, voice_config)
+        
         return await text_to_speech_gtts(text, output_path, voice_config)
     except ImportError:
         logger.error("gTTS not available for text-to-speech")
@@ -332,17 +341,164 @@ def get_voice_config_from_persona(persona: Dict[str, Any]) -> Dict[str, Any]:
         persona: Persona dictionary
         
     Returns:
-        Voice configuration dictionary with accent, language, speed, etc.
+        Voice configuration dictionary with accent, language, speed, code-switching, etc.
     """
     voice_config = persona.get('voice', {})
     
     # Provide sensible defaults
-    return {
+    config = {
         'accent': voice_config.get('accent', 'american'),
         'language': voice_config.get('language', persona.get('language', 'en')),
         'speed': voice_config.get('speed', 'normal'),
         'pitch': voice_config.get('pitch', 'normal'),
     }
+    
+    # Add code-switching configuration if present
+    code_switching = voice_config.get('code_switching', {})
+    if isinstance(code_switching, dict):
+        config['code_switching'] = {
+            'enabled': code_switching.get('enabled', False),
+            'percentage': max(1, min(30, code_switching.get('percentage', 10))),  # Clamp 1-30
+            'native_language': code_switching.get('native_language', 'fr')
+        }
+    else:
+        config['code_switching'] = {
+            'enabled': False,
+            'percentage': 10,
+            'native_language': 'fr'
+        }
+    
+    return config
+
+
+# Common code-switching expressions by language
+CODE_SWITCHING_PHRASES = {
+    'fr': {  # French
+        'greetings': ['Bonjour', 'Salut', 'Bonsoir', 'Oui', 'Non', 'Merci', 'S\'il vous plaît'],
+        'exclamations': ['Ah bon!', 'Mais oui!', 'C\'est vrai!', 'Bien sûr!', 'Voilà!', 'Eh bien'],
+        'fillers': ['alors', 'donc', 'eh bien', 'tu vois', 'vous savez', 'quoi'],
+        'phrases': ['C\'est la vie', 'Bon courage', 'Comme ci comme ça', 'Déjà vu']
+    },
+    'de': {  # German
+        'greetings': ['Guten Tag', 'Hallo', 'Tschüss', 'Ja', 'Nein', 'Danke', 'Bitte'],
+        'exclamations': ['Ach so!', 'Genau!', 'Natürlich!', 'Wunderbar!', 'Prima!', 'Ach ja'],
+        'fillers': ['also', 'ja', 'naja', 'doch', 'eben', 'halt'],
+        'phrases': ['Auf Wiedersehen', 'Gute Nacht', 'Viel Glück', 'Prost']
+    },
+    'es': {  # Spanish
+        'greetings': ['Hola', 'Buenos días', 'Adiós', 'Sí', 'No', 'Gracias', 'Por favor'],
+        'exclamations': ['¡Claro!', '¡Por supuesto!', '¡Exacto!', '¡Perfecto!', '¡Vale!', 'Bueno'],
+        'fillers': ['pues', 'bueno', 'entonces', 'sabes', 'o sea', 'vale'],
+        'phrases': ['Qué pasa', 'No pasa nada', 'Hasta luego', 'Mucho gusto']
+    },
+    'it': {  # Italian
+        'greetings': ['Ciao', 'Buongiorno', 'Arrivederci', 'Sì', 'No', 'Grazie', 'Prego'],
+        'exclamations': ['Certo!', 'Perfetto!', 'Bene!', 'Bravissimo!', 'Ecco!', 'Allora'],
+        'fillers': ['allora', 'dunque', 'cioè', 'insomma', 'dai', 'boh'],
+        'phrases': ['Come stai', 'Va bene', 'Mamma mia', 'Che bello']
+    },
+    'ar': {  # Arabic (transliterated)
+        'greetings': ['Salam', 'Marhaba', 'Shukran', 'Afwan', 'Na\'am', 'La'],
+        'exclamations': ['Yalla!', 'Mashallah!', 'Inshallah!', 'Alhamdulillah!', 'Wallah!', 'Khalas'],
+        'fillers': ['yani', 'khalas', 'akeed', 'tab', 'walla', 'sah'],
+        'phrases': ['Inshallah', 'Mashallah', 'Ma\'alesh', 'Yalla habibi']
+    },
+    'hi': {  # Hindi (transliterated)
+        'greetings': ['Namaste', 'Shukriya', 'Dhanyavaad', 'Haan', 'Nahi', 'Accha'],
+        'exclamations': ['Arre!', 'Acha!', 'Bilkul!', 'Zaroor!', 'Shabash!', 'Wah'],
+        'fillers': ['accha', 'haan', 'nahi', 'yaar', 'bhai', 'matlab'],
+        'phrases': ['Koi baat nahi', 'Theek hai', 'Chalo', 'Bas']
+    },
+    'pt': {  # Portuguese
+        'greetings': ['Olá', 'Bom dia', 'Tchau', 'Sim', 'Não', 'Obrigado', 'Por favor'],
+        'exclamations': ['Claro!', 'Exato!', 'Perfeito!', 'Ótimo!', 'Puxa!', 'Nossa'],
+        'fillers': ['então', 'né', 'pois', 'sabe', 'tipo', 'enfim'],
+        'phrases': ['Tudo bem', 'Que legal', 'Valeu', 'Beleza']
+    },
+    'ru': {  # Russian (transliterated)
+        'greetings': ['Privet', 'Zdrastvuyte', 'Spasibo', 'Pozhaluysta', 'Da', 'Net'],
+        'exclamations': ['Konechno!', 'Tochno!', 'Otlichno!', 'Molodets!', 'Nu!', 'Vot'],
+        'fillers': ['nu', 'vot', 'tak', 'znachit', 'prosto', 'kak-to'],
+        'phrases': ['Do svidaniya', 'Khorosho', 'Oy bozhe moy', 'Nichevo']
+    },
+    'ja': {  # Japanese (romanized)
+        'greetings': ['Konnichiwa', 'Arigatou', 'Sumimasen', 'Hai', 'Iie', 'Onegaishimasu'],
+        'exclamations': ['Sou desu ne!', 'Naruhodo!', 'Sugoi!', 'Yokatta!', 'Maa!', 'Ano'],
+        'fillers': ['ne', 'ano', 'etto', 'demo', 'sou', 'maa'],
+        'phrases': ['Ganbatte', 'Omedetou', 'Yoroshiku', 'Ja ne']
+    },
+    'zh': {  # Chinese (pinyin)
+        'greetings': ['Nǐ hǎo', 'Xièxiè', 'Bù kèqì', 'Shì', 'Bù shì', 'Qǐng'],
+        'exclamations': ['Duì!', 'Hǎo!', 'Tài hǎo le!', 'Zhēn de!', 'Ò!', 'Āi'],
+        'fillers': ['nà', 'jiù', 'duì', 'ma', 'ne', 'ba'],
+        'phrases': ['Zàijiàn', 'Méi guānxi', 'Duìbuqǐ', 'Hǎo ba']
+    }
+}
+
+
+def apply_code_switching(text: str, voice_config: Dict[str, Any]) -> str:
+    """
+    Apply code-switching to text by mixing in native language expressions.
+    This adds authenticity and cultural charm to the response.
+    
+    Args:
+        text: Original text in English
+        voice_config: Voice configuration with code-switching settings
+        
+    Returns:
+        Text with code-switched expressions mixed in
+    """
+    import random
+    
+    # Check if code-switching is enabled
+    code_switching = voice_config.get('code_switching', {})
+    if not code_switching.get('enabled', False):
+        return text
+    
+    native_lang = code_switching.get('native_language', 'fr')
+    percentage = code_switching.get('percentage', 10)
+    
+    # Get phrases for the native language
+    phrases = CODE_SWITCHING_PHRASES.get(native_lang, {})
+    if not phrases:
+        return text  # Language not supported yet
+    
+    # Collect all available phrases
+    all_phrases = []
+    for category in phrases.values():
+        all_phrases.extend(category)
+    
+    if not all_phrases:
+        return text
+    
+    # Split text into sentences
+    import re
+    sentences = re.split(r'([.!?]+\s+)', text)
+    
+    # Determine how many insertions to make based on percentage
+    # percentage is 1-30, representing how frequently to insert (roughly per sentence)
+    num_sentences = len([s for s in sentences if len(s.strip()) > 10])
+    num_insertions = max(1, int(num_sentences * percentage / 100))
+    
+    # Randomly select sentences to modify (avoid consecutive modifications)
+    sentence_indices = [i for i, s in enumerate(sentences) if len(s.strip()) > 10]
+    if sentence_indices:
+        selected_indices = random.sample(
+            sentence_indices, 
+            min(num_insertions, len(sentence_indices))
+        )
+        
+        for idx in selected_indices:
+            phrase = random.choice(all_phrases)
+            # Add phrase at beginning or end of sentence
+            if random.random() < 0.5:
+                # Beginning
+                sentences[idx] = f"{phrase}, {sentences[idx]}"
+            else:
+                # End (before punctuation)
+                sentences[idx] = sentences[idx].rstrip() + f", {phrase}"
+    
+    return ''.join(sentences)
 
 
 def detect_accent_from_text(text: str) -> Optional[str]:
