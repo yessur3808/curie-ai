@@ -277,7 +277,7 @@ pip install -r requirements.txt
 - `pydub>=0.25.1` - Audio processing
 - `SpeechRecognition>=3.12.0` - Alternative STT
 - `websockets>=14.1` - WebSocket support
-- `python-multipart>=0.0.20` - File uploads
+- `python-multipart>=0.0.22` - File uploads
 
 ## Troubleshooting
 
