@@ -276,7 +276,6 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
         )
 
         # Try to use cached model first
-        selected_model = None
         llama_model = None
         
         # Check if preferred model is already cached
