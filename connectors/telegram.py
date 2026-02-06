@@ -157,43 +157,43 @@ async def handle_voice_message(update: Update, persona: dict) -> str:
     Returns:
         Transcribed text or empty string if transcription fails
     """
+    # Import voice utilities and logger
+    from utils.voice import transcribe_audio, get_voice_config_from_persona
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Prepare audio path for temporary file
+    voice = update.message.voice
+    audio_path = f"/tmp/telegram_voice_{voice.file_id}.ogg"
+
     try:
-        # Import voice utilities
-        from utils.voice import transcribe_audio, get_voice_config_from_persona
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        # Get voice file
-        voice = update.message.voice
+        # Get voice file and download to temporary location
         voice_file = await voice.get_file()
-        
-        # Download to temporary location
-        audio_path = f"/tmp/telegram_voice_{voice.file_id}.ogg"
         await voice_file.download_to_drive(audio_path)
-        
+
         logger.info(f"Downloaded voice message: {audio_path}")
-        
+
         # Get voice config from persona
         voice_config = get_voice_config_from_persona(persona)
         accent = voice_config.get('accent')
         language = voice_config.get('language', 'en')
-        
+
         # Transcribe audio to text with accent awareness
         transcribed_text = await transcribe_audio(
-            audio_path, 
+            audio_path,
             language=language,
             accent=accent,
-            auto_detect=True
+            auto_detect=True,
         )
-        
-        # Clean up temporary file
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-        
+
         return transcribed_text or ""
     except Exception as e:
         logger.error(f"Error processing voice message: {e}")
         return ""
+    finally:
+        # Clean up temporary file regardless of success or failure
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
