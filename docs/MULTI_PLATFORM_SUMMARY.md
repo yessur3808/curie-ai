@@ -163,7 +163,7 @@ Text Input → Persona Config → gTTS with Accent → Audio Output
 
 ### API Enhancements
 - `websockets==14.1` - WebSocket support
-- `python-multipart==0.0.20` - File upload support
+- `python-multipart==0.0.22` - File upload support
 
 ## Testing Status
 
