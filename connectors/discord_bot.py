@@ -73,25 +73,26 @@ async def handle_voice_attachment(attachment) -> Optional[str]:
     Returns:
         Transcribed text or None if transcription fails
     """
+    # Prepare temporary audio file path
+    audio_path = f"/tmp/discord_audio_{attachment.id}.{attachment.filename.split('.')[-1]}"
     try:
         # Import voice utilities
         from utils.voice import transcribe_audio
         
         # Download audio file
-        audio_path = f"/tmp/discord_audio_{attachment.id}.{attachment.filename.split('.')[-1]}"
         await attachment.save(audio_path)
         
         # Transcribe audio to text
         transcribed_text = await transcribe_audio(audio_path)
         
-        # Clean up temporary file
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-        
         return transcribed_text
     except Exception as e:
         logger.error(f"Error processing voice attachment: {e}")
         return None
+    finally:
+        # Clean up temporary file regardless of success or failure
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
 
 
 class DiscordBot(commands.Bot):
