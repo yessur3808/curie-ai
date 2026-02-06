@@ -134,7 +134,8 @@ class ChatWorkflow:
         'external_chat_id': str or int,
         'message_id': str or int,
         'text': str,
-        'timestamp': datetime or float (unix timestamp)
+        'timestamp': datetime or float (unix timestamp),
+        'internal_id': str (optional) - pre-identified internal user ID (bypasses lookup if provided)
     }
     
     Output format:
@@ -199,7 +200,7 @@ class ChatWorkflow:
         This is the ONLY method connectors should call.
         
         Args:
-            normalized_input: {platform, external_user_id, external_chat_id, message_id, text, timestamp}
+            normalized_input: {platform, external_user_id, external_chat_id, message_id, text, timestamp, internal_id (optional)}
         
         Returns:
             {text, timestamp, model_used, processing_time_ms}
@@ -224,11 +225,14 @@ class ChatWorkflow:
             }
         
         # Get internal user ID for persistence
-        internal_id = UserManager.get_or_create_user_internal_id(
-            channel=platform,
-            external_id=str(external_user_id),
-            secret_username=f"{platform}_{external_user_id}"
-        )
+        # If internal_id is provided (e.g., via /identify), use it; otherwise lookup/create
+        internal_id = normalized_input.get('internal_id')
+        if not internal_id:
+            internal_id = UserManager.get_or_create_user_internal_id(
+                channel=platform,
+                external_id=str(external_user_id),
+                secret_username=f"{platform}_{external_user_id}"
+            )
         
         # Check deduplication cache
         cached_response = self.dedupe_cache.get(platform, str(external_chat_id), message_id)
