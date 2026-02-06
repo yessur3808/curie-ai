@@ -119,7 +119,7 @@ Text Input → Persona Config → gTTS with Accent → Audio Output
    - File extension allowlisting
    - Filename sanitization using regex
    - Path traversal prevention
-   - File size limits (implicit via FastAPI)
+   - File size limits (25MB enforced with chunked reading)
 
 2. **Path Security**
    - Real path verification
