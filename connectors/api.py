@@ -171,9 +171,18 @@ async def websocket_chat(websocket: WebSocket):
         active_connections.remove(websocket)
         logger.info("WebSocket client disconnected")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        if websocket in active_connections:
-            active_connections.remove(websocket)
+        logger.error(f"WebSocket error: {e}", exc_info=True)
+        try:
+            # Attempt to notify client about the internal error
+            await websocket.send_json({"error": "Internal server error"})
+            # Ensure the WebSocket is properly closed
+            await websocket.close()
+        except Exception:
+            # If sending the error or closing fails, just log and continue cleanup
+            logger.debug("Failed to send error message or close WebSocket", exc_info=True)
+        finally:
+            if websocket in active_connections:
+                active_connections.remove(websocket)
 
 
 @app.post("/transcribe")
