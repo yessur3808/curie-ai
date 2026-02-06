@@ -14,11 +14,8 @@ from dotenv import load_dotenv
 
 try:
     from whatsapp import WhatsApp
-    from whatsapp.ext import MessageHandler, filters as wa_filters
 except ImportError:
     WhatsApp = None
-    MessageHandler = None
-    wa_filters = None
 
 from agent.chat_workflow import ChatWorkflow
 from utils.persona import load_persona

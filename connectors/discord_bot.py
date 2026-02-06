@@ -133,7 +133,11 @@ class DiscordBot(commands.Bot):
         try:
             # Extract message details
             discord_user_id = message.author.id
-            discord_username = f"{message.author.name}#{message.author.discriminator}"
+            # Handle new Discord username system (discriminator is now '0' for new usernames)
+            if message.author.discriminator == '0':
+                discord_username = message.author.name
+            else:
+                discord_username = f"{message.author.name}#{message.author.discriminator}"
             message_id = message.id
             channel_id = message.channel.id
             
