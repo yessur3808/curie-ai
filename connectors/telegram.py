@@ -30,6 +30,34 @@ def set_workflow(workflow: ChatWorkflow):
     _workflow = workflow
 
 
+def get_internal_id(tg_user_id: int, telegram_username: str, platform: str = 'telegram') -> str:
+    """
+    Get internal user ID, respecting /identify command if used.
+    
+    If the user has identified themselves via /identify command, use that internal_id.
+    Otherwise, fall back to get_or_create_user_internal_id.
+    
+    Args:
+        tg_user_id: Telegram user ID
+        telegram_username: Telegram username (or fallback)
+        platform: Platform name (default: 'telegram')
+    
+    Returns:
+        Internal user ID (UUID string)
+    """
+    # Check if user has identified themselves
+    if tg_user_id in user_session_map:
+        return user_session_map[tg_user_id]
+    
+    # Fall back to standard lookup/creation
+    return UserManager.get_or_create_user_internal_id(
+        channel=platform,
+        external_id=tg_user_id,
+        secret_username=telegram_username,
+        updated_by='telegram_bot'
+    )
+
+
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _workflow:
         await update.message.reply_text("❌ System not initialized.")
@@ -70,14 +98,9 @@ async def handle_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = args[0]
     value = " ".join(args[1:])
     
-    # Get internal ID
+    # Get internal ID (respects /identify)
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
-    internal_id = UserManager.get_or_create_user_internal_id(
-        channel='telegram',
-        external_id=tg_user_id,
-        secret_username=telegram_username,
-        updated_by='telegram_bot'
-    )
+    internal_id = get_internal_id(tg_user_id, telegram_username)
     
     # Save fact
     UserManager.update_user_profile(internal_id, {key: value})
@@ -106,12 +129,7 @@ async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     tg_user_id = update.message.from_user.id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
-    internal_id = UserManager.get_or_create_user_internal_id(
-        channel='telegram',
-        external_id=tg_user_id,
-        secret_username=telegram_username,
-        updated_by='telegram_bot'
-    )
+    internal_id = get_internal_id(tg_user_id, telegram_username)
 
     if not is_master_user(internal_id):
         await update.message.reply_text("❌ You are not authorized to use this command.")
@@ -137,6 +155,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_id = update.message.message_id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
     
+    # Get internal ID (respects /identify if used)
+    internal_id = get_internal_id(tg_user_id, telegram_username)
+    
     # Normalize to standard ChatWorkflow format
     normalized_input = {
         'platform': 'telegram',
@@ -144,7 +165,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'external_chat_id': update.message.chat_id,
         'message_id': message_id,
         'text': user_message,
-        'timestamp': datetime.datetime.utcnow()
+        'timestamp': datetime.datetime.utcnow(),
+        'internal_id': internal_id  # Pass identified internal_id to workflow
     }
     
     # Process through workflow
