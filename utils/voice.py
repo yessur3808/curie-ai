@@ -153,40 +153,45 @@ async def transcribe_with_speech_recognition(
     """
     import speech_recognition as sr
     from pydub import AudioSegment
+
+    loop = asyncio.get_running_loop()
     
     # Use accent-specific language code if available
     if accent and accent.lower() in ACCENT_LANGUAGE_MAP:
         language = ACCENT_LANGUAGE_MAP[accent.lower()]
         logger.info(f"Using accent-specific language code: {language}")
     
-    # Convert audio to WAV if needed
+    # Convert audio to WAV if needed (in executor to avoid blocking event loop)
     audio_ext = Path(audio_path).suffix.lower()
     if audio_ext != '.wav':
         logger.info(f"Converting {audio_ext} to WAV")
-        audio = AudioSegment.from_file(audio_path)
-        wav_path = audio_path.rsplit('.', 1)[0] + '.wav'
-        audio.export(wav_path, format='wav')
-        audio_path = wav_path
-    
-    # Initialize recognizer
-    recognizer = sr.Recognizer()
-    
-    # Load audio file
-    with sr.AudioFile(audio_path) as source:
-        audio_data = recognizer.record(source)
-    
-    # Transcribe using Google Speech Recognition with accent-aware language code
-    try:
-        text = recognizer.recognize_google(audio_data, language=language)
-        return text
-    except sr.UnknownValueError:
-        logger.error("Could not understand audio")
-        return ""
-    except sr.RequestError as e:
-        logger.error(f"Speech recognition service error: {e}")
-        return ""
 
+        def _convert_to_wav(path: str) -> str:
+            audio = AudioSegment.from_file(path)
+            wav_path = path.rsplit('.', 1)[0] + '.wav'
+            audio.export(wav_path, format='wav')
+            return wav_path
 
+        audio_path = await loop.run_in_executor(None, _convert_to_wav, audio_path)
+    
+    def _recognize(path: str, lang: str) -> str:
+        # Initialize recognizer and perform recognition in executor
+        recognizer = sr.Recognizer()
+        try:
+            with sr.AudioFile(path) as source:
+                audio_data = recognizer.record(source)
+            text = recognizer.recognize_google(audio_data, language=lang)
+            return text
+        except sr.UnknownValueError:
+            logger.error("Could not understand audio")
+            return ""
+        except sr.RequestError as e:
+            logger.error(f"Speech recognition service error: {e}")
+            return ""
+
+    # Run speech recognition in executor to avoid blocking event loop
+    text = await loop.run_in_executor(None, _recognize, audio_path, language)
+    return text
 async def text_to_speech(
     text: str, 
     output_path: str, 
