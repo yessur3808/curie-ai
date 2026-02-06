@@ -17,21 +17,7 @@
 - Applies to both model preloading and lazy-loading during inference
 
 ### 4. Environment Configuration (.env)
-Current settings:
-```
-RUN_TELEGRAM=true
-RUN_API=true
-RUN_CODER=false
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-LLM_MODELS=qwen2.5-3b-instruct-Q4_K_M.gguf,Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf,Meta-Llama-3-70B-Instruct-Q4_K_M.gguf
-LLM_THREADS=18
-POSTGRES_HOST=192.168.50.183
-POSTGRES_PORT=5432
-POSTGRES_DB=assistant_db
-MONGODB_URI=mongodb://192.168.50.183:27017/
-```
-
-> **⚠️ Security Note:** A real Telegram bot token was previously committed here and must be treated as compromised. The token has been replaced with a placeholder. **You must regenerate/rotate your Telegram bot token** by contacting @BotFather on Telegram before using this configuration.
+All environment variables must be configured in your `.env` file. See `.env.example` in the repository root for a complete list of required and optional configuration options.
 
 ## Running with PM2
 
