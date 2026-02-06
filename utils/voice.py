@@ -278,27 +278,34 @@ async def text_to_speech_gtts(
     logger.info(f"Converting text to speech: {len(text)} characters")
     logger.info(f"Voice config: accent={accent}, language={profile['lang']}, tld={profile.get('tld', 'com')}, slow={slow}")
     
-    # Create TTS object with accent-specific settings
-    try:
-        tts = gTTS(
-            text=text, 
-            lang=profile['lang'], 
-            slow=slow,
-            tld=profile.get('tld', 'com')  # TLD controls accent
-        )
-        
-        # Save to file
-        tts.save(output_path)
-        
+    # Create TTS object and save to file in executor to avoid blocking event loop
+    loop = asyncio.get_running_loop()
+    
+    def _create_and_save_tts():
+        try:
+            tts = gTTS(
+                text=text, 
+                lang=profile['lang'], 
+                slow=slow,
+                tld=profile.get('tld', 'com')  # TLD controls accent
+            )
+            # Save to file
+            tts.save(output_path)
+            return True
+        except Exception as e:
+            logger.error(f"gTTS error: {e}")
+            # Fallback to basic settings
+            logger.info("Falling back to basic TTS without accent")
+            tts = gTTS(text=text, lang=profile['lang'], slow=slow)
+            tts.save(output_path)
+            return True
+    
+    success = await loop.run_in_executor(None, _create_and_save_tts)
+    
+    if success:
         logger.info(f"Speech saved to: {output_path}")
-        return True
-    except Exception as e:
-        logger.error(f"gTTS error: {e}")
-        # Fallback to basic settings
-        logger.info("Falling back to basic TTS without accent")
-        tts = gTTS(text=text, lang=profile['lang'], slow=slow)
-        tts.save(output_path)
-        return True
+    
+    return success
 
 
 def get_audio_duration(audio_path: str) -> float:
