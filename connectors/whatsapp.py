@@ -5,7 +5,6 @@ Receives WhatsApp events, normalizes to standard format, calls ChatWorkflow.
 Supports text messages, voice messages, and media.
 """
 
-import asyncio
 import datetime
 import os
 import logging
