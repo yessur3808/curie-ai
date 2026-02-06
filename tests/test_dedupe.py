@@ -218,6 +218,43 @@ def test_dedupe_cache_concurrent_same_key():
     print("✓ test_dedupe_cache_concurrent_same_key passed")
 
 
+def test_dedupe_cache_expired_key_fifo_order():
+    """Test that expired keys re-inserted maintain proper FIFO eviction order."""
+    cache = DedupeCache(ttl_seconds=100, max_size=3)
+    
+    now = 0.0
+    
+    # Add 3 keys at well-spaced times
+    # Cache order: key1 (now), key2 (now+5), key3 (now+10)
+    assert cache.check("key1", now) is False
+    assert cache.check("key2", now + 5) is False
+    assert cache.check("key3", now + 10) is False
+    assert cache.size() == 3
+    
+    # At now+101, key1 is expired (101 seconds old), but key2 and key3 are not (96 and 91 seconds old)
+    # Re-check key1 - should be treated as new and moved to end
+    # After deletion and re-insertion, cache order becomes: key2, key3, key1
+    assert cache.check("key1", now + 101) is False, "Expired key1 should be treated as new"
+    assert cache.size() == 3
+    
+    # At now+102, add key4 - should evict key2 (oldest in FIFO order)
+    # Cache order becomes: key3, key1, key4
+    assert cache.check("key4", now + 102) is False
+    assert cache.size() == 3
+    
+    # Verify eviction order at now+103: key2 should be gone, others should remain
+    # All remaining keys should still be valid (< 100 seconds old):
+    #   key3: 93s old (< 100), key1: 2s old, key4: 1s old
+    assert cache.check("key3", now + 103) is True, "key3 should still be in cache (93s old)"
+    assert cache.check("key1", now + 103) is True, "key1 (re-inserted) should still be in cache (2s old)"
+    assert cache.check("key4", now + 103) is True, "key4 should still be in cache (1s old)"
+    
+    # key2 should have been evicted
+    assert cache.check("key2", now + 103) is False, "key2 should have been evicted (treated as new)"
+    
+    print("✓ test_dedupe_cache_expired_key_fifo_order passed")
+
+
 def run_all_tests():
     """Run all tests using automatic test discovery."""
     # Discover all test functions in the current module
