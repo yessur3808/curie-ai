@@ -1,7 +1,6 @@
 import socket
 import subprocess
 import sys
-import os
 
 def is_port_in_use(port):
     """Check if a port is in use on localhost."""
