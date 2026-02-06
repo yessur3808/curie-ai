@@ -20,6 +20,22 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+# Import Discord connector (optional - may not be installed)
+try:
+    from connectors.discord_bot import start_discord_bot, set_workflow as set_discord_workflow
+    DISCORD_AVAILABLE = True
+except ImportError:
+    DISCORD_AVAILABLE = False
+    logger.warning("Discord connector not available (discord.py not installed)")
+
+# Import WhatsApp connector (optional - may not be installed)
+try:
+    from connectors.whatsapp import start_whatsapp_bot, set_workflow as set_whatsapp_workflow
+    WHATSAPP_AVAILABLE = True
+except ImportError:
+    WHATSAPP_AVAILABLE = False
+    logger.warning("WhatsApp connector not available (whatsapp-web.py not installed)")
+
 def configure_logging():
     """
     Configure logging for the application at startup.
@@ -87,6 +103,40 @@ def run_telegram(workflow: ChatWorkflow):
     start_telegram_bot(workflow)
 
 
+def run_discord(workflow: ChatWorkflow):
+    """Run Discord connector."""
+    if not DISCORD_AVAILABLE:
+        logger.error("Discord connector is not available. Install discord.py first.")
+        return
+    
+    print("Starting Discord connector...")
+    
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    start_discord_bot(workflow)
+
+
+def run_whatsapp(workflow: ChatWorkflow):
+    """Run WhatsApp connector."""
+    if not WHATSAPP_AVAILABLE:
+        logger.error("WhatsApp connector is not available. Install whatsapp-web.py first.")
+        return
+    
+    print("Starting WhatsApp connector...")
+    
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    start_whatsapp_bot(workflow)
+
+
 
 def run_api():
     print("Starting API (FastAPI) connector on http://0.0.0.0:8000 ...")
@@ -124,6 +174,8 @@ def run_coder_batch(goal, files_to_edit, repo_path, branch_name):
 def parse_args():
     parser = argparse.ArgumentParser(description="Start Curie AI Connectors")
     parser.add_argument('--telegram', action='store_true', help="Run Telegram connector")
+    parser.add_argument('--discord', action='store_true', help="Run Discord connector")
+    parser.add_argument('--whatsapp', action='store_true', help="Run WhatsApp connector")
     parser.add_argument('--api', action='store_true', help="Run API connector (FastAPI)")
     parser.add_argument('--coder', action='store_true', help="Run coder/PR skill (interactive)")
     parser.add_argument('--coder-batch', action='store_true', help="Run coder in batch mode (non-interactive)")
@@ -140,18 +192,22 @@ def parse_args():
 # --- Config Determination ---
 def determine_what_to_run(args):
     run_telegram_env = os.getenv("RUN_TELEGRAM", "false").lower() == "true"
+    run_discord_env = os.getenv("RUN_DISCORD", "false").lower() == "true"
+    run_whatsapp_env = os.getenv("RUN_WHATSAPP", "false").lower() == "true"
     run_api_env = os.getenv("RUN_API", "false").lower() == "true"
     run_coder_env = os.getenv("RUN_CODER", "false").lower() == "true"
 
     run_telegram_flag = args.all or args.telegram or run_telegram_env
+    run_discord_flag = args.all or args.discord or run_discord_env
+    run_whatsapp_flag = args.all or args.whatsapp or run_whatsapp_env
     run_api_flag = args.all or args.api or run_api_env
     run_coder_flag = args.all or args.coder or run_coder_env
     run_coder_batch_flag = args.coder_batch
 
-    if not (run_telegram_flag or run_api_flag or run_coder_flag or run_coder_batch_flag):
-        print("Nothing to run! Use --telegram, --api, --coder, --coder-batch, --all or set RUN_* in .env.")
+    if not (run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag or run_coder_flag or run_coder_batch_flag):
+        print("Nothing to run! Use --telegram, --discord, --whatsapp, --api, --coder, --coder-batch, --all or set RUN_* in .env.")
         sys.exit(1)
-    return run_telegram_flag, run_api_flag, run_coder_flag, run_coder_batch_flag
+    return run_telegram_flag, run_discord_flag, run_whatsapp_flag, run_api_flag, run_coder_flag, run_coder_batch_flag
 
 def init_llm_and_memory(no_init):
     if not no_init:
@@ -230,7 +286,7 @@ def main():
     configure_logging()
     
     args = parse_args()
-    run_telegram_flag, run_api_flag, run_coder_flag, run_coder_batch_flag = determine_what_to_run(args)
+    run_telegram_flag, run_discord_flag, run_whatsapp_flag, run_api_flag, run_coder_flag, run_coder_batch_flag = determine_what_to_run(args)
     init_llm_and_memory(args.no_init)
     
     # Load persona and initialize ChatWorkflow
@@ -240,14 +296,39 @@ def main():
     logger.info(f"✅ ChatWorkflow initialized with persona: {workflow.persona.get('name')}")
     
     # Share workflow with connectors
-    if run_telegram_flag or run_api_flag:
+    if run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag:
         set_telegram_workflow(workflow)
         set_api_workflow(workflow)
+        if DISCORD_AVAILABLE:
+            set_discord_workflow(workflow)
+        if WHATSAPP_AVAILABLE:
+            set_whatsapp_workflow(workflow)
 
     threads = []
+    
+    # Start Telegram bot (blocking)
     if run_telegram_flag:
         run_telegram(workflow) 
+    
+    # Start Discord bot in thread
+    if run_discord_flag:
+        if DISCORD_AVAILABLE:
+            t = threading.Thread(target=run_discord, args=(workflow,), daemon=True)
+            threads.append(t)
+            t.start()
+        else:
+            logger.error("Discord connector requested but not available")
+    
+    # Start WhatsApp bot in thread
+    if run_whatsapp_flag:
+        if WHATSAPP_AVAILABLE:
+            t = threading.Thread(target=run_whatsapp, args=(workflow,), daemon=True)
+            threads.append(t)
+            t.start()
+        else:
+            logger.error("WhatsApp connector requested but not available")
 
+    # Start API in thread
     if run_api_flag:
         t = threading.Thread(target=run_api, daemon=True)
         threads.append(t)

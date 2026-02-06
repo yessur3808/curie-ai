@@ -144,19 +144,82 @@ async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🧹 Your conversational memory has been cleared.")
 
 
+async def handle_voice_message(update: Update, persona: dict) -> str:
+    """
+    Handle voice message from Telegram.
+    Downloads the audio and converts it to text using speech recognition.
+    Uses persona voice config for accent-aware recognition.
+    
+    Args:
+        update: Telegram update object with voice message
+        persona: Persona dictionary with voice configuration
+        
+    Returns:
+        Transcribed text or empty string if transcription fails
+    """
+    try:
+        # Import voice utilities
+        from utils.voice import transcribe_audio, get_voice_config_from_persona
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Get voice file
+        voice = update.message.voice
+        voice_file = await voice.get_file()
+        
+        # Download to temporary location
+        audio_path = f"/tmp/telegram_voice_{voice.file_id}.ogg"
+        await voice_file.download_to_drive(audio_path)
+        
+        logger.info(f"Downloaded voice message: {audio_path}")
+        
+        # Get voice config from persona
+        voice_config = get_voice_config_from_persona(persona)
+        accent = voice_config.get('accent')
+        language = voice_config.get('language', 'en')
+        
+        # Transcribe audio to text with accent awareness
+        transcribed_text = await transcribe_audio(
+            audio_path, 
+            language=language,
+            accent=accent,
+            auto_detect=True
+        )
+        
+        # Clean up temporary file
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        
+        return transcribed_text or ""
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error processing voice message: {e}")
+        return ""
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Main message handler - normalize and process through ChatWorkflow."""
     if not _workflow:
         await update.message.reply_text("❌ System not initialized.")
         return
     
-    user_message = update.message.text
     tg_user_id = update.message.from_user.id
     message_id = update.message.message_id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
     
     # Get internal ID (respects /identify if used)
     internal_id = get_internal_id(tg_user_id, telegram_username)
+    
+    # Handle voice messages with persona-aware recognition
+    if update.message.voice:
+        user_message = await handle_voice_message(update, _workflow.persona)
+        if not user_message:
+            await update.message.reply_text("❌ Sorry, I couldn't understand the voice message.")
+            return
+        await update.message.reply_text(f"🎤 I heard: {user_message}")
+    else:
+        user_message = update.message.text
     
     # Normalize to standard ChatWorkflow format
     normalized_input = {
@@ -196,6 +259,7 @@ def start_telegram_bot(workflow: ChatWorkflow):
     app.add_handler(CommandHandler("remember", handle_remember))
     app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.VOICE, handle_message))  # Handle voice messages
 
     print("🤖 Telegram bot is running...")
     app.run_polling(drop_pending_updates=True)

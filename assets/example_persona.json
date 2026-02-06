@@ -43,5 +43,12 @@
     ],
     "language": "en",
     "default_temperature": 0.7,
+    "voice": {
+        "accent": "american",
+        "language": "en",
+        "speed": "normal",
+        "pitch": "normal",
+        "_comment": "Supported accents: american, british, australian, indian, canadian, irish, french, german, spanish, mexican, italian, portuguese, brazilian, etc."
+    },
     "_comment": "Customize this file by replacing placeholder text with your desired assistant personality. Save as 'persona.json' for use."
 }
