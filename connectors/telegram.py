@@ -6,6 +6,7 @@ Receives Telegram events, normalizes to standard format, calls ChatWorkflow.
 
 import datetime
 import os
+import logging
 from dotenv import load_dotenv
 
 from telegram import Update
@@ -17,6 +18,7 @@ from utils.session import set_busy_temporarily, clear_user_busy
 from memory import UserManager
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # Shared ChatWorkflow instance (initialized in main.py)
 _workflow = None
@@ -157,10 +159,8 @@ async def handle_voice_message(update: Update, persona: dict) -> str:
     Returns:
         Transcribed text or empty string if transcription fails
     """
-    # Import voice utilities and logger
+    # Import voice utilities
     from utils.voice import transcribe_audio, get_voice_config_from_persona
-    import logging
-    logger = logging.getLogger(__name__)
 
     # Prepare audio path for temporary file
     voice = update.message.voice
