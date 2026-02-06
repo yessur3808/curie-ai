@@ -1,34 +1,58 @@
 # C.U.R.I.E. - Clever Understanding and Reasoning Intelligent Entity
 
-Curie is an AI assistant that runs **locally** and interacts with users via Telegram.  
+Curie is an AI assistant that runs **locally** and interacts with users via **multiple platforms**.  
 It is inspired by conversational assistants like Jarvis from Iron Man, but runs fully on your hardware using state-of-the-art open local language models (no OpenAI account required).
 
 ## 🌟 Features
 
-- **Conversational AI** via Telegram
+- **Multi-Platform Support**: Telegram, Discord, WhatsApp, and RESTful/WebSocket API
+- **Voice Interface**: Accent-aware speech recognition and persona-based text-to-speech
+- **Conversational AI** with context and memory
 - **Local LLMs**: Runs Meta Llama 3/3.1 or other GGUF models (no cloud needed)
-- **Configurable Persona**: Customizable assistant personality via JSON
+- **Configurable Persona**: Customizable assistant personality via JSON with voice settings
 - **Memory Management**: Stores conversation history and context
 - **Database Integration**: PostgreSQL & MongoDB for data persistence
 - **Migration System**: Organized database versioning
 - **Utility Scripts**: Helper scripts for common operations
 - **Docker Support**: Containerized deployment ready
 
+## 📱 Supported Platforms
+
+| Platform | Text | Voice | Status |
+|----------|------|-------|--------|
+| **Telegram** | ✅ | ✅ | Stable |
+| **Discord** | ✅ | ✅ | Stable |
+| **WhatsApp** | ✅ | ✅ | Beta |
+| **REST API** | ✅ | ✅ | Stable |
+| **WebSocket** | ✅ | 🔜 | Stable |
+
+## 🎙️ Voice Features
+
+- **Speech-to-Text**: Powered by OpenAI Whisper with automatic language detection
+- **Text-to-Speech**: Google TTS with multi-accent support
+- **Accent Recognition**: Adapts to American, British, Indian, Australian, and more
+- **Persona-Based Voice**: Configure accent, language, and speaking style per persona
+
+See [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) for detailed voice configuration.
+
 ## 🏗️ High-Level Architecture
 
 ```
-┌────────────┐      ┌────────────┐      ┌─────────────┐
-│ Messaging  │─────▶│ Assistant  │─────▶│ Local LLM   │
-│ Platforms  │◀──── │ Back-End   │◀──── │ (.gguf, etc)│
-└─────┬──────┘      │ (Python)   │      └─────┬───────┘
-      │             │             │            │
-      │             └────┬────────┘            │
-      │                  │                     │
-      ▼                  ▼                     ▼
-Slack, Telegram,      Memory DB           Local actions
-WhatsApp, Voice       (e.g. SQLite,       (filesystem, web,
-API                   ChromaDB,           etc)
-                      LanceDB)
+┌────────────────┐      ┌────────────┐      ┌─────────────┐
+│ Messaging      │─────▶│ Assistant  │─────▶│ Local LLM   │
+│ Platforms      │◀──── │ Back-End   │◀──── │ (.gguf, etc)│
+│ • Telegram     │      │ (Python)   │      └─────┬───────┘
+│ • Discord      │      │             │            │
+│ • WhatsApp     │      └────┬────────┘            │
+│ • API/WS       │           │                     │
+└───────┬────────┘           │                     │
+        │                    ▼                     ▼
+        │              ┌──────────┐          ┌──────────┐
+        │              │ Memory   │          │  Voice   │
+        │              │ (Conv +  │          │Processing│
+        └──────────────│  User    │          │(STT/TTS) │
+                       │ Profile) │          └──────────┘
+                       └──────────┘
 ```
 
 
@@ -144,8 +168,10 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `TELEGRAM_BOT_TOKEN` | Your Telegram bot token from BotFather | `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11` |
+| `DISCORD_BOT_TOKEN` | Your Discord bot token from Developer Portal | `your_discord_bot_token_here` |
+| `WHATSAPP_SESSION_PATH` | Path to store WhatsApp session data | `./whatsapp_session` |
 | `LLM_MODELS` | Comma-separated list of GGUF model filenames | `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` |
-| `MASTER_USER_ID` | Telegram user ID with admin privileges | `123456789` |
+| `MASTER_USER_ID` | User ID with admin privileges | `123456789` |
 | `POSTGRES_HOST` | PostgreSQL database host | `localhost` |
 | `POSTGRES_PORT` | PostgreSQL database port | `5432` |
 | `POSTGRES_DB` | PostgreSQL database name | `assistant_db` |
@@ -153,6 +179,21 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 | `POSTGRES_PASSWORD` | PostgreSQL password | `your_pg_password` |
 | `MONGODB_URI` | MongoDB connection URI | `mongodb://localhost:27017/` |
 | `MONGODB_DB` | MongoDB database name | `assistant_db` |
+
+### Connector Flags
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `RUN_TELEGRAM` | Enable Telegram connector | `true` |
+| `RUN_DISCORD` | Enable Discord connector | `false` |
+| `RUN_WHATSAPP` | Enable WhatsApp connector | `false` |
+| `RUN_API` | Enable REST API connector | `true` |
+
+### Voice Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `WHISPER_MODEL` | Whisper model size (tiny, base, small, medium, large) | `base` |
 
 ### Optional Variables
 
@@ -216,12 +257,13 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 
 
 ## 🗺️ Roadmap
-- [ ] Voice interface integration
-- [ ] WhatsApp connector
-- [ ] Discord connector
-- [ ] Web dashboard
+- [x] Voice interface integration (✅ Completed)
+- [x] WhatsApp connector (✅ Completed)
+- [x] Discord connector (✅ Completed)
+- [x] Multi-platform support (✅ Completed)
+- [ ] Web dashboard / UI
 - [ ] Advanced memory management
-- [ ] Multi-user support
+- [ ] Enhanced multi-user support
 - [ ] Plugin system
 
 
