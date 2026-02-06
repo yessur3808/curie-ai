@@ -16,6 +16,9 @@ def get_postgres_process():
             if 'postgres' in line:
                 return line
     except subprocess.CalledProcessError:
+        # `lsof` exits with a non-zero status if no matching process is found.
+        # In that case, we simply treat it as "no Postgres process detected"
+        # and return None from this function.
         pass
     return None
 
