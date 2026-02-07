@@ -123,9 +123,13 @@ def main():
     # Load .env if present
     try:
         from dotenv import load_dotenv
-        load_dotenv()
-    except:
-        pass
+    except ImportError:
+        print(f"{YELLOW}⚠ python-dotenv is not installed; skipping .env loading.{RESET}")
+    else:
+        try:
+            load_dotenv()
+        except Exception as exc:
+            print(f"{YELLOW}⚠ Failed to load .env file: {exc}{RESET}")
     
     check_env_file()
     db_ok, missing_vars = check_database_config()
