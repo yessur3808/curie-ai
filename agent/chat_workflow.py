@@ -168,7 +168,7 @@ class ChatWorkflow:
     SPEAKER_TAG_PATTERN = re.compile(r'^\s*(?:User:|Curie:|Assistant:|Coder:|System:)', re.IGNORECASE)
     META_NOTE_PATTERN = re.compile(r'\[(?:Note|Meta|Aside|System):[^\]]*\]', re.IGNORECASE)
     ACTION_PATTERN = re.compile(r'\*[^*]*\*')  # *gestures*, *smiles*, etc.
-    CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```', re.MULTILINE)  # Remove code blocks like ```python ... ```
+    CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|```[\s\S]*$', re.MULTILINE)  # Remove complete or incomplete code blocks
     INLINE_CODE_PATTERN = re.compile(r'`[^`]+`')  # Remove inline code like `variable_name`
     
     def __init__(self, persona: Optional[Dict] = None, max_history: int = 5, 
