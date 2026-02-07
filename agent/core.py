@@ -7,6 +7,7 @@ from utils.weather import get_weather, extract_city_from_message, get_hko_typhoo
 from utils.search import web_search, image_search, crawl_google_images
 from utils.datetime_info import get_current_datetime, extract_timezone_from_message
 from agent.skills.find_info import find_info as find_info_skill
+from agent.skills.conversions import handle_conversion, is_conversion_query
 from llm import manager
 import asyncio
 import json
@@ -403,7 +404,10 @@ class Agent:
             "find_info",
             "scrape_info",
             "multi_source_info",
-            "list_directories"
+            "list_directories",
+            "conversion",
+            "convert_currency",
+            "convert_unit"
         }
 
         # Find all actionable intents (high confidence, no clarification needed, supported)
@@ -518,6 +522,15 @@ class Agent:
                     root_path = project.get("path")
                 resp = self.list_directories(root_path)
                 responses.append(resp)
+
+            elif action in ("conversion", "convert_currency", "convert_unit"):
+                reply = await handle_conversion(user_message)
+                if reply:
+                    responses.append(reply)
+                else:
+                    # Could not parse conversion, fall back to chat
+                    reply = self.handle_message(user_message, internal_id)
+                    responses.append(reply)
 
             else:
                 # Should not occur with SUPPORTED_ACTIONS, but log if it does
