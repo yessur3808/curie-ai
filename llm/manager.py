@@ -1,5 +1,7 @@
 # llm/manager.py
 
+from __future__ import annotations
+
 import os
 import logging
 import hashlib
@@ -8,13 +10,17 @@ import gc
 from collections import OrderedDict
 from threading import Lock
 from dotenv import load_dotenv
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from llama_cpp import Llama
 
 try:
     from llama_cpp import Llama
 except ImportError:
-    Llama = None
+    Llama = None  # type: ignore
 
 # Load environment variables from .env
 load_dotenv()
