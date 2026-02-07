@@ -935,10 +935,10 @@ agent.register_plugin(SmartHomePlugin())
 
 ### 2. Multi-Model Support Enhancement
 
-**Description**: Expand beyond LLama to support multiple AI models for different tasks.
+**Description**: Expand beyond Llama to support multiple AI models for different tasks.
 
 **Model Specialization:**
-- **Conversation**: LLama 3 (general chat)
+- **Conversation**: Llama 3 (general chat)
 - **Coding**: CodeLlama, DeepSeek Coder (code tasks)
 - **Vision**: CLIP, BLIP2 (image understanding)
 - **Embeddings**: Sentence Transformers (semantic search)
