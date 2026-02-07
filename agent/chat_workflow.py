@@ -370,8 +370,9 @@ class ChatWorkflow:
             lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
             lines.append(f"- Current time: {now.strftime('%I:%M %p %Z')}")
             lines.append(f"- Timezone: {user_tz}")
-        except Exception:
-            # Fallback to UTC on any error
+        except (pytz.UnknownTimeZoneError, pytz.AmbiguousTimeError) as e:
+            # Fallback to UTC on timezone errors
+            logger.warning(f"Timezone error: {e}, falling back to UTC")
             now = datetime.now(pytz.UTC)
             lines.append(f"\n[CURRENT DATE AND TIME]")
             lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")

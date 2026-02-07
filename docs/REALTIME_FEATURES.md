@@ -214,15 +214,15 @@ For existing installations:
 
 ## Compatibility
 
-- **Python**: 3.10 or higher (tested with 3.10, 3.11, 3.12)
+- **Python**: 3.10 or higher recommended (minimum 3.8 supported)
 - **Platforms**: All existing connectors (Telegram, Discord, WhatsApp, API)
 - **Database**: Existing schema (no migrations needed)
 - **Personas**: Backwards compatible with existing persona files
 
-Note: Python 3.10+ is required for:
-- Modern datetime timezone handling
-- Latest pytz timezone features
+Note: While Python 3.8+ is supported, Python 3.10+ is recommended for:
+- Better asyncio performance
 - Improved type hints support
+- Latest dependency compatibility
 
 ## Support
 

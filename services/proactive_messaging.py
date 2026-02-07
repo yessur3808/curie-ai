@@ -15,7 +15,7 @@ import random
 import threading
 import time
 import pytz
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from memory import UserManager, ConversationManager
@@ -139,15 +139,16 @@ class ProactiveMessagingService:
         Clean up old entries from last_contact cache to prevent memory growth.
         Keeps only the most recent MAX_CONTACT_HISTORY entries.
         """
-        if len(self.last_contact) > self.MAX_CONTACT_HISTORY:
-            # Sort by timestamp and keep only recent entries
-            sorted_contacts = sorted(
-                self.last_contact.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )
-            self.last_contact = dict(sorted_contacts[:self.MAX_CONTACT_HISTORY])
-            logger.info(f"Cleaned up contact history, kept {self.MAX_CONTACT_HISTORY} most recent entries")
+        with self.last_contact_lock:
+            if len(self.last_contact) > self.MAX_CONTACT_HISTORY:
+                # Sort by timestamp and keep only recent entries
+                sorted_contacts = sorted(
+                    self.last_contact.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+                self.last_contact = dict(sorted_contacts[:self.MAX_CONTACT_HISTORY])
+                logger.info(f"Cleaned up contact history, kept {self.MAX_CONTACT_HISTORY} most recent entries")
     
     async def _maybe_send_proactive_message(self, user_info: Dict):
         """
@@ -247,7 +248,8 @@ class ProactiveMessagingService:
         
         if history:
             prompt += "\nRecent conversation snippets:\n"
-            for role, msg in history[-3:]:  # Last 3 exchanges
+            # Last 3 messages (could be mix of user and assistant)
+            for role, msg in history[-3:]:
                 prompt += f"{role.capitalize()}: {msg[:100]}...\n"
         
         prompt += "\nYour friendly check-in message:"
