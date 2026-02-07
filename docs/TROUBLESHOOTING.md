@@ -116,7 +116,7 @@ These warnings are **normal** if you don't plan to use Discord or WhatsApp. The 
 To install them:
 ```bash
 pip install discord.py==2.4.0
-pip install whatsapp-web.py==0.0.8
+pip install whatsapp-web.py==0.1.0
 ```
 
 ---
