@@ -30,7 +30,13 @@ class ProactiveMessagingService:
     """
     
     # Maximum entries to keep in memory (prevents unbounded growth)
+    # Memory estimate: ~100 bytes per entry = ~100KB for 1000 entries
+    # This limit should be sufficient for most deployments while preventing memory issues
     MAX_CONTACT_HISTORY = 1000
+    
+    # Probability of sending a proactive message when interval is met (30%)
+    # This adds randomness to avoid predictable patterns
+    PROACTIVE_MESSAGE_PROBABILITY = 0.3
     
     def __init__(self, agent, connectors: Dict = None):
         """
@@ -50,6 +56,7 @@ class ProactiveMessagingService:
         # Note: In production, this should be persisted to database
         # For now, using in-memory cache with size limit
         self.last_contact = {}
+        self.last_contact_lock = threading.Lock()  # Thread-safe access
         
         logger.info("ProactiveMessagingService initialized")
     
@@ -165,8 +172,9 @@ class ProactiveMessagingService:
             logger.debug(f"User {internal_id} is busy, skipping proactive message")
             return
         
-        # Get last conversation time
-        last_contact_time = self.last_contact.get(internal_id)
+        # Get last conversation time (thread-safe)
+        with self.last_contact_lock:
+            last_contact_time = self.last_contact.get(internal_id)
         now = datetime.now(timezone.utc)  # Use timezone-aware datetime
         
         # Get user's preferred check-in interval (in hours)
@@ -179,8 +187,8 @@ class ProactiveMessagingService:
                 logger.debug(f"Too soon to contact user {internal_id} ({hours_since_contact:.1f}h < {min_interval_hours}h)")
                 return
         
-        # Randomly decide whether to send (30% chance to avoid being too frequent)
-        if random.random() > 0.3:
+        # Randomly decide whether to send (using class constant)
+        if random.random() > self.PROACTIVE_MESSAGE_PROBABILITY:
             logger.debug(f"Random check skipped proactive message for user {internal_id}")
             return
         
@@ -196,7 +204,9 @@ class ProactiveMessagingService:
             success = await self._send_via_connector(connector, external_user_id, message)
             
             if success:
-                self.last_contact[internal_id] = now
+                # Update last contact time (thread-safe)
+                with self.last_contact_lock:
+                    self.last_contact[internal_id] = now
                 # Save to conversation history
                 ConversationManager.save_conversation(internal_id, "assistant", message)
                 logger.info(f"✅ Sent proactive message to user {internal_id} on {platform}")

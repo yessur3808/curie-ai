@@ -357,8 +357,10 @@ class Agent:
             str: Formatted string with emoji prefix containing current date and time
                  Example: "📅 Today is Saturday, February 07, 2026 at 09:55 PM HKT"
         """
-        # Try to get timezone from user profile first
+        # Get user profile once
         user_profile = UserManager.get_user_profile(internal_id) if internal_id else {}
+        
+        # Try to get timezone from user profile first
         default_timezone = user_profile.get("timezone", "UTC")
         
         # Try to extract timezone from message if provided

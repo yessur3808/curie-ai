@@ -370,8 +370,8 @@ class ChatWorkflow:
             lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
             lines.append(f"- Current time: {now.strftime('%I:%M %p %Z')}")
             lines.append(f"- Timezone: {user_tz}")
-        except:
-            # Fallback to UTC
+        except Exception:
+            # Fallback to UTC on any error
             now = datetime.now(pytz.UTC)
             lines.append(f"\n[CURRENT DATE AND TIME]")
             lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")

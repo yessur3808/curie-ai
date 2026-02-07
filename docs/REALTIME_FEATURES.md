@@ -220,9 +220,9 @@ For existing installations:
 - **Personas**: Backwards compatible with existing persona files
 
 Note: Python 3.10+ is required for:
-- Modern type hints (e.g., `Dict | None`)
+- Modern datetime timezone handling
 - Latest pytz timezone features
-- datetime.now(timezone.utc) pattern
+- Improved type hints support
 
 ## Support
 
