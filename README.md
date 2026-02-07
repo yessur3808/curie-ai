@@ -257,14 +257,83 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 
 
 ## 🗺️ Roadmap
+
+### Completed Features
 - [x] Voice interface integration (✅ Completed)
 - [x] WhatsApp connector (✅ Completed)
 - [x] Discord connector (✅ Completed)
 - [x] Multi-platform support (✅ Completed)
+- [x] Real-time date/time access (✅ Completed)
+- [x] Proactive messaging service (✅ Completed)
+
+### Core Platform Improvements
 - [ ] Web dashboard / UI
 - [ ] Advanced memory management
 - [ ] Enhanced multi-user support
 - [ ] Plugin system
+
+### Feature Enhancements (See [FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md))
+
+#### Priority 1: High Impact, Low Complexity
+- [ ] **Currency & Unit Conversions**
+  - Live currency exchange rates
+  - Comprehensive unit conversions (length, mass, volume, temperature, speed, area, energy, power, pressure, force, angles, time, fuel)
+  - Cooking and measurement conversions
+
+- [ ] **Enhanced News Analysis**
+  - News aggregation from multiple sources
+  - Sentiment analysis
+  - Topic extraction and trending topics
+  - Category-specific news (business, tech, science, health, sports)
+
+- [ ] **Basic Financial Data** (View-only)
+  - Cryptocurrency prices and market data
+  - Stock market quotes and indices
+  - Forex exchange rates
+  - Market status and trends
+
+#### Priority 2: Medium Complexity
+- [ ] **Navigation & Traffic**
+  - Real-time traffic information
+  - Route planning and directions
+  - Multi-modal routing (walk, bike, transit, drive)
+  - Travel time estimates with traffic
+  - Alternative route suggestions
+
+- [ ] **Email Integration**
+  - Send emails via SMTP or API (SendGrid, Mailgun)
+  - Template management
+  - Scheduled email sending
+  - Attachment support
+  - Contact management
+
+- [ ] **Nutrition & Wellness Information**
+  - Nutrition database lookup
+  - Calorie and macro tracking
+  - BMI and health calculators
+  - General wellness tips
+  - Exercise recommendations
+
+#### Priority 3: Complex Features
+- [ ] **Legal & Tax Information** (Educational only)
+  - US tax code reference
+  - Tax brackets and deduction information
+  - Basic legal definitions
+  - ⚠️ With strong disclaimers - not professional advice
+
+- [ ] **Advanced Financial Analysis** (Educational only)
+  - Technical indicators (RSI, MACD, Moving Averages)
+  - Portfolio tracking (paper/virtual)
+  - Strategy backtesting (educational)
+  - Market trend analysis
+
+#### Future Considerations (Require Legal Framework)
+- ⚠️ Real trading execution (requires broker partnership & licensing)
+- ⚠️ Medical diagnosis/treatment advice (liability concerns - not planned)
+- ⚠️ Specific legal advice (unauthorized practice - not planned)
+- ⚠️ Tax filing services (requires professional review)
+
+**Note**: For detailed implementation plans, API requirements, and enhancement ideas, see [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md)
 
 
 
