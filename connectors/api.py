@@ -84,7 +84,7 @@ def set_workflow(workflow: ChatWorkflow):
     _workflow = workflow
 
 
-def get_internal_id(user_id: str, username: str = None) -> str:
+def get_internal_id(user_id: str, username: Optional[str] = None) -> str:
     """
     Get or create internal user ID for API users.
 
