@@ -264,7 +264,7 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 - [x] Discord connector (✅ Completed)
 - [x] Multi-platform support (✅ Completed)
 - [x] Real-time date/time access (✅ Completed)
-- [x] Proactive messaging service (✅ Completed)
+- [ ] Proactive messaging service (🚧 In progress)
 
 ### Core Platform Improvements
 - [ ] Web dashboard / UI
