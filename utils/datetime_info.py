@@ -44,6 +44,7 @@ def get_current_datetime(timezone_str: str = "UTC"):
 def extract_timezone_from_message(message: str) -> str:
     """
     Extract timezone from message based on location mentions.
+    Uses word boundary matching to avoid false positives (e.g., "any" won't match "ny").
     
     Args:
         message: User message text
@@ -52,27 +53,31 @@ def extract_timezone_from_message(message: str) -> str:
         Timezone string (e.g., 'Asia/Hong_Kong', 'America/New_York') if a location
         is found in the message, otherwise 'UTC' as the default fallback.
     """
+    import re
+    
     message_lower = message.lower()
     
-    # Map common location mentions to timezones
+    # Map common location mentions (regex patterns with word boundaries) to timezones
+    # Using word boundaries (\b) to prevent false positives
     timezone_map = {
-        "hong kong": "Asia/Hong_Kong",
-        "hk": "Asia/Hong_Kong",
-        "new york": "America/New_York",
-        "ny": "America/New_York",
-        "london": "Europe/London",
-        "paris": "Europe/Paris",
-        "tokyo": "Asia/Tokyo",
-        "sydney": "Australia/Sydney",
-        "los angeles": "America/Los_Angeles",
-        "la": "America/Los_Angeles",
-        "singapore": "Asia/Singapore",
-        "beijing": "Asia/Shanghai",
-        "shanghai": "Asia/Shanghai",
+        r"\bhong\s+kong\b": "Asia/Hong_Kong",
+        r"\bhk\b": "Asia/Hong_Kong",
+        r"\bnew\s+york\b": "America/New_York",
+        r"\bnyc\b": "America/New_York",
+        r"\bn\.?y\.?\b": "America/New_York",
+        r"\blondon\b": "Europe/London",
+        r"\bparis\b": "Europe/Paris",
+        r"\btokyo\b": "Asia/Tokyo",
+        r"\bsydney\b": "Australia/Sydney",
+        r"\blos\s+angeles\b": "America/Los_Angeles",
+        r"\bla\b": "America/Los_Angeles",
+        r"\bsingapore\b": "Asia/Singapore",
+        r"\bbeijing\b": "Asia/Shanghai",
+        r"\bshanghai\b": "Asia/Shanghai",
     }
     
-    for location, tz in timezone_map.items():
-        if location in message_lower:
+    for pattern, tz in timezone_map.items():
+        if re.search(pattern, message_lower):
             return tz
     
     return "UTC"
