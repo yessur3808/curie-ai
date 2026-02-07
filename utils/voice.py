@@ -16,6 +16,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Cache for Whisper models to avoid reloading on each transcription
+_whisper_model_cache = {}
+
 # Accent to language code mapping for better recognition
 ACCENT_LANGUAGE_MAP = {
     'american': 'en-US',
@@ -119,9 +122,16 @@ async def transcribe_with_whisper(
     # Models: tiny, base, small, medium, large
     model_name = os.getenv("WHISPER_MODEL", "base")
     
-    logger.info(f"Loading Whisper model: {model_name}")
-    loop = asyncio.get_running_loop()
-    model = await loop.run_in_executor(None, whisper.load_model, model_name)
+    # Check cache first to avoid reloading
+    if model_name in _whisper_model_cache:
+        logger.info(f"Using cached Whisper model: {model_name}")
+        model = _whisper_model_cache[model_name]
+    else:
+        logger.info(f"Loading Whisper model: {model_name}")
+        loop = asyncio.get_running_loop()
+        model = await loop.run_in_executor(None, whisper.load_model, model_name)
+        _whisper_model_cache[model_name] = model
+        logger.info(f"Cached Whisper model: {model_name}")
     
     # Transcribe with optional language hint
     logger.info(f"Transcribing audio: {audio_path}")
@@ -160,43 +170,54 @@ async def transcribe_with_speech_recognition(
     from pydub import AudioSegment
 
     loop = asyncio.get_running_loop()
+    converted_wav_path = None  # Track if we created a converted file
     
     # Use accent-specific language code if available
     if accent and accent.lower() in ACCENT_LANGUAGE_MAP:
         language = ACCENT_LANGUAGE_MAP[accent.lower()]
         logger.info(f"Using accent-specific language code: {language}")
     
-    # Convert audio to WAV if needed (in executor to avoid blocking event loop)
-    audio_ext = Path(audio_path).suffix.lower()
-    if audio_ext != '.wav':
-        logger.info(f"Converting {audio_ext} to WAV")
+    try:
+        # Convert audio to WAV if needed (in executor to avoid blocking event loop)
+        audio_ext = Path(audio_path).suffix.lower()
+        if audio_ext != '.wav':
+            logger.info(f"Converting {audio_ext} to WAV")
 
-        def _convert_to_wav(path: str) -> str:
-            audio = AudioSegment.from_file(path)
-            wav_path = path.rsplit('.', 1)[0] + '.wav'
-            audio.export(wav_path, format='wav')
-            return wav_path
+            def _convert_to_wav(path: str) -> str:
+                audio = AudioSegment.from_file(path)
+                wav_path = path.rsplit('.', 1)[0] + '.wav'
+                audio.export(wav_path, format='wav')
+                return wav_path
 
-        audio_path = await loop.run_in_executor(None, _convert_to_wav, audio_path)
-    
-    def _recognize(path: str, lang: str) -> str:
-        # Initialize recognizer and perform recognition in executor
-        recognizer = sr.Recognizer()
-        try:
-            with sr.AudioFile(path) as source:
-                audio_data = recognizer.record(source)
-            text = recognizer.recognize_google(audio_data, language=lang)
-            return text
-        except sr.UnknownValueError:
-            logger.error("Could not understand audio")
-            return ""
-        except sr.RequestError as e:
-            logger.error(f"Speech recognition service error: {e}")
-            return ""
+            converted_wav_path = await loop.run_in_executor(None, _convert_to_wav, audio_path)
+            audio_path = converted_wav_path
+        
+        def _recognize(path: str, lang: str) -> str:
+            # Initialize recognizer and perform recognition in executor
+            recognizer = sr.Recognizer()
+            try:
+                with sr.AudioFile(path) as source:
+                    audio_data = recognizer.record(source)
+                text = recognizer.recognize_google(audio_data, language=lang)
+                return text
+            except sr.UnknownValueError:
+                logger.error("Could not understand audio")
+                return ""
+            except sr.RequestError as e:
+                logger.error(f"Speech recognition service error: {e}")
+                return ""
 
-    # Run speech recognition in executor to avoid blocking event loop
-    text = await loop.run_in_executor(None, _recognize, audio_path, language)
-    return text
+        # Run speech recognition in executor to avoid blocking event loop
+        text = await loop.run_in_executor(None, _recognize, audio_path, language)
+        return text
+    finally:
+        # Clean up converted WAV file if we created one
+        if converted_wav_path and os.path.exists(converted_wav_path):
+            try:
+                os.remove(converted_wav_path)
+                logger.debug(f"Cleaned up converted WAV file: {converted_wav_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up converted WAV: {e}")
 async def text_to_speech(
     text: str, 
     output_path: str, 

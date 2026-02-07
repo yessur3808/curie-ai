@@ -206,6 +206,10 @@ def start_whatsapp_bot(workflow: ChatWorkflow):
     
     try:
         # Initialize WhatsApp client
+        # Note: whatsapp-web.py library may not support session_path parameter
+        # If the library supports session persistence, pass it here:
+        # session_path = os.getenv("WHATSAPP_SESSION_PATH", "./whatsapp_session")
+        # client = WhatsApp(session=session_path)
         client = WhatsApp()
         
         # Register message handler
