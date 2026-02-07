@@ -412,8 +412,13 @@ async def get_audio_file(filename: str):
     )
 
 
+class ClearMemoryRequest(BaseModel):
+    user_id: Optional[str] = None
+    username: Optional[str] = None
+
+
 @app.post("/clear_memory")
-async def clear_memory_api(req: MessageRequest):
+async def clear_memory_api(req: ClearMemoryRequest):
     user_id = req.user_id
     username = req.username
     internal_id = get_internal_id(user_id, username)
