@@ -6,7 +6,7 @@ Supports length, mass, volume, temperature, speed, area, and more.
 
 import logging
 import re
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Any
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +201,7 @@ def convert_unit(
     value: float,
     from_unit: str,
     to_unit: str
-) -> Optional[Dict[str, any]]:
+) -> Optional[Dict[str, Any]]:
     """
     Convert a value from one unit to another.
     
@@ -256,7 +256,7 @@ def convert_unit(
     return None
 
 
-def format_unit_result(conversion: Dict[str, any]) -> str:
+def format_unit_result(conversion: Dict[str, Any]) -> str:
     """
     Format a unit conversion result for display.
     

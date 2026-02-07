@@ -7,7 +7,7 @@ Uses exchangerate.host API (free, no authentication required).
 import logging
 import httpx
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, f
     global _rate_cache, _cache_timestamp
     
     # Check if cache is still valid
-    now = datetime.utcnow()
+    now = datetime.now(datetime.UTC) if hasattr(datetime, 'UTC') else datetime.utcnow()
     if _cache_timestamp and _rate_cache and (now - _cache_timestamp) < _cache_duration:
         if base_currency in _rate_cache:
             logger.debug(f"Using cached exchange rates for {base_currency}")
@@ -72,7 +72,7 @@ async def convert_currency(
     amount: float,
     from_currency: str,
     to_currency: str
-) -> Optional[Dict[str, any]]:
+) -> Optional[Dict[str, Any]]:
     """
     Convert an amount from one currency to another.
     
@@ -104,7 +104,7 @@ async def convert_currency(
             'converted_amount': amount,
             'converted_currency': to_currency,
             'exchange_rate': 1.0,
-            'timestamp': datetime.utcnow()
+            'timestamp': datetime.now(datetime.UTC) if hasattr(datetime, 'UTC') else datetime.utcnow()
         }
     
     # Fetch exchange rates with from_currency as base
@@ -127,7 +127,7 @@ async def convert_currency(
         'converted_amount': round(converted_amount, 2),
         'converted_currency': to_currency,
         'exchange_rate': round(exchange_rate, 6),
-        'timestamp': datetime.utcnow()
+        'timestamp': datetime.now(datetime.UTC) if hasattr(datetime, 'UTC') else datetime.utcnow()
     }
 
 
@@ -140,7 +140,7 @@ def get_popular_currencies() -> list:
     ]
 
 
-def format_currency_result(conversion: Dict[str, any]) -> str:
+def format_currency_result(conversion: Dict[str, Any]) -> str:
     """
     Format a currency conversion result for display.
     

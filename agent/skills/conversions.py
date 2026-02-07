@@ -6,14 +6,14 @@ Provides natural language interface for converting between currencies and variou
 
 import logging
 import re
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, Any
 from utils.conversions import convert_currency, format_currency_result, get_popular_currencies
 from utils.units import convert_unit, format_unit_result, get_supported_units
 
 logger = logging.getLogger(__name__)
 
 
-def extract_conversion_params(message: str) -> Optional[Dict[str, any]]:
+def extract_conversion_params(message: str) -> Optional[Dict[str, Any]]:
     """
     Extract conversion parameters from a natural language message.
     
