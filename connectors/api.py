@@ -2,6 +2,8 @@ import os
 import datetime
 import uuid
 import logging
+import time
+import threading
 from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
@@ -20,6 +22,44 @@ _workflow = None
 # Active WebSocket connections
 active_connections = []
 
+# Track generated voice files for cleanup (filename: timestamp)
+_voice_files = {}
+_voice_files_lock = threading.Lock()
+
+# Voice file TTL in seconds (default: 1 hour)
+VOICE_FILE_TTL = int(os.getenv("VOICE_FILE_TTL", "3600"))
+
+
+def cleanup_old_voice_files():
+    """Periodically clean up expired voice files."""
+    while True:
+        try:
+            time.sleep(300)  # Run every 5 minutes
+            current_time = time.time()
+            with _voice_files_lock:
+                expired_files = [
+                    filename for filename, created_time in _voice_files.items()
+                    if current_time - created_time > VOICE_FILE_TTL
+                ]
+                for filename in expired_files:
+                    file_path = os.path.join("/tmp", filename)
+                    try:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            logger.info(f"Cleaned up expired voice file: {filename}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete {filename}: {e}")
+                    finally:
+                        del _voice_files[filename]
+        except Exception as e:
+            logger.error(f"Error in voice file cleanup: {e}")
+
+
+# Start cleanup thread
+_cleanup_thread = threading.Thread(target=cleanup_old_voice_files, daemon=True)
+_cleanup_thread.start()
+
+
 
 def set_workflow(workflow: ChatWorkflow):
     """Set the shared ChatWorkflow instance (called from main.py)."""
@@ -32,7 +72,7 @@ class MessageRequest(BaseModel):
     message: str
     idempotency_key: str = None  # Optional: for idempotency
     voice_response: bool = False  # Optional: request voice response
-    stream: bool = False  # Optional: stream response
+    # Note: streaming not yet implemented
 
 
 class MessageResponse(BaseModel):
@@ -96,6 +136,9 @@ async def chat_api(req: MessageRequest):
             success = await text_to_speech(result['text'], voice_path, voice_config)
             if success:
                 voice_url = f"/audio/{voice_filename}"
+                # Track file for cleanup
+                with _voice_files_lock:
+                    _voice_files[voice_filename] = time.time()
                 logger.info(f"Generated voice response: {voice_url}")
         except Exception as e:
             logger.error(f"Failed to generate voice response: {e}")
@@ -295,13 +338,24 @@ async def get_audio_file(filename: str):
     if not real_path.startswith("/tmp/"):
         raise HTTPException(status_code=403, detail="Access denied")
     
+    # Determine MIME type based on file extension
+    ext = filename.rsplit('.', 1)[-1].lower()
+    mime_types = {
+        'mp3': 'audio/mpeg',
+        'wav': 'audio/wav',
+        'ogg': 'audio/ogg'
+    }
+    media_type = mime_types.get(ext, 'audio/mpeg')
+    
     def iter_file():
         with open(file_path, "rb") as f:
-            yield from f
+            # Read in chunks for large files
+            while chunk := f.read(8192):
+                yield chunk
     
     return StreamingResponse(
         iter_file(),
-        media_type="audio/mpeg",
+        media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
