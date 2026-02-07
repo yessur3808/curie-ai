@@ -34,7 +34,7 @@ pip install -r requirements.txt
 python scripts/verify_setup.py
 ```
 
-**Note:** If `pip install -r requirements.txt` fails on Python 3.13+ with openai-whisper errors, that's expected. The dependencies have been moved to `requirements-optional.txt`. The application will work fine without them.
+**Note:** If `pip install -r requirements-optional.txt` fails on Python 3.13+ with openai-whisper errors, that's expected. Whisper is only used for optional voice features and extra connectors, and the application will work fine without these optional dependencies.
 
 If you see other errors, check the [Troubleshooting Guide](TROUBLESHOOTING.md).
 
