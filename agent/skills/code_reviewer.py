@@ -7,7 +7,7 @@ Supports GitHub, GitLab, Bitbucket and other Git platforms
 
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import subprocess
 import git
 import llm.manager
@@ -31,7 +31,7 @@ class CodeReviewer:
             from agent.skills.coder import get_coding_model_name
             self.model_name = get_coding_model_name()
     
-    def review_code_changes(self, diff_content: str, file_path: str = None) -> Dict[str, any]:
+    def review_code_changes(self, diff_content: str, file_path: str = None) -> Dict[str, Any]:
         """
         Review code changes and provide feedback
         
@@ -71,7 +71,7 @@ class CodeReviewer:
         
         return review_data
     
-    def _parse_plain_review(self, response: str) -> Dict[str, any]:
+    def _parse_plain_review(self, response: str) -> Dict[str, Any]:
         """Parse plain text review response into structured format"""
         lines = response.strip().split('\n')
         
@@ -116,7 +116,7 @@ class CodeReviewer:
             'summary': summary.strip() if summary else "Code review completed"
         }
     
-    def review_file(self, file_path: str, repo_path: str = ".") -> Dict[str, any]:
+    def review_file(self, file_path: str, repo_path: str = ".") -> Dict[str, Any]:
         """
         Review an entire file
         
@@ -169,7 +169,7 @@ class CodeReviewer:
                 'summary': f"Error reviewing file: {str(e)}"
             }
     
-    def review_pull_request(self, repo_path: str, base_branch: str, head_branch: str) -> Dict[str, any]:
+    def review_pull_request(self, repo_path: str, base_branch: str, head_branch: str) -> Dict[str, Any]:
         """
         Review all changes in a pull request
         
@@ -206,7 +206,7 @@ class CodeReviewer:
                 'summary': f"Error reviewing PR: {str(e)}"
             }
     
-    def format_review_comment(self, review_data: Dict[str, any]) -> str:
+    def format_review_comment(self, review_data: Dict[str, Any]) -> str:
         """
         Format review data as a markdown comment
         

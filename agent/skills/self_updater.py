@@ -8,7 +8,7 @@ import os
 import sys
 import subprocess
 import git
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class SelfUpdater:
         self.repo = git.Repo(self.repo_path)
         self.backup_branch = "backup-before-update"
     
-    def check_for_updates(self, branch: str = "main") -> Dict[str, any]:
+    def check_for_updates(self, branch: str = "main") -> Dict[str, Any]:
         """
         Check if updates are available
         
@@ -96,7 +96,7 @@ class SelfUpdater:
             logger.error(f"Failed to create backup: {e}")
             return False
     
-    def pull_updates(self, branch: str = "main", force: bool = False) -> Dict[str, any]:
+    def pull_updates(self, branch: str = "main", force: bool = False) -> Dict[str, Any]:
         """
         Pull latest updates from remote
         
@@ -152,7 +152,7 @@ class SelfUpdater:
                 'error': str(e)
             }
     
-    def update_dependencies(self) -> Dict[str, any]:
+    def update_dependencies(self) -> Dict[str, Any]:
         """
         Update Python dependencies from requirements.txt
         
@@ -197,7 +197,7 @@ class SelfUpdater:
                 'output': e.stderr
             }
     
-    def rollback(self) -> Dict[str, any]:
+    def rollback(self) -> Dict[str, Any]:
         """
         Rollback to backup branch
         
@@ -232,7 +232,7 @@ class SelfUpdater:
         branch: str = "main",
         update_deps: bool = True,
         force: bool = False
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """
         Perform a complete update: pull code and update dependencies
         
@@ -269,7 +269,7 @@ class SelfUpdater:
         results['success'] = True
         return results
     
-    def restart_service(self, service_name: Optional[str] = None) -> Dict[str, any]:
+    def restart_service(self, service_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Restart the service (requires proper setup with systemd or similar)
         
@@ -324,7 +324,7 @@ def auto_update(
     update_deps: bool = True,
     restart: bool = False,
     force: bool = False
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Convenience function to perform automatic update
     
