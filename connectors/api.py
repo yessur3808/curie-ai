@@ -4,6 +4,7 @@ import uuid
 import logging
 import time
 import threading
+import re
 from typing import Optional, NoReturn
 from dotenv import load_dotenv
 from fastapi import (
@@ -18,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from agent.chat_workflow import ChatWorkflow
 from memory import ConversationManager, UserManager
+from utils.db import is_master_user
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -106,9 +108,9 @@ class MessageRequest(BaseModel):
     message: str = Field(
         ..., min_length=1, max_length=10000, pattern=r"^\S+.*\S+$|^\S$"
     )
-    idempotency_key: str = None  # Optional: for idempotency
+    idempotency_key: Optional[str] = None  # Optional: for idempotency
     voice_response: bool = False  # Optional: request voice response
-    username: str = None  # Optional: username for memory management
+    username: Optional[str] = None  # Optional: username for memory management
     # Note: streaming not yet implemented
     # Pattern ensures no leading/trailing whitespace and non-empty content
 
@@ -147,6 +149,17 @@ async def chat_api(req: MessageRequest):
     # Generate or use provided idempotency key
     message_id = req.idempotency_key or str(uuid.uuid4())
 
+    # Validate idempotency_key is safe for filesystem use (UUID format only)
+    # This prevents path traversal attacks when generating voice files
+    if req.idempotency_key and not re.match(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        req.idempotency_key,
+        re.IGNORECASE,
+    ):
+        raise HTTPException(
+            status_code=400, detail="idempotency_key must be a valid UUID format"
+        )
+
     # Normalize to standard ChatWorkflow format
     normalized_input = {
         "platform": "api",
@@ -168,8 +181,10 @@ async def chat_api(req: MessageRequest):
 
             voice_config = get_voice_config_from_persona(_workflow.persona)
 
-            # Generate voice file
-            voice_filename = f"voice_{message_id}.mp3"
+            # Generate voice file with server-generated UUID to prevent path traversal
+            # Use a separate safe server-side filename instead of client-provided message_id
+            voice_file_id = str(uuid.uuid4())
+            voice_filename = f"voice_{voice_file_id}.mp3"
             voice_path = f"/tmp/{voice_filename}"
 
             success = await text_to_speech(result["text"], voice_path, voice_config)
@@ -402,7 +417,7 @@ async def clear_memory_api(req: MessageRequest):
     user_id = req.user_id
     username = req.username
     internal_id = get_internal_id(user_id, username)
-    if not UserManager.is_master_user(internal_id):
+    if not is_master_user(internal_id):
         raise HTTPException(status_code=403, detail="Not authorized to clear memory")
     ConversationManager.clear_conversation(internal_id)
     return {"status": "ok", "message": "Memory cleared."}
