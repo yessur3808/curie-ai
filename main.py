@@ -142,6 +142,30 @@ def run_api():
     print("Starting API (FastAPI) connector on http://0.0.0.0:8000 ...")
     uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="info")
 
+def run_coding_service(workflow: ChatWorkflow):
+    """Run the standalone coding service in parallel with other modules"""
+    print("Starting Coding Service...")
+    from services.coding_service import CodingService
+    
+    # Create notification callback to send messages to master user
+    def notify_master_user(message: str, data: dict):
+        master_user_id = os.getenv("MASTER_USER_ID")
+        if master_user_id:
+            # Store notification in memory for master user to retrieve
+            logger.info(f"Coding Service notification for master: {message}")
+            # You could extend this to send actual messages via connectors
+    
+    service = CodingService(notification_callback=notify_master_user)
+    service.start()
+    
+    # Keep service running
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Stopping coding service...")
+        service.stop()
+
 def run_coder_interactive():
     print("Starting Coder skill (interactive mode)...")
     from agent.skills.coder import apply_code_change
@@ -177,6 +201,7 @@ def parse_args():
     parser.add_argument('--discord', action='store_true', help="Run Discord connector")
     parser.add_argument('--whatsapp', action='store_true', help="Run WhatsApp connector")
     parser.add_argument('--api', action='store_true', help="Run API connector (FastAPI)")
+    parser.add_argument('--coding-service', action='store_true', help="Run standalone coding service")
     parser.add_argument('--coder', action='store_true', help="Run coder/PR skill (interactive)")
     parser.add_argument('--coder-batch', action='store_true', help="Run coder in batch mode (non-interactive)")
     parser.add_argument('--coder-config', type=str, help="JSON file with coder batch parameters")
@@ -196,6 +221,7 @@ def determine_what_to_run(args):
     run_whatsapp_env = os.getenv("RUN_WHATSAPP", "false").lower() == "true"
     run_api_env = os.getenv("RUN_API", "false").lower() == "true"
     run_coder_env = os.getenv("RUN_CODER", "false").lower() == "true"
+    run_coding_service_env = os.getenv("RUN_CODING_SERVICE", "false").lower() == "true"
 
     run_telegram_flag = args.all or args.telegram or run_telegram_env
     run_discord_flag = args.all or args.discord or run_discord_env
@@ -203,11 +229,12 @@ def determine_what_to_run(args):
     run_api_flag = args.all or args.api or run_api_env
     run_coder_flag = args.all or args.coder or run_coder_env
     run_coder_batch_flag = args.coder_batch
+    run_coding_service_flag = args.coding_service or run_coding_service_env
 
-    if not (run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag or run_coder_flag or run_coder_batch_flag):
-        print("Nothing to run! Use --telegram, --discord, --whatsapp, --api, --coder, --coder-batch, --all or set RUN_* in .env.")
+    if not (run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag or run_coder_flag or run_coder_batch_flag or run_coding_service_flag):
+        print("Nothing to run! Use --telegram, --discord, --whatsapp, --api, --coder, --coder-batch, --coding-service, --all or set RUN_* in .env.")
         sys.exit(1)
-    return run_telegram_flag, run_discord_flag, run_whatsapp_flag, run_api_flag, run_coder_flag, run_coder_batch_flag
+    return run_telegram_flag, run_discord_flag, run_whatsapp_flag, run_api_flag, run_coder_flag, run_coder_batch_flag, run_coding_service_flag
 
 def init_llm_and_memory(no_init):
     if not no_init:
@@ -286,7 +313,7 @@ def main():
     configure_logging()
     
     args = parse_args()
-    run_telegram_flag, run_discord_flag, run_whatsapp_flag, run_api_flag, run_coder_flag, run_coder_batch_flag = determine_what_to_run(args)
+    run_telegram_flag, run_discord_flag, run_whatsapp_flag, run_api_flag, run_coder_flag, run_coder_batch_flag, run_coding_service_flag = determine_what_to_run(args)
     init_llm_and_memory(args.no_init)
     
     # Load persona and initialize ChatWorkflow
@@ -296,7 +323,7 @@ def main():
     logger.info(f"✅ ChatWorkflow initialized with persona: {workflow.persona.get('name')}")
     
     # Share workflow with connectors
-    if run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag:
+    if run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag or run_coding_service_flag:
         set_telegram_workflow(workflow)
         set_api_workflow(workflow)
         if DISCORD_AVAILABLE:
@@ -327,6 +354,12 @@ def main():
     # Start API in thread
     if run_api_flag:
         t = threading.Thread(target=run_api, daemon=True)
+        threads.append(t)
+        t.start()
+    
+    # Start Coding Service in thread
+    if run_coding_service_flag:
+        t = threading.Thread(target=run_coding_service, args=(workflow,), daemon=True)
         threads.append(t)
         t.start()
 
