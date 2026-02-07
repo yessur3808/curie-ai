@@ -99,6 +99,55 @@ python scripts/verify_setup.py
 
 See [llama-cpp-python documentation](https://github.com/abetlen/llama-cpp-python) for more options.
 
+### openai-whisper Installation Issues (Python 3.13+)
+
+**Symptoms:**
+```
+Getting requirements to build wheel did not run successfully.
+exit code: 1
+```
+when installing `openai-whisper==20240930`
+
+**Cause:** 
+- `openai-whisper` requires building from source and may not be compatible with Python 3.13+
+- The package requires system dependencies (Rust compiler, ffmpeg) that may not be installed
+- Build failures are common on newer Python versions
+
+**Solution:**
+
+**Option 1: Skip openai-whisper (Recommended for Python 3.13+)**
+
+Install only the core dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+Voice features will fall back to `SpeechRecognition` library, which works without openai-whisper.
+
+**Option 2: Install optional dependencies separately**
+
+If you need openai-whisper and are on Python 3.10-3.12:
+```bash
+# Install system dependencies first (Ubuntu/Debian)
+sudo apt-get install ffmpeg
+
+# Then try installing openai-whisper
+pip install openai-whisper==20240930
+```
+
+**Option 3: Use Python 3.10-3.12**
+
+If voice transcription with Whisper is critical, use Python 3.10, 3.11, or 3.12 instead of 3.13:
+```bash
+# Create a new virtual environment with Python 3.12
+python3.12 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-optional.txt  # For optional features
+```
+
+**Note:** The application works fine without openai-whisper. Voice features will automatically use the SpeechRecognition library as a fallback.
+
 ### discord.py or whatsapp-web.py Not Available
 
 **Symptoms:**
@@ -115,6 +164,8 @@ These warnings are **normal** if you don't plan to use Discord or WhatsApp. The 
 
 To install them:
 ```bash
+pip install -r requirements-optional.txt
+# Or install individually:
 pip install discord.py==2.4.0
 pip install whatsapp-web.py==0.1.0
 ```

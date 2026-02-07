@@ -25,12 +25,8 @@ beautifulsoup4==4.12.3
 
 icrawler==0.6.10
 
-# Multi-platform connectors
-discord.py==2.4.0
-whatsapp-web.py==0.1.0
-
-# Voice/Audio processing
-openai-whisper==20240930
+# Voice/Audio processing (core dependencies only)
+# Note: openai-whisper is optional - see requirements-optional.txt
 pydub==0.25.1
 SpeechRecognition==3.12.0
 gTTS==2.5.4

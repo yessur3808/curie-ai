@@ -113,6 +113,10 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Optional: Install voice features and extra connectors
+# Note: Skip on Python 3.13+ if openai-whisper fails to build
+# pip install -r requirements-optional.txt
 ```
 
 **Option B: System-wide installation**

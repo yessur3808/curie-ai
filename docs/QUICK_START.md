@@ -23,6 +23,10 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Optional: Install voice features and extra connectors (Discord, WhatsApp)
+# Skip this if you're on Python 3.13+ or don't need these features
+# pip install -r requirements-optional.txt
 ```
 
 **Verify installation:**
@@ -30,7 +34,9 @@ pip install -r requirements.txt
 python scripts/verify_setup.py
 ```
 
-If you see errors, check the [Troubleshooting Guide](TROUBLESHOOTING.md).
+**Note:** If `pip install -r requirements.txt` fails on Python 3.13+ with openai-whisper errors, that's expected. The dependencies have been moved to `requirements-optional.txt`. The application will work fine without them.
+
+If you see other errors, check the [Troubleshooting Guide](TROUBLESHOOTING.md).
 
 ### 2. Configure Environment
 
@@ -165,6 +171,18 @@ Once you have C.U.R.I.E. running:
 4. **Advanced features**: Check out the [Coding Modules Guide](CODING_MODULES_GUIDE.md)
 
 ## Common Issues
+
+### "openai-whisper installation fails" (Python 3.13+)
+
+**Error:**
+```
+Getting requirements to build wheel did not run successfully.
+exit code: 1
+```
+
+**Solution:** This is expected on Python 3.13+. The core dependencies in `requirements.txt` no longer include openai-whisper. The application will work fine - voice features will automatically use SpeechRecognition as a fallback.
+
+For more details, see [Troubleshooting Guide - openai-whisper Installation Issues](TROUBLESHOOTING.md#openai-whisper-installation-issues-python-313).
 
 ### "ModuleNotFoundError: No module named 'pytz'"
 
