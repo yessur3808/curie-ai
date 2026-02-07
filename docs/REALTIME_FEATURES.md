@@ -87,7 +87,7 @@ Note: `proactive_interval_hours` is optional and defaults to 24 if not specified
 A new caring, bilingual persona optimized for helpfulness.
 
 **What changed:**
-- Created `assets/personality/curie.json` persona file
+- Persona infrastructure supports caring, helpful personality
 - Prioritizes user wellbeing
 - Natural French-English code-switching for personality
 - Warm, friendly, and direct communication style
@@ -100,10 +100,13 @@ A new caring, bilingual persona optimized for helpfulness.
 - Prioritizes user wellbeing
 
 **To use:**
-Set in your `.env` file:
+1. Create your persona file at `assets/personality/curie.json` (see `assets/example_persona.json` for template)
+2. Set in your `.env` file:
 ```
 PERSONA_FILE=curie.json
 ```
+
+Note: Persona files in `assets/personality/*.json` are excluded from git by `.gitignore` to protect sensitive configurations.
 
 ## Technical Details
 
@@ -118,10 +121,12 @@ PERSONA_FILE=curie.json
    - Generates caring messages using LLM
    - Respects user preferences
 
-3. **assets/personality/curie.json**
-   - Complete persona configuration
-   - Voice settings with French accent
-   - Caring personality traits
+3. **docs/REALTIME_FEATURES.md**
+   - Complete documentation for all features
+   - Configuration examples
+   - Usage guidelines
+
+Note: Persona configuration files (e.g., `curie.json`) should be created locally in `assets/personality/` directory. Use `assets/example_persona.json` as a template.
 
 ### Modified Files
 
