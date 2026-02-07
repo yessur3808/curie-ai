@@ -166,7 +166,7 @@ class TestCodingServiceIntegration:
         service.start()
         
         # Add a simple task
-        task_id = service.add_task('review', {
+        service.add_task('review', {
             'type': 'file',
             'file_path': 'test.py'
         })
