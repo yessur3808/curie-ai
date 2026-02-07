@@ -26,16 +26,21 @@ class GitHubIntegration:
         Initialize GitHub integration
         
         Args:
-            token: GitHub personal access token (uses GITHUB_TOKEN env if not provided)
+            token: GitHub personal access token (uses GITHUB_TOKEN env if not provided).
+                If not provided and no GITHUB_TOKEN is set, GitHub API operations will
+                be performed unauthenticated and may be rate-limited or fail.
             repo_path: Local repository path (uses current dir if not provided)
         """
         self.token = token or os.getenv('GITHUB_TOKEN')
         if not self.token:
-            raise ValueError("GitHub token not provided. Set GITHUB_TOKEN environment variable.")
+            logger.warning(
+                "GitHub token not provided. GitHub API operations will be unauthenticated "
+                "and may be rate-limited or fail. Local git and file operations remain available."
+            )
         
         self.repo_path = repo_path or os.getcwd()
         
-        # Initialize PyGithub client
+        # Initialize PyGithub client (may be unauthenticated if token is None)
         self.github_client = Github(self.token)
         
         # Initialize GitPython repo
