@@ -280,6 +280,7 @@ class SelfUpdater:
             Dictionary with restart results
         """
         service_name = service_name or os.getenv('SYSTEMD_SERVICE_NAME')
+        restart_timeout = int(os.getenv('SERVICE_RESTART_TIMEOUT', '30'))
         
         if not service_name:
             return {
@@ -289,13 +290,13 @@ class SelfUpdater:
             }
         
         try:
-            # Try to restart using systemctl
+            # Try to restart using systemctl with configurable timeout
             result = subprocess.run(
                 ['sudo', 'systemctl', 'restart', service_name],
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=restart_timeout
             )
             
             return {

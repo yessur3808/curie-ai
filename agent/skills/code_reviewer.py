@@ -12,6 +12,9 @@ import subprocess
 import git
 import llm.manager
 
+# Maximum characters to read from a file for review (configurable)
+MAX_FILE_CONTENT_LENGTH = int(os.getenv('CODE_REVIEW_MAX_CHARS', '4000'))
+
 
 class CodeReviewer:
     """Generic code reviewer that can work with multiple Git platforms"""
@@ -130,10 +133,15 @@ class CodeReviewer:
             with open(full_path, 'r') as f:
                 content = f.read()
             
+            # Limit content size using configurable constant
+            truncated_content = content[:MAX_FILE_CONTENT_LENGTH]
+            if len(content) > MAX_FILE_CONTENT_LENGTH:
+                truncated_content += "\n\n... (content truncated)"
+            
             prompt = (
                 f"You are an expert code reviewer. Review the following file:\n\n"
                 f"File: {file_path}\n\n"
-                f"```\n{content[:4000]}\n```\n\n"  # Limit content size
+                f"```\n{truncated_content}\n```\n\n"
                 f"Provide feedback on:\n"
                 f"1. Code quality and best practices\n"
                 f"2. Potential bugs or issues\n"

@@ -165,7 +165,9 @@ class CodingService:
                     'error': f'Unknown review type: {review_type}'
                 }
             
-            result['success'] = True
+            # Only set success=True if no error exists
+            if 'success' not in result:
+                result['success'] = True
             return result
             
         except Exception as e:

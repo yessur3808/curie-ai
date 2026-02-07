@@ -24,6 +24,7 @@ class TestCodeReviewer:
         """Test that review_code_changes returns proper structure"""
         diff = """
 diff --git a/test.py b/test.py
+--- a/test.py
 +++ b/test.py
 @@ -1,3 +1,5 @@
  def hello():
