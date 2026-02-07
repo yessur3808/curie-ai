@@ -17,7 +17,7 @@ class TestCodeReviewer:
         # Skip if no model available
         try:
             return CodeReviewer()
-        except:
+        except (ImportError, ValueError, RuntimeError):
             pytest.skip("LLM model not available")
     
     def test_review_code_changes_structure(self, reviewer):
@@ -114,7 +114,7 @@ class TestCodeReviewerIntegration:
         """Create a CodeReviewer instance for testing"""
         try:
             return CodeReviewer()
-        except:
+        except (ImportError, ValueError, RuntimeError):
             pytest.skip("LLM model not available")
     
     def test_review_file_error_handling(self, reviewer):

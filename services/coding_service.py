@@ -17,6 +17,9 @@ from datetime import datetime
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Define logger before any imports that might use it
+logger = logging.getLogger(__name__)
+
 # Import with error handling to prevent startup failures
 try:
     from agent.skills.code_reviewer import CodeReviewer
@@ -43,13 +46,12 @@ try:
 except ImportError as e:
     logger.warning(f"Self-updater import failed: {e}")
     auto_update = None
+
 try:
     from agent.skills.coder import apply_code_change
 except ImportError as e:
     logger.warning(f"Coder import failed: {e}")
     apply_code_change = None
-
-logger = logging.getLogger(__name__)
 
 
 class CodingService:
@@ -384,13 +386,16 @@ class CodingService:
             try:
                 # Wait for task with timeout
                 task = self.task_queue.get(timeout=1)
-                self.process_task(task)
-                self.task_queue.task_done()
+                try:
+                    self.process_task(task)
+                finally:
+                    # Always mark task as done, even if processing fails
+                    self.task_queue.task_done()
                 
             except queue.Empty:
                 continue
             except Exception as e:
-                logger.error(f"Worker loop error: {e}")
+                logger.error(f"Worker loop error: {e}", exc_info=True)
         
         logger.info("Coding service worker stopped")
     

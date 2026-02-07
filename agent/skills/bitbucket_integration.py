@@ -10,6 +10,9 @@ import requests
 import git
 from agent.skills.code_reviewer import CodeReviewer
 
+# HTTP request timeout in seconds
+HTTP_TIMEOUT = 30
+
 
 class BitbucketIntegration:
     """Bitbucket API integration for code review and pull request management"""
@@ -71,7 +74,7 @@ class BitbucketIntegration:
             Repository data dictionary
         """
         url = f"{self.api_url}/repositories/{workspace}/{repo_slug}"
-        response = requests.get(url, auth=self.auth)
+        response = requests.get(url, auth=self.auth, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
@@ -115,7 +118,7 @@ class BitbucketIntegration:
             }
         }
         
-        response = requests.post(url, auth=self.auth, json=data)
+        response = requests.post(url, auth=self.auth, json=data, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
@@ -133,7 +136,7 @@ class BitbucketIntegration:
             Pull request data
         """
         url = f"{self.api_url}/repositories/{workspace}/{repo_slug}/pullrequests/{pr_id}"
-        response = requests.get(url, auth=self.auth)
+        response = requests.get(url, auth=self.auth, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
@@ -158,7 +161,7 @@ class BitbucketIntegration:
             }
         }
         
-        response = requests.post(url, auth=self.auth, json=data)
+        response = requests.post(url, auth=self.auth, json=data, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
@@ -176,7 +179,7 @@ class BitbucketIntegration:
             Diff content as string
         """
         url = f"{self.api_url}/repositories/{workspace}/{repo_slug}/pullrequests/{pr_id}/diff"
-        response = requests.get(url, auth=self.auth)
+        response = requests.get(url, auth=self.auth, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.text

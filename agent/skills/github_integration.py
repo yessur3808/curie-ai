@@ -55,6 +55,33 @@ class GitHubIntegration:
         if self.git_repo is None:
             raise RuntimeError(f"Not a git repository: {self.repo_path}")
     
+    def _validate_path(self, file_path: str) -> str:
+        """
+        Validate that file_path is safe and within repo_path
+        
+        Args:
+            file_path: Path to validate (relative to repo root)
+            
+        Returns:
+            Validated absolute path
+            
+        Raises:
+            ValueError: If path is absolute or escapes repo directory
+        """
+        # Reject absolute paths
+        if os.path.isabs(file_path):
+            raise ValueError(f"Absolute paths are not allowed: {file_path}")
+        
+        # Join and resolve to absolute path
+        full_path = os.path.abspath(os.path.join(self.repo_path, file_path))
+        repo_path_abs = os.path.abspath(self.repo_path)
+        
+        # Check that resolved path is within repo
+        if not full_path.startswith(repo_path_abs + os.sep) and full_path != repo_path_abs:
+            raise ValueError(f"Path escapes repository: {file_path}")
+        
+        return full_path
+    
     # --- File Editing Operations ---
     
     def read_file(self, file_path: str) -> str:
@@ -67,7 +94,7 @@ class GitHubIntegration:
         Returns:
             File contents as string
         """
-        full_path = os.path.join(self.repo_path, file_path)
+        full_path = self._validate_path(file_path)
         
         if not os.path.exists(full_path):
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -89,7 +116,7 @@ class GitHubIntegration:
         Returns:
             True if successful
         """
-        full_path = os.path.join(self.repo_path, file_path)
+        full_path = self._validate_path(file_path)
         
         # Create directories if they don't exist
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -151,7 +178,7 @@ class GitHubIntegration:
         Returns:
             True if successful
         """
-        full_path = os.path.join(self.repo_path, file_path)
+        full_path = self._validate_path(file_path)
         
         if not os.path.exists(full_path):
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -457,6 +484,8 @@ class GitHubIntegration:
         """
         if repo_name is None:
             repo_name = os.getenv('MAIN_REPO')
+            if not repo_name:
+                raise ValueError("Repository name not provided and MAIN_REPO not set")
             if 'github.com' in repo_name:
                 from agent.skills.coder import extract_github_repo
                 repo_name = extract_github_repo(repo_name)

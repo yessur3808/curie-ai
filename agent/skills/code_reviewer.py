@@ -64,7 +64,7 @@ class CodeReviewer:
         try:
             import json
             review_data = json.loads(response)
-        except:
+        except (json.JSONDecodeError, ValueError, TypeError):
             # Fallback to plain text parsing
             review_data = self._parse_plain_review(response)
         

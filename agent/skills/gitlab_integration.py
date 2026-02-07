@@ -10,6 +10,9 @@ import requests
 import git
 from agent.skills.code_reviewer import CodeReviewer
 
+# HTTP request timeout in seconds
+HTTP_TIMEOUT = 30
+
 
 class GitLabIntegration:
     """GitLab API integration for code review and merge request management"""
@@ -73,7 +76,7 @@ class GitLabIntegration:
         encoded_path = urllib.parse.quote(project_path, safe='')
         
         url = f"{self.api_url}/projects/{encoded_path}"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
@@ -110,7 +113,7 @@ class GitLabIntegration:
             'description': description
         }
         
-        response = requests.post(url, headers=self.headers, json=data)
+        response = requests.post(url, headers=self.headers, json=data, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
@@ -130,7 +133,7 @@ class GitLabIntegration:
         encoded_path = urllib.parse.quote(project_path, safe='')
         
         url = f"{self.api_url}/projects/{encoded_path}/merge_requests/{mr_iid}"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
@@ -153,7 +156,7 @@ class GitLabIntegration:
         url = f"{self.api_url}/projects/{encoded_path}/merge_requests/{mr_iid}/notes"
         data = {'body': comment}
         
-        response = requests.post(url, headers=self.headers, json=data)
+        response = requests.post(url, headers=self.headers, json=data, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
@@ -173,7 +176,7 @@ class GitLabIntegration:
         encoded_path = urllib.parse.quote(project_path, safe='')
         
         url = f"{self.api_url}/projects/{encoded_path}/merge_requests/{mr_iid}/changes"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         
         return response.json()
