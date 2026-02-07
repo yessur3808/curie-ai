@@ -22,6 +22,10 @@ It is inspired by conversational assistants like Jarvis from Iron Man, but runs 
   - **Multi-Platform PR/MR**: Support for GitHub, GitLab, and Bitbucket
   - **Self-Update**: Safe self-update mechanism with rollback capability
   - **Standalone Coding Service**: Run code operations independently in parallel
+- **🆕 Currency & Unit Conversions**:
+  - **Currency Conversion**: Real-time exchange rates for 150+ currencies
+  - **Unit Conversion**: Length, mass, volume, temperature, speed, area conversions
+  - **Natural Language**: Understands queries like "convert 100 USD to EUR" or "how many miles in 5 km"
 
 ## 📱 Supported Platforms
 
@@ -41,6 +45,38 @@ It is inspired by conversational assistants like Jarvis from Iron Man, but runs 
 - **Persona-Based Voice**: Configure accent, language, and speaking style per persona
 
 See [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) for detailed voice configuration.
+
+## 💱 Conversion Features
+
+Curie can perform currency and unit conversions using natural language:
+
+**Currency Conversions:**
+```
+User: convert 100 USD to EUR
+Curie: 💱 Currency Conversion:
+       100.00 USD = 85.50 EUR
+       Exchange rate: 1 USD = 0.855000 EUR
+```
+
+**Unit Conversions:**
+```
+User: how many miles in 5 km
+Curie: 📏 Unit Conversion (Length):
+       5.0000 km = 3.1069 miles
+
+User: what is 25 celsius in fahrenheit
+Curie: 🌡️ Unit Conversion (Temperature):
+       25.0000 celsius = 77.0000 fahrenheit
+```
+
+Supported categories:
+- **Currency**: 150+ currency codes (USD, EUR, GBP, JPY, etc.)
+- **Length**: meters, kilometers, feet, miles, inches, yards
+- **Mass**: grams, kilograms, pounds, ounces
+- **Volume**: liters, gallons, cups, pints, quarts
+- **Temperature**: celsius, fahrenheit, kelvin
+- **Speed**: km/h, mph, m/s, knots
+- **Area**: square meters, acres, hectares, square miles
 
 ## 📚 Documentation
 
