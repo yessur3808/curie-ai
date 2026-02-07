@@ -159,7 +159,7 @@ pm2 status
 
 Once you have C.U.R.I.E. running:
 
-1. **Customize your persona**: Edit `assets/personality/curie.json`
+1. **Customize your persona**: Create `assets/personality/curie.json` (for example, copy from `assets/example_persona.json`) and edit it. The `assets/personality` folder is gitignored, so your persona file won’t be committed.
 2. **Add more platforms**: Configure Discord, WhatsApp, or API
 3. **Enable voice**: Set up speech recognition and TTS
 4. **Advanced features**: Check out the [Coding Modules Guide](CODING_MODULES_GUIDE.md)
