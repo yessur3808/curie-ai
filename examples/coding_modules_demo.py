@@ -6,8 +6,6 @@ This script demonstrates the structure of the new features.
 Note: Requires dependencies from requirements.txt to be installed.
 """
 
-import os
-
 def main():
     """Show examples of how to use the enhanced coding modules"""
     print("=" * 60)
