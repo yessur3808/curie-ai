@@ -38,12 +38,12 @@ class EnvManager:
         self.env_example_path = self.repo_root / ".env.example"
         self.env_path = self.repo_root / ".env"
         
-    def parse_env_file(self, filepath: Path) -> Dict[str, Tuple[str, List[str]]]:
+    def parse_env_file(self, filepath: Path) -> Dict[str, Tuple[str, List[str], bool]]:
         """
-        Parse .env file and return dict of {variable_name: (value, [comment_lines])}
+        Parse .env file and return dict of {variable_name: (value, [comment_lines], is_commented)}
         
         Returns:
-            Dict mapping variable names to (value, comments) tuples
+            Dict mapping variable names to (value, comments, is_commented) tuples
         """
         if not filepath.exists():
             return {}
