@@ -144,27 +144,34 @@ def run_api():
 
 def run_coding_service(workflow: ChatWorkflow):
     """Run the standalone coding service in parallel with other modules"""
-    print("Starting Coding Service...")
-    from services.coding_service import CodingService
+    logger.info("Starting Coding Service...")
     
-    # Create notification callback to send messages to master user
-    def notify_master_user(message: str, data: dict):
-        master_user_id = os.getenv("MASTER_USER_ID")
-        if master_user_id:
-            # Store notification in memory for master user to retrieve
-            logger.info(f"Coding Service notification for master: {message}")
-            # You could extend this to send actual messages via connectors
-    
-    service = CodingService(notification_callback=notify_master_user)
-    service.start()
-    
-    # Keep service running
     try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Stopping coding service...")
-        service.stop()
+        from services.coding_service import CodingService
+        
+        # Create notification callback to send messages to master user
+        def notify_master_user(message: str, data: dict):
+            master_user_id = os.getenv("MASTER_USER_ID")
+            if master_user_id:
+                # Store notification in memory for master user to retrieve
+                logger.info(f"Coding Service notification for master: {message}")
+                # You could extend this to send actual messages via connectors
+        
+        service = CodingService(notification_callback=notify_master_user)
+        service.start()
+        logger.info("✅ Coding service initialized and started successfully")
+        
+        # Keep service running
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Stopping coding service...")
+            service.stop()
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to start coding service: {e}", exc_info=True)
+        raise
 
 def run_coder_interactive():
     print("Starting Coder skill (interactive mode)...")
@@ -359,9 +366,14 @@ def main():
     
     # Start Coding Service in thread
     if run_coding_service_flag:
-        t = threading.Thread(target=run_coding_service, args=(workflow,), daemon=True)
-        threads.append(t)
-        t.start()
+        try:
+            logger.info("Initializing coding service thread...")
+            t = threading.Thread(target=run_coding_service, args=(workflow,), daemon=True)
+            threads.append(t)
+            t.start()
+            logger.info("Coding service thread started")
+        except Exception as e:
+            logger.error(f"Failed to start coding service thread: {e}", exc_info=True)
 
     if run_coder_flag:
         run_coder_interactive()

@@ -41,10 +41,18 @@ class CodingService:
             notification_callback: Optional callback function to notify master user
                                  Should accept (message: str, data: dict)
         """
+        logger.info("Initializing coding service...")
         self.running = False
         self.task_queue = queue.Queue()
         self.notification_callback = notification_callback
-        self.reviewer = CodeReviewer()
+        
+        # Initialize code reviewer with error handling
+        try:
+            self.reviewer = CodeReviewer()
+            logger.info("✓ Code reviewer initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize code reviewer: {e}", exc_info=True)
+            raise RuntimeError(f"Cannot start coding service without code reviewer: {e}")
         
         # Initialize integrations based on available credentials
         self.github_available = bool(os.getenv('GITHUB_TOKEN'))
@@ -57,15 +65,17 @@ class CodingService:
         if self.gitlab_available:
             try:
                 self.gitlab = GitLabIntegration()
+                logger.info("✓ GitLab integration initialized")
             except Exception as e:
-                logger.warning(f"GitLab integration failed: {e}")
+                logger.warning(f"✗ GitLab integration failed: {e}")
                 self.gitlab_available = False
         
         if self.bitbucket_available:
             try:
                 self.bitbucket = BitbucketIntegration()
+                logger.info("✓ Bitbucket integration initialized")
             except Exception as e:
-                logger.warning(f"Bitbucket integration failed: {e}")
+                logger.warning(f"✗ Bitbucket integration failed: {e}")
                 self.bitbucket_available = False
         
         logger.info(
@@ -74,6 +84,10 @@ class CodingService:
             f"GitLab: {self.gitlab_available}, "
             f"Bitbucket: {self.bitbucket_available}"
         )
+        
+        # Warn if no platforms are available
+        if not (self.github_available or self.gitlab_available or self.bitbucket_available):
+            logger.warning("⚠️  No platform integrations available. Set GITHUB_TOKEN, GITLAB_TOKEN, or BITBUCKET credentials to enable platform features.")
     
     def notify_master(self, message: str, data: Optional[Dict] = None):
         """
@@ -310,7 +324,7 @@ class CodingService:
                 )
             
         except Exception as e:
-            logger.error(f"Task {task_id} failed with exception: {e}")
+            logger.error(f"Task {task_id} failed with exception: {e}", exc_info=True)
             self.notify_master(
                 f"❌ Task {task_id} crashed: {str(e)}",
                 {'task_id': task_id, 'error': str(e)}
