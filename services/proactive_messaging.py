@@ -115,14 +115,93 @@ class ProactiveMessagingService:
         Get list of users eligible for proactive messaging.
         Returns list of dicts with user info.
         
-        NOTE: This is a placeholder that returns an empty list.
-        Production implementation requires database integration to query users
-        with proactive_messaging_enabled=true in their profiles.
+        Queries MongoDB for users with proactive_messaging_enabled=true
+        and joins with PostgreSQL to get platform-specific IDs.
         
-        See docs/REALTIME_FEATURES.md for database schema requirements.
+        Returns:
+            List[Dict]: Each dict contains:
+                - internal_id: UUID string
+                - platform: 'telegram', 'discord', 'whatsapp', or 'api'
+                - external_user_id: Platform-specific user ID
+                - proactive_interval_hours: User's preferred interval (default: 24)
+                - timezone: User's timezone (default: 'UTC')
+                - busy: User's busy status (default: False)
         """
-        # TODO: Implement database query to retrieve users eligible for proactive messaging
-        return []
+        try:
+            from memory.database import mongo_db, get_pg_conn
+            
+            # Query MongoDB for users with proactive messaging enabled
+            cursor = mongo_db.user_profiles.find({
+                "facts.proactive_messaging_enabled": True
+            })
+            
+            eligible_users = []
+            
+            for profile in cursor:
+                internal_id = profile.get("_id")
+                if not internal_id:
+                    continue
+                
+                facts = profile.get("facts", {})
+                
+                # Skip if user is busy
+                if facts.get("busy", False):
+                    continue
+                
+                # Get user from PostgreSQL to find their platform ID
+                try:
+                    with get_pg_conn() as conn:
+                        cur = conn.cursor()
+                        cur.execute("SELECT * FROM users WHERE internal_id = %s", (str(internal_id),))
+                        user_row = cur.fetchone()
+                        
+                        if not user_row:
+                            logger.warning(f"User {internal_id} found in MongoDB but not in PostgreSQL")
+                            continue
+                        
+                        # Determine which platform this user uses
+                        platform = None
+                        external_user_id = None
+                        
+                        if user_row.get('telegram_id'):
+                            platform = 'telegram'
+                            external_user_id = user_row['telegram_id']
+                        elif user_row.get('discord_id'):
+                            platform = 'discord'
+                            external_user_id = user_row['discord_id']
+                        elif user_row.get('whatsapp_id'):
+                            platform = 'whatsapp'
+                            external_user_id = user_row['whatsapp_id']
+                        elif user_row.get('api_id'):
+                            platform = 'api'
+                            external_user_id = user_row['api_id']
+                        
+                        if not platform or not external_user_id:
+                            logger.warning(f"User {internal_id} has no platform ID")
+                            continue
+                        
+                        # Build user info dict
+                        user_info = {
+                            'internal_id': internal_id,
+                            'platform': platform,
+                            'external_user_id': external_user_id,
+                            'proactive_interval_hours': facts.get('proactive_interval_hours', 24),
+                            'timezone': facts.get('timezone', 'UTC'),
+                            'busy': facts.get('busy', False)
+                        }
+                        
+                        eligible_users.append(user_info)
+                        
+                except Exception as e:
+                    logger.error(f"Error querying user {internal_id} from PostgreSQL: {e}")
+                    continue
+            
+            logger.info(f"Found {len(eligible_users)} users eligible for proactive messaging")
+            return eligible_users
+            
+        except Exception as e:
+            logger.error(f"Error querying eligible users: {e}", exc_info=True)
+            return []
     
     def _cleanup_old_contacts(self):
         """
