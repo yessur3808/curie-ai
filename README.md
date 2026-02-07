@@ -49,6 +49,10 @@ See [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) for detailed voice conf
 - [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) - Platform-specific setup
 - [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) - Advanced coding features
 - [Quick Reference](docs/QUICK_REFERENCE.md) - Common commands and operations
+- [Feature Roadmap](docs/FEATURE_ROADMAP.md) - Official planned features and implementation plans
+- [Feature Enhancement Suggestions](docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md) - Additional feature ideas and enhancements
+- [Feature Suggestions Summary](docs/FEATURE_SUGGESTIONS_SUMMARY.md) - Quick reference for suggested features
+- [Feature Comparison Matrix](docs/FEATURE_COMPARISON_MATRIX.md) - Visual comparison of current, planned, and suggested features
 
 ## 🏗️ High-Level Architecture
 
@@ -416,18 +420,14 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 - ⚠️ Specific legal advice (unauthorized practice - not planned)
 - ⚠️ Tax filing services (requires professional review)
 
-**Note**: For detailed implementation plans, API requirements, and enhancement ideas, see [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md)
-
-
-## 📚 Documentation
-
-- [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) - Voice configuration and multi-platform setup
-- [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) - Code review, PR/MR management, and self-update
-- [Contributing Guidelines](CONTRIBUTING.md) - How to contribute to the project
-
+**Note**: For detailed implementation plans, API requirements, and enhancement ideas, see:
+- [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) - Official planned features
+- [docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md](docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md) - Additional feature suggestions and enhancements
+- [docs/FEATURE_SUGGESTIONS_SUMMARY.md](docs/FEATURE_SUGGESTIONS_SUMMARY.md) - Quick reference summary
+- [docs/FEATURE_COMPARISON_MATRIX.md](docs/FEATURE_COMPARISON_MATRIX.md) - Visual comparison matrix
 
 ## 🤝 Contributing
-Contributions welcome! Please read our contributing guidelines.
+Contributions welcome! Please read our [contributing guidelines](CONTRIBUTING.md).
 
 ## 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
