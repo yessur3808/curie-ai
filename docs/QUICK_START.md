@@ -67,7 +67,13 @@ MODEL_PATH=models/your-model.gguf
 
 ### 3. Setup Databases
 
-**Option A: Using Docker (Easiest)**
+**Option A: Using Docker with Make (Easiest)**
+```bash
+# Start databases and run all migrations
+make db-start && make setup-db
+```
+
+**Option B: Using Docker manually**
 ```bash
 # Start PostgreSQL and MongoDB with Docker
 docker-compose up -d postgres mongo
@@ -81,7 +87,7 @@ python scripts/gen_master_id.py
 python scripts/insert_master.py
 ```
 
-**Option B: Local Installation**
+**Option C: Local Installation**
 ```bash
 # Install PostgreSQL and MongoDB on your system
 # Then create the database:
@@ -104,6 +110,19 @@ python scripts/insert_master.py
 
 ### 5. Run C.U.R.I.E.
 
+**Using Make commands (recommended):**
+```bash
+# Run with Telegram connector
+make run-telegram
+
+# Or run with API server
+make run-api
+
+# Or run all connectors
+make run-all
+```
+
+**Or run directly:**
 ```bash
 # Run with Telegram connector
 python main.py --telegram
@@ -216,12 +235,47 @@ pip install -r requirements.txt
 - **Platform-Specific**: See [Multi-Platform Guide](MULTI_PLATFORM_GUIDE.md)
 - **GitHub Issues**: [Report bugs or ask questions](https://github.com/yessur3808/curie-ai/issues)
 
+## Useful Make Commands
+
+For convenience, many common tasks have Make shortcuts. Run `make help` to see all available commands.
+
+**Quick reference:**
+```bash
+# Installation
+make install              # Install core dependencies
+make install-optional     # Install optional dependencies (Whisper, Discord, WhatsApp)
+make verify              # Verify your setup
+
+# Database management
+make db-start            # Start databases with Docker
+make db-stop             # Stop databases
+make db-status           # Check database status
+make setup-db            # Run migrations (after db-start)
+
+# Running the application
+make run-telegram        # Start with Telegram
+make run-discord         # Start with Discord
+make run-whatsapp        # Start with WhatsApp
+make run-api             # Start with API server
+make run-all             # Start with all connectors
+
+# Development
+make test                # Run tests
+make clean               # Clean cache files
+make check-ports         # Check if ports are available
+```
+
+**Complete first-time setup:**
+```bash
+make install && make db-start && make setup-db && make run-telegram
+```
+
 ## Verification Checklist
 
 Before asking for help, verify:
 
 - [ ] Python 3.10+ installed: `python --version`
-- [ ] Dependencies installed: `python scripts/verify_setup.py`
+- [ ] Dependencies installed: `make verify` or `python scripts/verify_setup.py`
 - [ ] `.env` file configured correctly
 - [ ] Databases running and accessible
 - [ ] No other instance of the bot running

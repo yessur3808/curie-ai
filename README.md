@@ -105,7 +105,24 @@ cd curie-ai
 
 ### 2. **Install dependencies**
 
-**Option A: Using virtual environment (Recommended)**
+**Option A: Using Make (Recommended)**
+```sh
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+make install
+
+# Optional: Install voice features and extra connectors
+# Note: Skip on Python 3.13+ if openai-whisper fails to build
+# make install-optional
+
+# Verify installation
+make verify
+```
+
+**Option B: Using pip directly**
 ```sh
 # Create and activate virtual environment
 python3 -m venv venv
@@ -117,15 +134,8 @@ pip install -r requirements.txt
 # Optional: Install voice features and extra connectors
 # Note: Skip on Python 3.13+ if openai-whisper fails to build
 # pip install -r requirements-optional.txt
-```
 
-**Option B: System-wide installation**
-```sh
-pip install -r requirements.txt
-```
-
-**Verify installation:**
-```sh
+# Verify installation
 python scripts/verify_setup.py
 ```
 
@@ -160,6 +170,13 @@ You can list multiple GGUF model files (comma-separated) if you want to support 
 
 ### 5. Set up databases
 
+**Using Make (Recommended):**
+```sh
+# Start databases and run all setup
+make db-start && make setup-db
+```
+
+**Or manually:**
 ```sh
 # Apply database migrations
 python scripts/apply_migrations.py
@@ -178,7 +195,15 @@ Edit assets/persona.json to customize the assistant’s name, greeting, and styl
 
 ## Running the Bot
 
-**Start with a specific connector:**
+**Using Make commands (Recommended):**
+```sh
+make run-telegram  # Run Telegram bot
+make run-discord   # Run Discord bot
+make run-api       # Run REST API
+make run-all       # Run all connectors
+```
+
+**Or run directly:**
 ```sh
 python main.py --telegram  # Run Telegram bot
 python main.py --discord   # Run Discord bot
@@ -197,7 +222,12 @@ pm2 logs curie-main
 docker-compose up
 ```
 
-> **Note:** If you get errors when starting, run `python scripts/verify_setup.py` to diagnose issues.
+**See all available commands:**
+```sh
+make help  # Shows all Make commands with descriptions
+```
+
+> **Note:** If you get errors when starting, run `make verify` or `python scripts/verify_setup.py` to diagnose issues.
 > See [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for help with common errors.
 
 ## 🔧 Environment Variables
