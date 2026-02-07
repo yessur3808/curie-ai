@@ -40,6 +40,13 @@ It is inspired by conversational assistants like Jarvis from Iron Man, but runs 
 
 See [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) for detailed voice configuration.
 
+## 📚 Documentation
+
+- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Fix common setup and runtime issues
+- [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) - Platform-specific setup
+- [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) - Advanced coding features
+- [Quick Reference](docs/QUICK_REFERENCE.md) - Common commands and operations
+
 ## 🏗️ High-Level Architecture
 
 ```
@@ -95,9 +102,27 @@ cd curie-ai
 
 ### 2. **Install dependencies**
 
+**Option A: Using virtual environment (Recommended)**
+```sh
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+**Option B: System-wide installation**
 ```sh
 pip install -r requirements.txt
 ```
+
+**Verify installation:**
+```sh
+python scripts/verify_setup.py
+```
+
+> **Troubleshooting:** If you encounter any errors like `ModuleNotFoundError`, see [Troubleshooting Guide](docs/TROUBLESHOOTING.md)
 
 
 ### 3. **Download a GGUF LLM model**
@@ -146,23 +171,27 @@ Edit assets/persona.json to customize the assistant’s name, greeting, and styl
 
 ## Running the Bot
 
+**Start with a specific connector:**
 ```sh
-python main.py
+python main.py --telegram  # Run Telegram bot
+python main.py --discord   # Run Discord bot
+python main.py --api       # Run REST API
+python main.py --all       # Run all connectors
 ```
 
-or
-
+**Run with PM2 (for production):**
 ```sh
-python3 main.py
+pm2 start ecosystem.config.js
+pm2 logs curie-main
 ```
 
-
-Using Docker:
-
+**Using Docker:**
 ```sh
-
 docker-compose up
 ```
+
+> **Note:** If you get errors when starting, run `python scripts/verify_setup.py` to diagnose issues.
+> See [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for help with common errors.
 
 ## 🔧 Environment Variables
 
