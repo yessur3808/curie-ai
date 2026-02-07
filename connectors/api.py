@@ -402,5 +402,7 @@ async def clear_memory_api(req: MessageRequest):
     user_id = req.user_id
     username = req.username
     internal_id = get_internal_id(user_id, username)
+    if not UserManager.is_master_user(internal_id):
+        raise HTTPException(status_code=403, detail="Not authorized to clear memory")
     ConversationManager.clear_conversation(internal_id)
     return {"status": "ok", "message": "Memory cleared."}
