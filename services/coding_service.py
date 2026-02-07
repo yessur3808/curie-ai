@@ -11,7 +11,7 @@ import time
 import logging
 import threading
 import queue
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 from datetime import datetime
 
 # Add parent directory to path for imports
