@@ -14,7 +14,8 @@ import logging
 import random
 import threading
 import time
-from datetime import datetime, timedelta
+import pytz
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 from memory import UserManager, ConversationManager
@@ -27,6 +28,9 @@ class ProactiveMessagingService:
     """
     Service that sends proactive, caring check-in messages to users.
     """
+    
+    # Maximum entries to keep in memory (prevents unbounded growth)
+    MAX_CONTACT_HISTORY = 1000
     
     def __init__(self, agent, connectors: Dict = None):
         """
@@ -43,6 +47,8 @@ class ProactiveMessagingService:
         self.check_interval = 3600  # Check every hour
         
         # Tracking when we last messaged each user
+        # Note: In production, this should be persisted to database
+        # For now, using in-memory cache with size limit
         self.last_contact = {}
         
         logger.info("ProactiveMessagingService initialized")
@@ -82,6 +88,9 @@ class ProactiveMessagingService:
     async def _check_and_send_messages(self):
         """Check all users and send proactive messages if appropriate."""
         try:
+            # Clean up old contact history periodically
+            self._cleanup_old_contacts()
+            
             # Get all users who have the proactive_messaging preference enabled
             # For now, we'll check users from recent conversations
             users = self._get_eligible_users()
@@ -103,6 +112,21 @@ class ProactiveMessagingService:
         # TODO: Query database for users with proactive_messaging enabled
         # For now, return empty list - this would need database support
         return []
+    
+    def _cleanup_old_contacts(self):
+        """
+        Clean up old entries from last_contact cache to prevent memory growth.
+        Keeps only the most recent MAX_CONTACT_HISTORY entries.
+        """
+        if len(self.last_contact) > self.MAX_CONTACT_HISTORY:
+            # Sort by timestamp and keep only recent entries
+            sorted_contacts = sorted(
+                self.last_contact.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            self.last_contact = dict(sorted_contacts[:self.MAX_CONTACT_HISTORY])
+            logger.info(f"Cleaned up contact history, kept {self.MAX_CONTACT_HISTORY} most recent entries")
     
     async def _maybe_send_proactive_message(self, user_info: Dict):
         """
@@ -129,7 +153,7 @@ class ProactiveMessagingService:
         
         # Get last conversation time
         last_contact_time = self.last_contact.get(internal_id)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)  # Use timezone-aware datetime
         
         # Get user's preferred check-in interval (in hours)
         min_interval_hours = user_profile.get('proactive_interval_hours', 24)
