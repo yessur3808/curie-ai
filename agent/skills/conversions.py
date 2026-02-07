@@ -6,9 +6,9 @@ Provides natural language interface for converting between currencies and variou
 
 import logging
 import re
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any
 from utils.conversions import convert_currency, format_currency_result, get_popular_currencies
-from utils.units import convert_unit, format_unit_result, get_supported_units
+from utils.units import convert_unit, format_unit_result
 
 logger = logging.getLogger(__name__)
 
