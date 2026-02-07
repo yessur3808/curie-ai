@@ -121,16 +121,7 @@ class ProactiveMessagingService:
         
         See docs/REALTIME_FEATURES.md for database schema requirements.
         """
-        # TODO: Query database for users with proactive_messaging enabled
-        # Example implementation:
-        # users = []
-        # for user in UserManager.get_all_users_with_proactive_enabled():
-        #     users.append({
-        #         'internal_id': user.internal_id,
-        #         'platform': user.primary_platform,
-        #         'external_user_id': user.external_id
-        #     })
-        # return users
+        # TODO: Implement database query to retrieve users eligible for proactive messaging
         return []
     
     def _cleanup_old_contacts(self):
