@@ -470,7 +470,7 @@ def run_standalone_service():
     
     parser = argparse.ArgumentParser(description="Curie AI Coding Service")
     parser.add_argument('--config', type=str, help="Configuration file path")
-    args = parser.parse_args()
+    _ = parser.parse_args()
     
     # Setup logging
     logging.basicConfig(
