@@ -15,7 +15,7 @@ import random
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict
 
 from memory import UserManager, ConversationManager
 from llm import manager
