@@ -155,7 +155,7 @@ class CodeReviewer:
             try:
                 import json
                 review_data = json.loads(response)
-            except:
+            except json.JSONDecodeError:
                 review_data = self._parse_plain_review(response)
             
             return review_data
