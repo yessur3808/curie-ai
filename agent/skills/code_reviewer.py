@@ -7,7 +7,7 @@ Supports GitHub, GitLab, Bitbucket and other Git platforms
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 import subprocess
 import git
 import llm.manager
