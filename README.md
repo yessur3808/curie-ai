@@ -3,6 +3,8 @@
 Curie is an AI assistant that runs **locally** and interacts with users via **multiple platforms**.  
 It is inspired by conversational assistants like Jarvis from Iron Man, but runs fully on your hardware using state-of-the-art open local language models (no OpenAI account required).
 
+> **🚀 New to C.U.R.I.E.?** Start with the [Quick Start Guide](docs/QUICK_START.md) to get running in 5 minutes!
+
 ## 🌟 Features
 
 - **Multi-Platform Support**: Telegram, Discord, WhatsApp, and RESTful/WebSocket API
@@ -42,6 +44,7 @@ See [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) for detailed voice conf
 
 ## 📚 Documentation
 
+- **[Quick Start Guide](docs/QUICK_START.md)** - Get up and running in 5 minutes ⚡
 - [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Fix common setup and runtime issues
 - [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) - Platform-specific setup
 - [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) - Advanced coding features
