@@ -14,7 +14,6 @@ import logging
 import random
 import threading
 import time
-import pytz
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
