@@ -1070,7 +1070,7 @@ Culture Agent: "In Japan, tipping isn't customary, which helps with budgeting."
 **Description**: Improve complex reasoning capabilities.
 
 **Techniques:**
-- Chain-of-thought prompting (already used)
+- Chain-of-thought prompting (for complex reasoning tasks)
 - Tree-of-thought exploration
 - Self-reflection and verification
 - Multi-step problem decomposition
