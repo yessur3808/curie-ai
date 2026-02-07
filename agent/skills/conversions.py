@@ -32,7 +32,6 @@ def extract_conversion_params(message: str) -> Optional[Dict[str, Any]]:
         }
         Or None if no conversion detected
     """
-    """
     message = message.lower().strip()
     
     # Pattern 1: "convert X FROM_UNIT to TO_UNIT"
