@@ -15,7 +15,6 @@ Usage:
     python scripts/sync_env.py --backup           # Create backup before making changes
 """
 
-import os
 import sys
 import argparse
 import shutil
