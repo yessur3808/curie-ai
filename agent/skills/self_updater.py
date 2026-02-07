@@ -291,7 +291,7 @@ class SelfUpdater:
         
         try:
             # Try to restart using systemctl with configurable timeout
-            result = subprocess.run(
+            subprocess.run(
                 ['sudo', 'systemctl', 'restart', service_name],
                 check=True,
                 capture_output=True,
