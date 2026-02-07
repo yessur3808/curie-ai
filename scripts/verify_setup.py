@@ -8,7 +8,7 @@ before running the application. It helps diagnose common setup issues.
 
 import sys
 import os
-import importlib.util
+import importlib
 from typing import List, Tuple
 
 # Color codes for terminal output

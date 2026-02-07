@@ -64,7 +64,7 @@ MODEL_PATH=models/your-model.gguf
 **Option A: Using Docker (Easiest)**
 ```bash
 # Start PostgreSQL and MongoDB with Docker
-docker-compose up -d postgres mongodb
+docker-compose up -d postgres mongo
 
 # Wait a few seconds for databases to start
 sleep 5
