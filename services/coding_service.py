@@ -39,12 +39,10 @@ except ImportError as e:
     apply_bitbucket_code_change = None
 
 try:
-    from agent.skills.self_updater import SelfUpdater, auto_update
+    from agent.skills.self_updater import auto_update
 except ImportError as e:
     logger.warning(f"Self-updater import failed: {e}")
-    SelfUpdater = None
     auto_update = None
-
 try:
     from agent.skills.coder import apply_code_change
 except ImportError as e:
