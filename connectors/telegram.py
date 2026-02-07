@@ -7,10 +7,17 @@ Receives Telegram events, normalizes to standard format, calls ChatWorkflow.
 import datetime
 import os
 import logging
+from typing import Optional
 from dotenv import load_dotenv
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    MessageHandler,
+    CommandHandler,
+    filters,
+    ContextTypes,
+)
 from agent.chat_workflow import ChatWorkflow
 
 from utils.persona import load_persona
@@ -32,31 +39,33 @@ def set_workflow(workflow: ChatWorkflow):
     _workflow = workflow
 
 
-def get_internal_id(tg_user_id: int, telegram_username: str, platform: str = 'telegram') -> str:
+def get_internal_id(
+    tg_user_id: int, telegram_username: str, platform: str = "telegram"
+) -> str:
     """
     Get internal user ID, respecting /identify command if used.
-    
+
     If the user has identified themselves via /identify command, use that internal_id.
     Otherwise, fall back to get_or_create_user_internal_id.
-    
+
     Args:
         tg_user_id: Telegram user ID
         telegram_username: Telegram username (or fallback)
         platform: Platform name (default: 'telegram')
-    
+
     Returns:
         Internal user ID (UUID string)
     """
     # Check if user has identified themselves
     if tg_user_id in user_session_map:
         return user_session_map[tg_user_id]
-    
+
     # Fall back to standard lookup/creation
     return UserManager.get_or_create_user_internal_id(
         channel=platform,
         external_id=tg_user_id,
         secret_username=telegram_username,
-        updated_by='telegram_bot'
+        updated_by="telegram_bot",
     )
 
 
@@ -64,7 +73,7 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _workflow:
         await update.message.reply_text("❌ System not initialized.")
         return
-    
+
     greeting = _workflow.persona.get("greeting", "Hello!")
     await update.message.reply_text(f"{greeting}")
 
@@ -80,9 +89,7 @@ async def handle_busy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
     clear_user_busy(tg_user_id)
-    await update.message.reply_text(
-        "Bienvenue! I'm here and ready to chat again. 😊"
-    )
+    await update.message.reply_text("Bienvenue! I'm here and ready to chat again. 😊")
 
 
 async def handle_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,19 +98,21 @@ async def handle_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Example: /remember favorite_food pizza
     """
     tg_user_id = update.message.from_user.id
-    args = context.args if hasattr(context, 'args') else []
-    
+    args = context.args if hasattr(context, "args") else []
+
     if len(args) < 2:
-        await update.message.reply_text("Usage: /remember <key> <value>\nExample: /remember favorite_food pizza")
+        await update.message.reply_text(
+            "Usage: /remember <key> <value>\nExample: /remember favorite_food pizza"
+        )
         return
-    
+
     key = args[0]
     value = " ".join(args[1:])
-    
+
     # Get internal ID (respects /identify)
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
     internal_id = get_internal_id(tg_user_id, telegram_username)
-    
+
     # Save fact
     UserManager.update_user_profile(internal_id, {key: value})
     await update.message.reply_text(f"✅ Remembered: {key} = {value}")
@@ -111,7 +120,7 @@ async def handle_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_identify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
-    args = context.args if hasattr(context, 'args') else []
+    args = context.args if hasattr(context, "args") else []
     if not args:
         await update.message.reply_text("Usage: /identify <your_secret_username>")
         return
@@ -120,7 +129,9 @@ async def handle_identify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     internal_id = UserManager.get_internal_id_by_secret_username(secret_username)
     if internal_id:
         user_session_map[tg_user_id] = internal_id
-        await update.message.reply_text(f"✅ Identity linked to secret_username `{secret_username}`.")
+        await update.message.reply_text(
+            f"✅ Identity linked to secret_username `{secret_username}`."
+        )
     else:
         await update.message.reply_text("❌ No user found with that secret_username.")
 
@@ -128,36 +139,40 @@ async def handle_identify(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from memory import ConversationManager
     from utils.db import is_master_user
-    
+
     tg_user_id = update.message.from_user.id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
     internal_id = get_internal_id(tg_user_id, telegram_username)
 
     if not is_master_user(internal_id):
-        await update.message.reply_text("❌ You are not authorized to use this command.")
+        await update.message.reply_text(
+            "❌ You are not authorized to use this command."
+        )
         return
-    
-    args = context.args if hasattr(context, 'args') else []
+
+    args = context.args if hasattr(context, "args") else []
     if args and args[0] == "all":
         ConversationManager.clear_conversation()
         await update.message.reply_text("🧹 All conversational memory cleared.")
     else:
         ConversationManager.clear_conversation(internal_id)
-        await update.message.reply_text("🧹 Your conversational memory has been cleared.")
+        await update.message.reply_text(
+            "🧹 Your conversational memory has been cleared."
+        )
 
 
-async def handle_voice_message(update: Update, persona: dict) -> str:
+async def handle_voice_message(update: Update, persona: dict) -> Optional[str]:
     """
     Handle voice message from Telegram.
     Downloads the audio and converts it to text using speech recognition.
     Uses persona voice config for accent-aware recognition.
-    
+
     Args:
         update: Telegram update object with voice message
         persona: Persona dictionary with voice configuration
-        
+
     Returns:
-        Transcribed text or empty string if transcription fails
+        Transcribed text or None if transcription fails
     """
     # Import voice utilities
     from utils.voice import transcribe_audio, get_voice_config_from_persona
@@ -175,8 +190,8 @@ async def handle_voice_message(update: Update, persona: dict) -> str:
 
         # Get voice config from persona
         voice_config = get_voice_config_from_persona(persona)
-        accent = voice_config.get('accent')
-        language = voice_config.get('language', 'en')
+        accent = voice_config.get("accent")
+        language = voice_config.get("language", "en")
 
         # Transcribe audio to text with accent awareness
         transcribed_text = await transcribe_audio(
@@ -186,10 +201,10 @@ async def handle_voice_message(update: Update, persona: dict) -> str:
             auto_detect=True,
         )
 
-        return transcribed_text or ""
+        return transcribed_text
     except Exception as e:
         logger.error(f"Error processing voice message: {e}")
-        return ""
+        return None
     finally:
         # Clean up temporary file regardless of success or failure
         if os.path.exists(audio_path):
@@ -201,40 +216,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _workflow:
         await update.message.reply_text("❌ System not initialized.")
         return
-    
+
     tg_user_id = update.message.from_user.id
     message_id = update.message.message_id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
-    
+
     # Get internal ID (respects /identify if used)
     internal_id = get_internal_id(tg_user_id, telegram_username)
-    
+
     # Handle voice messages with persona-aware recognition
     if update.message.voice:
         user_message = await handle_voice_message(update, _workflow.persona)
         if not user_message:
-            await update.message.reply_text("❌ Sorry, I couldn't understand the voice message.")
+            await update.message.reply_text(
+                "❌ Sorry, I couldn't understand the voice message."
+            )
             return
         await update.message.reply_text(f"🎤 I heard: {user_message}")
     else:
         user_message = update.message.text
-    
+
     # Normalize to standard ChatWorkflow format
     normalized_input = {
-        'platform': 'telegram',
-        'external_user_id': tg_user_id,
-        'external_chat_id': update.message.chat_id,
-        'message_id': message_id,
-        'text': user_message,
-        'timestamp': datetime.datetime.utcnow(),
-        'internal_id': internal_id  # Pass identified internal_id to workflow
+        "platform": "telegram",
+        "external_user_id": tg_user_id,
+        "external_chat_id": update.message.chat_id,
+        "message_id": message_id,
+        "text": user_message,
+        "timestamp": datetime.datetime.utcnow(),
+        "internal_id": internal_id,  # Pass identified internal_id to workflow
     }
-    
+
     # Process through workflow
     result = await _workflow.process_message(normalized_input)
-    
+
     # Send response
-    response_text = result.get('text', '[Error: No response]')
+    response_text = result.get("text", "[Error: No response]")
     await update.message.reply_text(response_text)
 
 
@@ -242,13 +259,15 @@ def start_telegram_bot(workflow: ChatWorkflow):
     """Start Telegram bot with shared ChatWorkflow."""
     global _workflow
     _workflow = workflow
-    
-    telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
+
+    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not telegram_token:
-        raise RuntimeError("Telegram bot token not found in .env file or environment variables.")
+        raise RuntimeError(
+            "Telegram bot token not found in .env file or environment variables."
+        )
 
     app = ApplicationBuilder().token(telegram_token).build()
-    
+
     # Register handlers
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(CommandHandler("identify", handle_identify))
@@ -257,7 +276,9 @@ def start_telegram_bot(workflow: ChatWorkflow):
     app.add_handler(CommandHandler("remember", handle_remember))
     app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.VOICE, handle_message))  # Handle voice messages
+    app.add_handler(
+        MessageHandler(filters.VOICE, handle_message)
+    )  # Handle voice messages
 
     print("🤖 Telegram bot is running...")
     app.run_polling(drop_pending_updates=True)
