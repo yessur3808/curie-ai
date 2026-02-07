@@ -373,15 +373,20 @@ def main():
             # Build connector map for proactive messaging
             connectors = {}
             # We'll populate this as connectors are initialized
-            # For now, we'll pass empty and update when telegram starts
+            # Note: do not start the service unless at least one connector is registered
             
             # Get check interval from env (default: 3600 seconds = 1 hour)
             check_interval = int(os.getenv("PROACTIVE_CHECK_INTERVAL", "3600"))
             
-            proactive_service = ProactiveMessagingService(agent=agent, connectors=connectors)
-            proactive_service.check_interval = check_interval
-            proactive_service.start()
-            logger.info(f"✅ Proactive messaging service started (check interval: {check_interval}s)")
+            if not connectors:
+                logger.info(
+                    "Proactive messaging service not started because no connectors are registered yet."
+                )
+            else:
+                proactive_service = ProactiveMessagingService(agent=agent, connectors=connectors)
+                proactive_service.check_interval = check_interval
+                proactive_service.start()
+                logger.info(f"✅ Proactive messaging service started (check interval: {check_interval}s)")
         except Exception as e:
             logger.error(f"❌ Failed to start proactive messaging service: {e}", exc_info=True)
     elif not enable_proactive:
