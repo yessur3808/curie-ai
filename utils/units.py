@@ -5,9 +5,7 @@ Supports length, mass, volume, temperature, speed, area, and more.
 """
 
 import logging
-import re
-from typing import Optional, Dict, Tuple, Any
-
+from typing import Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 # Conversion factors to base units
