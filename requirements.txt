@@ -36,3 +36,6 @@ gTTS==2.5.4
 # WebSocket support for Web UI
 websockets==14.1
 python-multipart==0.0.22
+
+# Timezone support
+pytz==2024.2

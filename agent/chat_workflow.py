@@ -356,6 +356,28 @@ class ChatWorkflow:
         lines.append("- Only extract and store facts when explicitly asked to remember them.")
         lines.append("- Keep responses natural and conversational - no meta-commentary or speaker labels.")
         lines.append("- Do not include actions like *nods* or *smiles*.")
+        lines.append("- NEVER state that you don't have access to real-time information - you DO have access.")
+        lines.append("- NEVER say you're just an AI or language model - focus on helping naturally.")
+        
+        # Add current datetime context to every prompt
+        from datetime import datetime as dt
+        import pytz
+        try:
+            # Try to get user's timezone from profile
+            user_tz = user_profile.get('timezone', 'UTC') if user_profile else 'UTC'
+            tz = pytz.timezone(user_tz)
+            now = dt.now(tz)
+            lines.append(f"\n[CURRENT DATE AND TIME]")
+            lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
+            lines.append(f"- Current time: {now.strftime('%I:%M %p %Z')}")
+            lines.append(f"- Timezone: {user_tz}")
+        except:
+            # Fallback to UTC
+            now = dt.now(pytz.UTC)
+            lines.append(f"\n[CURRENT DATE AND TIME]")
+            lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
+            lines.append(f"- Current time: {now.strftime('%I:%M %p UTC')}")
+            lines.append(f"- Timezone: UTC")
         
         # User facts/profile
         if user_profile:
