@@ -277,16 +277,48 @@ class ProactiveMessagingService:
             True if successful, False otherwise
         """
         try:
-            # Different connectors may have different send methods
-            # This is a generic implementation that may need connector-specific handling
-            
-            if hasattr(connector, 'send_message'):
-                await connector.send_message(external_user_id, message)
+            # Different connectors may have different outbound message interfaces.
+            # We support a small set of duck-typed options here so proactive sends
+            # can work even if a connector doesn't expose `send_message` directly.
+
+            async def _call_maybe_async(func, *args, **kwargs):
+                """Call `func` which may be sync or async, returning after it completes."""
+                # If it's declared as a coroutine function, call and await it.
+                if asyncio.iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                # If calling it returns a coroutine, await that.
+                result = func(*args, **kwargs)
+                if asyncio.iscoroutine(result):
+                    return await result
+                # Otherwise, offload the sync function to a thread.
+                return await asyncio.to_thread(func, *args, **kwargs)
+
+            # 1. Preferred interface: `send_message(external_user_id, message)`
+            if hasattr(connector, "send_message"):
+                await _call_maybe_async(connector.send_message, external_user_id, message)
                 return True
-            else:
-                logger.warning(f"Connector {type(connector).__name__} doesn't have send_message method")
-                return False
-        
+
+            # 2. Common generic interfaces on some connectors: `send` or `send_text`
+            if hasattr(connector, "send"):
+                await _call_maybe_async(connector.send, external_user_id, message)
+                return True
+
+            if hasattr(connector, "send_text"):
+                await _call_maybe_async(connector.send_text, external_user_id, message)
+                return True
+
+            # 3. Fallback: treat the connector itself as a callable sender.
+            if callable(connector):
+                await _call_maybe_async(connector, external_user_id, message)
+                return True
+
+            # If we reach here, we don't know how to send via this connector.
+            logger.warning(
+                "Connector %s does not implement a supported outbound messaging interface "
+                "(expected one of: send_message, send, send_text, or a callable).",
+                type(connector).__name__,
+            )
+            return False
         except Exception as e:
             logger.error(f"Error sending message via connector: {e}", exc_info=True)
             return False
