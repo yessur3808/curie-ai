@@ -10,7 +10,6 @@ import logging
 from typing import Dict, List, Optional
 import git
 from github import Github
-import subprocess
 
 logger = logging.getLogger(__name__)
 
