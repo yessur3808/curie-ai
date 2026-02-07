@@ -7,6 +7,7 @@ Centralized chat workflow: handles all chat intelligence independent of connecto
 - Prompt construction with structured message format
 - LLM inference with output sanitation
 - Deduplication at the chat level
+- Coding assistant skill integration
 """
 
 import asyncio
@@ -246,6 +247,31 @@ class ChatWorkflow:
             }
         
         try:
+            # Check for coding-related queries first (before LLM)
+            try:
+                from agent.skills.coding_assistant import handle_coding_query
+                coding_response = await handle_coding_query(user_text)
+                if coding_response:
+                    # Found a coding intent, return the response
+                    logger.info(f"Coding skill handled the query")
+                    # Save to conversation history
+                    ConversationManager.save_conversation(internal_id, "user", user_text)
+                    ConversationManager.save_conversation(internal_id, "assistant", coding_response)
+                    
+                    # Cache response for deduplication
+                    self.dedupe_cache.set(platform, str(external_chat_id), message_id, coding_response)
+                    
+                    processing_time = (time.time() - start_time) * 1000
+                    return {
+                        'text': coding_response,
+                        'timestamp': datetime.utcnow(),
+                        'model_used': 'coding_skill',
+                        'processing_time_ms': round(processing_time, 2)
+                    }
+            except Exception as e:
+                # Log but don't fail - fall back to normal LLM processing
+                logger.debug(f"Coding skill check failed: {e}")
+            
             # Load user profile and conversation history in parallel
             user_profile, history = await self._batch_load_context(internal_id)
             

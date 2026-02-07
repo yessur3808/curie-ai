@@ -15,6 +15,11 @@ It is inspired by conversational assistants like Jarvis from Iron Man, but runs 
 - **Migration System**: Organized database versioning
 - **Utility Scripts**: Helper scripts for common operations
 - **Docker Support**: Containerized deployment ready
+- **🆕 Enhanced Coding Modules**: 
+  - **Code Review**: Automated code review with AI-powered analysis
+  - **Multi-Platform PR/MR**: Support for GitHub, GitLab, and Bitbucket
+  - **Self-Update**: Safe self-update mechanism with rollback capability
+  - **Standalone Coding Service**: Run code operations independently in parallel
 
 ## 📱 Supported Platforms
 
@@ -203,11 +208,18 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 | `ASSISTANT_NAME` | Display name of your AI assistant (used for speaker tag removal) | None | `jarvis` |
 | `PERSONA_FILE` | Persona configuration filename (set to "all" for multi-persona mode) | None | `personality.json` |
 | `GITHUB_TOKEN` | GitHub personal access token for code operations | None | `ghp_***` |
+| `GITLAB_TOKEN` | GitLab personal access token for code operations | None | `glpat_***` |
+| `GITLAB_URL` | GitLab instance URL (for self-hosted) | `https://gitlab.com` | `https://gitlab.company.com` |
+| `BITBUCKET_USERNAME` | Bitbucket username for code operations | None | `username` |
+| `BITBUCKET_APP_PASSWORD` | Bitbucket app password for code operations | None | `app_password` |
 | `MAIN_REPO` | Main repository URL for code operations | None | `https://github.com/user/repo` |
 | `MAIN_REVIEWER` | Default code reviewer username | None | `MainCoder` |
+| `TARGET_BRANCH` | Default target branch for PRs/MRs | `main` | `develop` |
+| `SYSTEMD_SERVICE_NAME` | Systemd service name for automated restarts | None | `curie-ai` |
 | `RUN_TELEGRAM` | Enable/disable Telegram bot | `true` | `true` or `false` |
 | `RUN_API` | Enable/disable API server | `true` | `true` or `false` |
 | `RUN_CODER` | Enable/disable coding agent | `false` | `true` or `false` |
+| `RUN_CODING_SERVICE` | Enable/disable standalone coding service | `false` | `true` or `false` |
 | `PROJECTS_ROOT` | Root directory for projects | None | `/var/projects` |
 
 ### LLM Context Window Configuration (Advanced)
@@ -261,11 +273,22 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 - [x] WhatsApp connector (✅ Completed)
 - [x] Discord connector (✅ Completed)
 - [x] Multi-platform support (✅ Completed)
+- [x] Enhanced coding modules (✅ Completed)
+  - [x] Multi-platform PR/MR (GitHub, GitLab, Bitbucket)
+  - [x] Automated code review
+  - [x] Self-update system
+  - [x] Standalone coding service
 - [ ] Web dashboard / UI
 - [ ] Advanced memory management
 - [ ] Enhanced multi-user support
 - [ ] Plugin system
 
+
+## 📚 Documentation
+
+- [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) - Voice configuration and multi-platform setup
+- [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) - Code review, PR/MR management, and self-update
+- [Contributing Guidelines](CONTRIBUTING.md) - How to contribute to the project
 
 
 ## 🤝 Contributing
