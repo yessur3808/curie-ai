@@ -1,6 +1,12 @@
 SHELL := /bin/bash
 
-.PHONY: run start test migrate migrate-down lint format shell
+.PHONY: install run start test migrate migrate-down lint format shell verify
+
+install:  ## Install all dependencies from requirements.txt
+	pip install -r requirements.txt
+
+verify:  ## Verify setup and dependencies
+	python scripts/verify_setup.py
 
 run:
 	python main.py

@@ -7,16 +7,34 @@ import sys
 import json
 import logging
 
-from connectors.telegram import start_telegram_bot, set_workflow as set_telegram_workflow
-from connectors.api import app as fastapi_app, set_workflow as set_api_workflow
-from memory import init_memory
-from llm import manager
-import uvicorn
+# Check for critical dependencies early to provide helpful error messages
+try:
+    from connectors.telegram import start_telegram_bot, set_workflow as set_telegram_workflow
+    from connectors.api import app as fastapi_app, set_workflow as set_api_workflow
+    from memory import init_memory
+    from llm import manager
+    import uvicorn
 
-from agent.core import Agent
-from agent.chat_workflow import ChatWorkflow
-from utils.persona import load_persona, list_available_personas
-import asyncio
+    from agent.core import Agent
+    from agent.chat_workflow import ChatWorkflow
+    from utils.persona import load_persona, list_available_personas
+    import asyncio
+except ModuleNotFoundError as e:
+    print(f"\n{'='*70}")
+    print("ERROR: Missing required Python dependency")
+    print(f"{'='*70}\n")
+    print(f"Module not found: {e.name}")
+    print("\nThis error occurs when required dependencies are not installed.")
+    print("\nTo fix this issue, please install all dependencies:\n")
+    print("  pip install -r requirements.txt\n")
+    print("After installation, verify your setup:\n")
+    print("  python scripts/verify_setup.py\n")
+    print(f"{'='*70}\n")
+    print("For more help, see:")
+    print("  - docs/QUICK_START.md")
+    print("  - docs/TROUBLESHOOTING.md")
+    print(f"{'='*70}\n")
+    sys.exit(1)
 
 logger = logging.getLogger(__name__)
 
