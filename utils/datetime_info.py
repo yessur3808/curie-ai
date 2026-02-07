@@ -26,7 +26,7 @@ def get_current_datetime(timezone_str: str = "UTC"):
             "formatted": now.strftime("%A, %B %d, %Y at %I:%M %p %Z"),
             "iso": now.isoformat()
         }
-    except Exception as e:
+    except pytz.UnknownTimeZoneError as e:
         # Fallback to UTC if timezone is invalid
         tz = pytz.UTC
         now = datetime.now(tz)
