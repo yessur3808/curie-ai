@@ -249,16 +249,25 @@ class CodingService:
         
         try:
             if platform == 'github' and self.github_available:
-                branch, changes, pr_url = apply_code_change(
-                    goal, files_to_edit, repo_path, branch_name
-                )
-                result = {
-                    'success': True,
-                    'platform': 'github',
-                    'branch': branch,
-                    'url': pr_url,
-                    'files_changed': list(changes.keys())
-                }
+                if apply_code_change is None:
+                    result = {
+                        'success': False,
+                        'error': (
+                            'GitHub PR creation is not available because the optional '
+                            'apply_code_change helper could not be imported.'
+                        )
+                    }
+                else:
+                    branch, changes, pr_url = apply_code_change(
+                        goal, files_to_edit, repo_path, branch_name
+                    )
+                    result = {
+                        'success': True,
+                        'platform': 'github',
+                        'branch': branch,
+                        'url': pr_url,
+                        'files_changed': list(changes.keys())
+                    }
                 
             elif platform == 'gitlab' and self.gitlab_available:
                 branch, changes, mr_url = apply_gitlab_code_change(
