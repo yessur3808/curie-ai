@@ -52,6 +52,7 @@ See [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) for detailed voice conf
 - [Feature Roadmap](docs/FEATURE_ROADMAP.md) - Official planned features and implementation plans
 - [Feature Enhancement Suggestions](docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md) - Additional feature ideas and enhancements
 - [Feature Suggestions Summary](docs/FEATURE_SUGGESTIONS_SUMMARY.md) - Quick reference for suggested features
+- [Feature Comparison Matrix](docs/FEATURE_COMPARISON_MATRIX.md) - Visual comparison of current, planned, and suggested features
 
 ## 🏗️ High-Level Architecture
 
@@ -423,6 +424,7 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 - [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) - Official planned features
 - [docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md](docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md) - Additional feature suggestions and enhancements
 - [docs/FEATURE_SUGGESTIONS_SUMMARY.md](docs/FEATURE_SUGGESTIONS_SUMMARY.md) - Quick reference summary
+- [docs/FEATURE_COMPARISON_MATRIX.md](docs/FEATURE_COMPARISON_MATRIX.md) - Visual comparison matrix
 
 ## 🤝 Contributing
 Contributions welcome! Please read our contributing guidelines.
