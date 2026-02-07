@@ -9,7 +9,7 @@ pymongo==4.13.0
 GitPython==3.1.44
 PyGithub==2.6.1
 python-gitlab==4.4.0
-requests==2.31.0
+requests>=2.32.3
 
 fastapi==0.115.12
 uvicorn==0.34.3
@@ -27,7 +27,7 @@ icrawler==0.6.10
 
 # Multi-platform connectors
 discord.py==2.4.0
-whatsapp-web.py==0.0.8
+whatsapp-web.py==0.1.0
 
 # Voice/Audio processing
 openai-whisper==20240930
@@ -36,7 +36,7 @@ SpeechRecognition==3.12.0
 gTTS==2.5.4
 
 # WebSocket support for Web UI
-websockets==14.1
+websockets>=14.1
 python-multipart==0.0.22
 
 # Timezone support
