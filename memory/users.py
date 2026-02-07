@@ -45,6 +45,22 @@ class UserManager:
                 )
             )
             conn.commit()
+            
+            # Initialize user profile in MongoDB with proactive messaging enabled by default
+            # Master users and all new users get proactive messaging enabled
+            default_profile = {
+                "proactive_messaging_enabled": True,
+                "proactive_interval_hours": 24
+            }
+            mongo_db.user_profiles.update_one(
+                {"_id": new_uuid},
+                {
+                    "$set": {"facts": default_profile},
+                    "$currentDate": {"last_updated": True}
+                },
+                upsert=True
+            )
+            
             return new_uuid
 
     @staticmethod

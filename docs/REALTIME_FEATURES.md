@@ -72,11 +72,19 @@ Curie can now randomly check in with users like a caring friend.
 
 **How to enable:**
 
-Set these fields in the user's profile (MongoDB):
+Proactive messaging is **enabled by default** for all new users and master users with these default settings:
 ```json
 {
   "proactive_messaging_enabled": true,
   "proactive_interval_hours": 24
+}
+```
+
+To **disable** or customize for a user, update their profile in MongoDB:
+```json
+{
+  "proactive_messaging_enabled": false,  // Set to false to disable
+  "proactive_interval_hours": 48          // Or customize the interval
 }
 ```
 
