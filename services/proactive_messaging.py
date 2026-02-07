@@ -308,7 +308,7 @@ class ProactiveMessagingService:
             "DON'T say things like 'Would you like me to...' or 'What would you like me to do?'. "
             "Just be natural and caring. Examples: 'Hey! How's your day going?', "
             "'Thought of you today, hope you're doing well!', 'What's new with you?'\n"
-            "CRITICAL: Do NOT reveal you're checking in automatically. Just be natural like a real friend.\n"
+            "CRITICAL: Do NOT reveal you're checking in automatically. Just be natural, be a real genuine, caring friend.\n"
             "Keep it SHORT and CASUAL - 1-2 sentences only!\n"
         )
         
