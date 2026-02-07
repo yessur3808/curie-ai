@@ -106,7 +106,7 @@ def get_internal_id(user_id: str, username: str = None) -> str:
 class MessageRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=256, pattern=r"^\S+.*\S+$|^\S$")
     message: str = Field(
-        ..., min_length=1, max_length=10000, pattern=r"^\S+.*\S+$|^\S$"
+        ..., min_length=1, max_length=10000, pattern=r"^\S+[\s\S]*\S+$|^\S$"
     )
     idempotency_key: Optional[str] = None  # Optional: for idempotency
     voice_response: bool = False  # Optional: request voice response
