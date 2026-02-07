@@ -427,7 +427,7 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 - [docs/FEATURE_COMPARISON_MATRIX.md](docs/FEATURE_COMPARISON_MATRIX.md) - Visual comparison matrix
 
 ## 🤝 Contributing
-Contributions welcome! Please read our contributing guidelines.
+Contributions welcome! Please read our [contributing guidelines](CONTRIBUTING.md).
 
 ## 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
