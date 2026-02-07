@@ -18,11 +18,39 @@ from datetime import datetime
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent.skills.code_reviewer import CodeReviewer
-from agent.skills.gitlab_integration import GitLabIntegration, apply_gitlab_code_change
-from agent.skills.bitbucket_integration import BitbucketIntegration, apply_bitbucket_code_change
-from agent.skills.self_updater import SelfUpdater, auto_update
-from agent.skills.coder import apply_code_change
+# Import with error handling to prevent startup failures
+try:
+    from agent.skills.code_reviewer import CodeReviewer
+except ImportError as e:
+    logger.warning(f"CodeReviewer import failed: {e}. Coding service will not be available.")
+    CodeReviewer = None
+
+try:
+    from agent.skills.gitlab_integration import GitLabIntegration, apply_gitlab_code_change
+except ImportError as e:
+    logger.warning(f"GitLab integration import failed: {e}")
+    GitLabIntegration = None
+    apply_gitlab_code_change = None
+
+try:
+    from agent.skills.bitbucket_integration import BitbucketIntegration, apply_bitbucket_code_change
+except ImportError as e:
+    logger.warning(f"Bitbucket integration import failed: {e}")
+    BitbucketIntegration = None
+    apply_bitbucket_code_change = None
+
+try:
+    from agent.skills.self_updater import SelfUpdater, auto_update
+except ImportError as e:
+    logger.warning(f"Self-updater import failed: {e}")
+    SelfUpdater = None
+    auto_update = None
+
+try:
+    from agent.skills.coder import apply_code_change
+except ImportError as e:
+    logger.warning(f"Coder import failed: {e}")
+    apply_code_change = None
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +70,14 @@ class CodingService:
                                  Should accept (message: str, data: dict)
         """
         logger.info("Initializing coding service...")
+        
+        # Check if required modules are available
+        if CodeReviewer is None:
+            raise RuntimeError(
+                "Cannot initialize coding service: CodeReviewer module failed to import. "
+                "Please check that all dependencies are installed (GitPython, etc.)"
+            )
+        
         self.running = False
         self.task_queue = queue.Queue()
         self.notification_callback = notification_callback
@@ -56,13 +92,17 @@ class CodingService:
         
         # Initialize integrations based on available credentials
         self.github_available = bool(os.getenv('GITHUB_TOKEN'))
-        self.gitlab_available = bool(os.getenv('GITLAB_TOKEN'))
-        self.bitbucket_available = bool(os.getenv('BITBUCKET_USERNAME') and os.getenv('BITBUCKET_APP_PASSWORD'))
+        self.gitlab_available = bool(os.getenv('GITLAB_TOKEN') and GitLabIntegration is not None)
+        self.bitbucket_available = bool(
+            os.getenv('BITBUCKET_USERNAME') and 
+            os.getenv('BITBUCKET_APP_PASSWORD') and 
+            BitbucketIntegration is not None
+        )
         
         self.gitlab = None
         self.bitbucket = None
         
-        if self.gitlab_available:
+        if self.gitlab_available and GitLabIntegration is not None:
             try:
                 self.gitlab = GitLabIntegration()
                 logger.info("✓ GitLab integration initialized")
@@ -70,7 +110,7 @@ class CodingService:
                 logger.warning(f"✗ GitLab integration failed: {e}")
                 self.gitlab_available = False
         
-        if self.bitbucket_available:
+        if self.bitbucket_available and BitbucketIntegration is not None:
             try:
                 self.bitbucket = BitbucketIntegration()
                 logger.info("✓ Bitbucket integration initialized")
