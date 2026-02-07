@@ -1,0 +1,12 @@
+# Optional Dependencies
+# These features are not required for basic operation.
+# Install only if you need the specific functionality.
+
+# Voice/Audio processing (requires system dependencies)
+# Note: openai-whisper may not work with Python 3.13+
+# See docs/TROUBLESHOOTING.md for alternatives
+openai-whisper==20240930
+
+# Multi-platform connectors (optional)
+discord.py==2.4.0
+whatsapp-web.py==0.1.0
