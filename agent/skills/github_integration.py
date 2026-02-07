@@ -7,7 +7,7 @@ Provides full git workflow: add, commit, fetch, pull, cherry-pick, push, and cod
 
 import os
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import git
 from github import Github
 import subprocess
