@@ -348,6 +348,14 @@ class Agent:
         """
         Get current date and time information.
         Extracts timezone from message or user profile.
+        
+        Args:
+            user_message: Optional user message to extract timezone from
+            internal_id: Optional user internal ID to get timezone from profile
+        
+        Returns:
+            str: Formatted string with emoji prefix containing current date and time
+                 Example: "📅 Today is Saturday, February 07, 2026 at 09:55 PM HKT"
         """
         # Try to get timezone from user profile first
         user_profile = UserManager.get_user_profile(internal_id) if internal_id else {}

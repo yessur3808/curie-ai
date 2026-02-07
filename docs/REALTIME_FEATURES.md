@@ -76,9 +76,11 @@ Set these fields in the user's profile (MongoDB):
 ```json
 {
   "proactive_messaging_enabled": true,
-  "proactive_interval_hours": 24  // optional, defaults to 24
+  "proactive_interval_hours": 24
 }
 ```
+
+Note: `proactive_interval_hours` is optional and defaults to 24 if not specified.
 
 ### 5. Enhanced Curie Persona
 
@@ -143,13 +145,20 @@ Store these in user's profile (MongoDB) to enable features:
 
 ```json
 {
-  "timezone": "Asia/Hong_Kong",                    // User's timezone
-  "city": "Hong Kong",                             // Default city for weather
-  "proactive_messaging_enabled": true,             // Enable check-ins
-  "proactive_interval_hours": 24,                  // Hours between check-ins
-  "busy": false                                     // Set to true to pause check-ins
+  "timezone": "Asia/Hong_Kong",
+  "city": "Hong Kong",
+  "proactive_messaging_enabled": true,
+  "proactive_interval_hours": 24,
+  "busy": false
 }
 ```
+
+**Field descriptions:**
+- `timezone`: User's timezone (e.g., "Asia/Hong_Kong", "America/New_York")
+- `city`: Default city for weather queries
+- `proactive_messaging_enabled`: Enable check-ins (true/false)
+- `proactive_interval_hours`: Hours between check-ins (default: 24)
+- `busy`: Set to true to pause check-ins temporarily
 
 ### Environment Variables
 
@@ -205,10 +214,15 @@ For existing installations:
 
 ## Compatibility
 
-- Python 3.10+
-- All existing connectors (Telegram, Discord, WhatsApp, API)
-- Existing database schema (no migrations needed)
-- Backwards compatible with existing personas
+- **Python**: 3.10 or higher (tested with 3.10, 3.11, 3.12)
+- **Platforms**: All existing connectors (Telegram, Discord, WhatsApp, API)
+- **Database**: Existing schema (no migrations needed)
+- **Personas**: Backwards compatible with existing persona files
+
+Note: Python 3.10+ is required for:
+- Modern type hints (e.g., `Dict | None`)
+- Latest pytz timezone features
+- datetime.now(timezone.utc) pattern
 
 ## Support
 

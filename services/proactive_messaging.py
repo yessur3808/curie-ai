@@ -108,9 +108,23 @@ class ProactiveMessagingService:
         """
         Get list of users eligible for proactive messaging.
         Returns list of dicts with user info.
+        
+        NOTE: This is a placeholder that returns an empty list.
+        Production implementation requires database integration to query users
+        with proactive_messaging_enabled=true in their profiles.
+        
+        See docs/REALTIME_FEATURES.md for database schema requirements.
         """
         # TODO: Query database for users with proactive_messaging enabled
-        # For now, return empty list - this would need database support
+        # Example implementation:
+        # users = []
+        # for user in UserManager.get_all_users_with_proactive_enabled():
+        #     users.append({
+        #         'internal_id': user.internal_id,
+        #         'platform': user.primary_platform,
+        #         'external_user_id': user.external_id
+        #     })
+        # return users
         return []
     
     def _cleanup_old_contacts(self):

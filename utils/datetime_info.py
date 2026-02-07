@@ -44,6 +44,13 @@ def get_current_datetime(timezone_str: str = "UTC"):
 def extract_timezone_from_message(message: str) -> str:
     """
     Extract timezone from message, defaulting to common ones based on location mentions.
+    
+    Args:
+        message: User message text
+    
+    Returns:
+        str: Timezone string (e.g., 'Asia/Hong_Kong', 'America/New_York') if a location
+             is found in the message, otherwise 'UTC' as the default fallback.
     """
     message_lower = message.lower()
     
