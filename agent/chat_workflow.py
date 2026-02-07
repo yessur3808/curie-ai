@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import time
+import pytz
 from datetime import datetime
 from typing import Optional, Dict, Tuple
 from collections import OrderedDict
@@ -82,15 +83,23 @@ class PromptCache:
         self.hits = 0
         self.misses = 0
     
-    def _make_key(self, system_prompt: str, user_facts: Dict, history_str: str) -> str:
-        """Create a hash key from prompt components."""
+    def _make_key(self, system_prompt: str, user_facts: Dict, history_str: str, time_bucket: str = "") -> str:
+        """
+        Create a hash key from prompt components.
+        
+        Args:
+            system_prompt: The system prompt text
+            user_facts: User profile dictionary
+            history_str: Conversation history string
+            time_bucket: Optional time bucket (e.g., "2026-02-07-15") for cache invalidation
+        """
         facts_str = json.dumps(user_facts, sort_keys=True) if user_facts else ""
-        combined = f"{system_prompt}|||{facts_str}|||{history_str}"
+        combined = f"{system_prompt}|||{facts_str}|||{history_str}|||{time_bucket}"
         return str(hash(combined))
     
-    def get(self, system_prompt: str, user_facts: Dict, history_str: str) -> Optional[Tuple]:
+    def get(self, system_prompt: str, user_facts: Dict, history_str: str, time_bucket: str = "") -> Optional[Tuple]:
         """Returns (prompt_text, token_count) or None."""
-        key = self._make_key(system_prompt, user_facts, history_str)
+        key = self._make_key(system_prompt, user_facts, history_str, time_bucket)
         with self.lock:
             if key in self.cache:
                 self.hits += 1
@@ -100,9 +109,9 @@ class PromptCache:
             self.misses += 1
         return None
     
-    def set(self, system_prompt: str, user_facts: Dict, history_str: str, prompt_text: str, token_count: int):
+    def set(self, system_prompt: str, user_facts: Dict, history_str: str, prompt_text: str, token_count: int, time_bucket: str = ""):
         """Store a tokenized prompt."""
-        key = self._make_key(system_prompt, user_facts, history_str)
+        key = self._make_key(system_prompt, user_facts, history_str, time_bucket)
         with self.lock:
             if key in self.cache:
                 del self.cache[key]
@@ -362,55 +371,96 @@ class ChatWorkflow:
         # Build history string for cache key
         history_str = "\n".join([f"{role}: {msg[:50]}" for role, msg in history[-5:]])
         
-        # Try to get cached prompt
-        cached = self.prompt_cache.get(self.persona.get('system_prompt', ''), user_profile, history_str)
-        if cached:
-            prompt_text, _ = cached
-            # Append current message (not cached since it's dynamic)
-            return prompt_text + f"\n\nUser: {user_text}"
+        # Create time bucket for cache (hourly granularity)
+        # This ensures datetime context stays fresh (max 1 hour stale)
+        user_tz = user_profile.get('timezone', 'UTC') if user_profile else 'UTC'
+        try:
+            tz = pytz.timezone(user_tz)
+            now = datetime.now(tz)
+        except (pytz.UnknownTimeZoneError, pytz.AmbiguousTimeError):
+            tz = pytz.UTC
+            now = datetime.now(pytz.UTC)
         
-        # Build new prompt
-        lines = []
+        time_bucket = now.strftime('%Y-%m-%d-%H')  # Hourly cache invalidation
         
-        # System prompt
-        system_prompt = self.persona.get('system_prompt', 'You are a helpful assistant.')
-        lines.append(system_prompt)
-        
-        # Safety rules (from persona or hardcoded)
-        lines.append("\n[IMPORTANT RULES]")
-        lines.append("- If you don't know something, say so. Don't make up facts.")
-        lines.append("- Only extract and store facts when explicitly asked to remember them.")
-        lines.append("- Keep responses natural and conversational - no meta-commentary or speaker labels.")
-        lines.append("- Do not include actions like *nods* or *smiles*.")
-        
-        # User facts/profile
-        if user_profile:
-            lines.append("\n[VERIFIED FACTS ABOUT USER]")
-            for key, value in user_profile.items():
-                lines.append(f"- {key}: {value}")
-        
-        # Conversation history
-        if history:
-            lines.append("\n[CONVERSATION HISTORY]")
-            for role, msg in history:
-                role_label = "User" if role == "user" else "Assistant"
-                lines.append(f"{role_label}: {msg}")
-        
-        # Current user message
-        lines.append(f"\nUser: {user_text}")
-        lines.append("Assistant:")
-        
-        prompt_text = "\n".join(lines)
-        
-        # Cache this prompt (without the current message)
-        base_prompt = "\n".join(lines[:-2])  # Exclude "User: {user_text}" and "Assistant:"
-        self.prompt_cache.set(
+        # Try to get cached prompt (base prompt without datetime)
+        cached = self.prompt_cache.get(
             self.persona.get('system_prompt', ''),
             user_profile,
             history_str,
-            base_prompt,
-            len(base_prompt.split())
+            time_bucket
         )
+        
+        if cached:
+            base_prompt, _ = cached
+        else:
+            # Build new base prompt (without datetime - that's added dynamically)
+            lines = []
+            
+            # System prompt
+            system_prompt = self.persona.get('system_prompt', 'You are a helpful assistant.')
+            lines.append(system_prompt)
+            
+            # Safety rules (from persona or hardcoded)
+            lines.append("\n[IMPORTANT RULES]")
+            lines.append("- If you don't know something, say so. Don't make up facts.")
+            lines.append("- Only extract and store facts when explicitly asked to remember them.")
+            lines.append("- Keep responses natural and conversational - no meta-commentary or speaker labels.")
+            lines.append("- Do not include actions like *nods* or *smiles*.")
+            lines.append("- NEVER state that you don't have access to real-time information - you DO have access.")
+            lines.append("- NEVER say you're just an AI or language model - focus on helping naturally.")
+            
+            # User facts/profile
+            if user_profile:
+                lines.append("\n[VERIFIED FACTS ABOUT USER]")
+                for key, value in user_profile.items():
+                    lines.append(f"- {key}: {value}")
+            
+            # Conversation history
+            if history:
+                lines.append("\n[CONVERSATION HISTORY]")
+                for role, msg in history:
+                    role_label = "User" if role == "user" else "Assistant"
+                    lines.append(f"{role_label}: {msg}")
+            
+            base_prompt = "\n".join(lines)
+            
+            # Cache the base prompt (without datetime)
+            self.prompt_cache.set(
+                self.persona.get('system_prompt', ''),
+                user_profile,
+                history_str,
+                base_prompt,
+                len(base_prompt.split()),
+                time_bucket
+            )
+        
+        # NOW add current datetime context (always fresh, never cached)
+        datetime_lines = []
+        try:
+            # Use the timezone and datetime we already calculated
+            datetime_lines.append(f"\n[CURRENT DATE AND TIME]")
+            datetime_lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
+            datetime_lines.append(f"- Current time: {now.strftime('%I:%M %p %Z')}")
+            datetime_lines.append(f"- Timezone: {user_tz}")
+        except Exception as e:
+            # Extra safety fallback
+            logger.warning(f"Error formatting datetime: {e}, using UTC")
+            utc_now = datetime.now(pytz.UTC)
+            datetime_lines.append(f"\n[CURRENT DATE AND TIME]")
+            datetime_lines.append(f"- Current date: {utc_now.strftime('%A, %B %d, %Y')}")
+            datetime_lines.append(f"- Current time: {utc_now.strftime('%I:%M %p UTC')}")
+            datetime_lines.append(f"- Timezone: UTC")
+        
+        # Build final prompt: base + datetime + current message
+        prompt_parts = [
+            base_prompt,
+            "\n".join(datetime_lines),
+            f"\nUser: {user_text}",
+            "Assistant:"
+        ]
+        
+        prompt_text = "\n".join(prompt_parts)
         
         return prompt_text
     

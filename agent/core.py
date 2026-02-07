@@ -5,6 +5,7 @@ from utils.busy import detect_busy_intent, detect_resume_intent
 from utils.project_indexer import index_project_dir, project_index_markdown, classify_project_intent
 from utils.weather import get_weather, extract_city_from_message, get_hko_typhoon_signal
 from utils.search import web_search, image_search, crawl_google_images
+from utils.datetime_info import get_current_datetime, extract_timezone_from_message
 from agent.skills.find_info import find_info as find_info_skill
 from llm import manager
 import asyncio
@@ -343,8 +344,38 @@ class Agent:
                 heads_up += f"\n⚠️ {hko_signal}"
         return heads_up
     
-    
-    import asyncio
+    def get_datetime_info(self, user_message=None, internal_id=None):
+        """
+        Get current date and time information.
+        Extracts timezone from message or user profile.
+        
+        Args:
+            user_message: Optional user message to extract timezone from
+            internal_id: Optional user internal ID to get timezone from profile
+        
+        Returns:
+            str: Formatted string with emoji prefix containing current date and time
+                 Example: "📅 Today is Saturday, February 07, 2026 at 09:55 PM HKT"
+        """
+        # Get user profile once
+        user_profile = UserManager.get_user_profile(internal_id) if internal_id else {}
+        
+        # Try to get timezone from user profile first
+        default_timezone = user_profile.get("timezone", "UTC")
+        
+        # Try to extract timezone from message if provided
+        if user_message:
+            extracted_tz = extract_timezone_from_message(user_message)
+            if extracted_tz != "UTC":
+                default_timezone = extracted_tz
+        
+        # Get datetime info
+        dt_info = get_current_datetime(default_timezone)
+        
+        # Format response
+        reply = f"📅 Today is {dt_info['formatted']}"
+        
+        return reply
 
     async def route_message(self, user_message, internal_id):
         """
@@ -362,6 +393,7 @@ class Agent:
             "image_search",
             "google_crawl",
             "weather",
+            "date_time",
             "busy",
             "resume",
             "index_project",
@@ -435,6 +467,10 @@ class Agent:
             elif action == "weather":
                 city = params.get("city")
                 reply = await self.get_weather_report(user_message, internal_id=internal_id)
+                responses.append(reply)
+
+            elif action == "date_time":
+                reply = self.get_datetime_info(user_message, internal_id=internal_id)
                 responses.append(reply)
 
             elif action == "busy":
@@ -619,6 +655,22 @@ class Agent:
             "{\n"
             "  \"intents\": [\n"
             "    {\"action\": \"find_info\", \"description\": \"Find real-time NBA news and scores from multiple sources.\", \"confidence\": 0.97, \"parameters\": {\"topic\": \"NBA\", \"time\": \"now\"}, \"reasoning\": \"The user wants current NBA info from the web.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"news\", \"language\": \"en\"}\n"
+            "  ],\n"
+            "  \"overall_clarification_needed\": false,\n"
+            "  \"overall_suggested_questions\": []\n"
+            "}\n"
+            "User: What's today's date?\n"
+            "{\n"
+            "  \"intents\": [\n"
+            "    {\"action\": \"date_time\", \"description\": \"Get current date and time.\", \"confidence\": 0.99, \"parameters\": {}, \"reasoning\": \"User wants to know the current date.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"knowledge\", \"language\": \"en\"}\n"
+            "  ],\n"
+            "  \"overall_clarification_needed\": false,\n"
+            "  \"overall_suggested_questions\": []\n"
+            "}\n"
+            "User: What's the weather like in Tokyo this weekend?\n"
+            "{\n"
+            "  \"intents\": [\n"
+            "    {\"action\": \"weather\", \"description\": \"Get weather forecast for Tokyo.\", \"confidence\": 0.98, \"parameters\": {\"city\": \"Tokyo\", \"time\": \"weekend\"}, \"reasoning\": \"User wants weather information for a specific city.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"knowledge\", \"language\": \"en\"}\n"
             "  ],\n"
             "  \"overall_clarification_needed\": false,\n"
             "  \"overall_suggested_questions\": []\n"
