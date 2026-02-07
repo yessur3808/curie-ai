@@ -91,18 +91,18 @@ def _cleanup_excess_models():
 
 class ResponseCache:
     """Simple TTL-based cache for LLM responses."""
-    
+
     @staticmethod
     def _make_key(prompt: str, temperature: float, max_tokens: int) -> str:
         """Create a hash key from prompt + parameters."""
         key_str = f"{prompt}||{temperature}||{max_tokens}"
         return hashlib.md5(key_str.encode()).hexdigest()
-    
+
     @staticmethod
     def get(prompt: str, temperature: float, max_tokens: int) -> str | None:
         """Get cached response if available and not expired."""
         global _response_cache_hits, _response_cache_misses
-        
+
         key = ResponseCache._make_key(prompt, temperature, max_tokens)
         with _response_cache_lock:
             if key in _response_cache:
@@ -116,7 +116,7 @@ class ResponseCache:
                     del _response_cache[key]
             _response_cache_misses += 1
         return None
-    
+
     @staticmethod
     def set(prompt: str, temperature: float, max_tokens: int, response: str):
         """Cache a response."""
@@ -126,7 +126,7 @@ class ResponseCache:
             # FIFO eviction when exceeding max size
             while len(_response_cache) > _response_cache_max_size:
                 _response_cache.popitem(last=False)
-    
+
     @staticmethod
     def stats() -> dict:
         """Return cache statistics."""
@@ -136,7 +136,7 @@ class ResponseCache:
             "hits": _response_cache_hits,
             "misses": _response_cache_misses,
             "hit_rate_percent": round(hit_rate, 1),
-            "size": len(_response_cache)
+            "size": len(_response_cache),
         }
 
 
@@ -157,7 +157,9 @@ def _select_available_model(preferred: str | None = None) -> str | None:
     return None
 
 
-def _load_model_with_fallback(preferred: str | None = None) -> tuple[Llama | None, str | None]:
+def _load_model_with_fallback(
+    preferred: str | None = None,
+) -> tuple[Llama | None, str | None]:
     """
     Attempts to load a model, trying fallbacks if the preferred model fails.
     Returns (loaded_model, model_name) or (None, None) if all models fail.
@@ -175,12 +177,12 @@ def _load_model_with_fallback(preferred: str | None = None) -> tuple[Llama | Non
     # Try each candidate in order
     seen = set()
     n_threads = _get_int_env("LLM_THREADS", 18)
-    
+
     for model_name in candidates:
         if not model_name or model_name in seen:
             continue
         seen.add(model_name)
-        
+
         model_path = os.path.join("models", model_name)
         if not os.path.exists(model_path):
             logger.warning(f"Model file not found: {model_path}")
@@ -209,7 +211,9 @@ def _get_int_env(key, default):
     try:
         return int(os.getenv(key, default))
     except (ValueError, TypeError):
-        logger.warning(f"Invalid value '{os.getenv(key)}' for {key}, using default {default}")
+        logger.warning(
+            f"Invalid value '{os.getenv(key)}' for {key}, using default {default}"
+        )
         return default
 
 
@@ -244,11 +248,11 @@ def preload_llama_model():
 
     preferred_model = llm_config.get("model_path") or DEFAULT_LLAMA_MODEL
     logger.info(f"Preloading LLM model (preferred: {preferred_model})")
-    
+
     model, model_name = _load_model_with_fallback(preferred_model)
     if model is None or model_name is None:
         raise RuntimeError("Failed to load any available LLM model")
-    
+
     llama_models_cache[model_name] = model
     logger.info(f"Preloaded model: {model_name}")
 
@@ -283,7 +287,7 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
 
         # Try to use cached model first
         llama_model = None
-        
+
         # Check if preferred model is already cached
         if preferred_model in llama_models_cache:
             selected_model = preferred_model
@@ -295,10 +299,12 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                 llama_model = llama_models_cache[cached_name]
                 logger.info(f"Using cached model: {cached_name}")
                 break
-        
+
         # Lazy-load with fallback if no cached model available
         if llama_model is None:
-            logger.info(f"No cached model, attempting to load with fallback (preferred: {preferred_model})")
+            logger.info(
+                f"No cached model, attempting to load with fallback (preferred: {preferred_model})"
+            )
             model, model_name_loaded = _load_model_with_fallback(preferred_model)
             if model is None or model_name_loaded is None:
                 return "[Error: Failed to load any available model]"
@@ -345,10 +351,10 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
 
             # Apply sanity filter
             response = _sanity_filter_response(raw_response)
-            
+
             # Cache response
             ResponseCache.set(prompt, temperature, max_tokens, response)
-            
+
             return response
         except Exception as e:
             return f"[Error during inference: {e}]"
