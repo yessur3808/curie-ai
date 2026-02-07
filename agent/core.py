@@ -7,7 +7,7 @@ from utils.weather import get_weather, extract_city_from_message, get_hko_typhoo
 from utils.search import web_search, image_search, crawl_google_images
 from utils.datetime_info import get_current_datetime, extract_timezone_from_message
 from agent.skills.find_info import find_info as find_info_skill
-from agent.skills.conversions import handle_conversion, is_conversion_query
+from agent.skills.conversions import handle_conversion
 from llm import manager
 import asyncio
 import json
