@@ -148,7 +148,7 @@ $ python scripts/sync_env.py --clean
 1. **Regular Sync**: Run `python scripts/sync_env.py` regularly to stay in sync with `.env.example` updates
 2. **Before Updates**: Run `python scripts/sync_env.py --backup` before major updates
 3. **Clean Periodically**: Use `--clean` to remove variables that are no longer needed
-4. **Version Control**: Add `.env.backup.*` to your `.gitignore` (already done)
+4. **Version Control**: Add `.env.backup.*` to your `.gitignore` to avoid committing backup files
 
 ## Automation
 
