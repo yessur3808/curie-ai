@@ -7,7 +7,7 @@ Handles queries about code changes, reviews, updates, and enhancements
 
 import os
 import logging
-from typing import Dict, Optional, List
+from typing import Optional
 import re
 
 logger = logging.getLogger(__name__)
