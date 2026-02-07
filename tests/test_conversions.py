@@ -4,7 +4,6 @@ Tests for currency and unit conversion utilities.
 """
 
 import pytest
-import asyncio
 from utils.units import (
     convert_unit,
     convert_temperature,
