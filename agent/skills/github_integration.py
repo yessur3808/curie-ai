@@ -493,6 +493,15 @@ class GitHubIntegration:
         """
         if repo_name is None:
             repo_name = os.getenv('MAIN_REPO')
+            if not repo_name:
+                logger.error(
+                    "MAIN_REPO environment variable is not set and no repo_name was provided "
+                    "to add_pr_comment. Cannot determine target repository."
+                )
+                raise ValueError(
+                    "Repository name not provided. Set the MAIN_REPO environment variable "
+                    "or pass repo_name explicitly to add_pr_comment."
+                )
             if 'github.com' in repo_name:
                 from agent.skills.coder import extract_github_repo
                 repo_name = extract_github_repo(repo_name)
