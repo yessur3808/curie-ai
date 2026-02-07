@@ -63,10 +63,10 @@ test:  ## Run all tests
 	pytest tests/
 
 lint:  ## Lint code with flake8
-	flake8 src/ tests/
+	flake8 agent/ connectors/ llm/ memory/ services/ utils/ scripts/ main.py tests/
 
 format:  ## Format code with black
-	black src/ tests/
+	black agent/ connectors/ llm/ memory/ services/ utils/ scripts/ main.py tests/
 
 check-ports:  ## Check if required ports are available
 	python scripts/check_ports.py
