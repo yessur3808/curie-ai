@@ -8,7 +8,7 @@ import os
 import sys
 import subprocess
 import git
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
