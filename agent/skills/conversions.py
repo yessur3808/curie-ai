@@ -86,15 +86,20 @@ def extract_conversion_params(message: str) -> Optional[Dict[str, Any]]:
 
 
 def is_currency_code(unit: str) -> bool:
-    """Check if a unit string is a currency code."""
-    unit = unit.upper().strip()
-    # Common currency codes are 3 letters
-    if len(unit) == 3 and unit.isalpha():
-        # Check against popular currencies
-        popular = get_popular_currencies()
-        if unit in popular:
-            return True
-    return False
+    """
+    Heuristically check if a unit string looks like a currency code.
+    
+    We treat any 3-letter alphabetic code as a potential currency and let
+    `convert_currency` or its backing API validate whether the code is
+    actually supported.
+    """
+    if unit is None:
+        return False
+    code = unit.strip().upper()
+    if not code:
+        return False
+    # ISO-4217 currency codes are 3-letter alphabetic strings.
+    return len(code) == 3 and code.isalpha()
 
 
 async def handle_conversion(message: str) -> Optional[str]:

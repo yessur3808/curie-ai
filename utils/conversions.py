@@ -12,8 +12,8 @@ from typing import Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 # Cache exchange rates to minimize API calls
+# Format: {base_currency: {'rates': {...}, 'timestamp': datetime}}
 _rate_cache = {}
-_cache_timestamp = None
 _cache_duration = timedelta(hours=1)
 
 
@@ -27,14 +27,15 @@ async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, f
     Returns:
         Dictionary of currency codes to exchange rates, or None if failed
     """
-    global _rate_cache, _cache_timestamp
+    global _rate_cache
     
-    # Check if cache is still valid
+    # Check if cache is still valid for this base currency
     now = datetime.now(datetime.UTC) if hasattr(datetime, 'UTC') else datetime.utcnow()
-    if _cache_timestamp and _rate_cache and (now - _cache_timestamp) < _cache_duration:
-        if base_currency in _rate_cache:
+    if base_currency in _rate_cache:
+        cache_entry = _rate_cache[base_currency]
+        if (now - cache_entry['timestamp']) < _cache_duration:
             logger.debug(f"Using cached exchange rates for {base_currency}")
-            return _rate_cache[base_currency]
+            return cache_entry['rates']
     
     try:
         url = f"https://api.exchangerate.host/latest?base={base_currency.upper()}"
@@ -44,11 +45,11 @@ async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, f
                 data = response.json()
                 if data.get("success", False) and "rates" in data:
                     rates = data["rates"]
-                    # Update cache
-                    if base_currency not in _rate_cache:
-                        _rate_cache[base_currency] = {}
-                    _rate_cache[base_currency] = rates
-                    _cache_timestamp = now
+                    # Update cache with per-base timestamp
+                    _rate_cache[base_currency] = {
+                        'rates': rates,
+                        'timestamp': now
+                    }
                     logger.info(f"Fetched {len(rates)} exchange rates for {base_currency}")
                     return rates
                 else:
