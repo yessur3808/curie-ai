@@ -87,7 +87,7 @@ class SelfUpdater:
             
             # Create new backup branch
             current = self.repo.active_branch
-            backup = self.repo.create_head(self.backup_branch, current.commit)
+            self.repo.create_head(self.backup_branch, current.commit)
             
             logger.info(f"Created backup branch: {self.backup_branch}")
             return True
