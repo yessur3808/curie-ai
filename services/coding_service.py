@@ -8,7 +8,6 @@ Handles code review, PR/MR management, and self-updates
 import os
 import sys
 import time
-import json
 import logging
 import threading
 import queue
