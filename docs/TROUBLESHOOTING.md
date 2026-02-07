@@ -229,7 +229,7 @@ psycopg2.OperationalError: could not connect to server
 
 4. **Run migrations:**
    ```bash
-   python scripts/run_migrations.py
+   python scripts/apply_migrations.py
    ```
 
 ### MongoDB Connection Failed
