@@ -40,7 +40,13 @@ VOICE_FILE_TTL = int(os.getenv("VOICE_FILE_TTL", "3600"))
 
 
 def cleanup_old_voice_files() -> NoReturn:
-    """Periodically clean up expired voice files."""
+    """
+    Periodically clean up expired voice files.
+
+    This function runs indefinitely in a daemon thread and never returns.
+    It is designed to be run as a background task that continuously monitors
+    and removes expired voice files from the /tmp directory.
+    """
     while True:
         try:
             time.sleep(300)  # Run every 5 minutes
@@ -96,12 +102,15 @@ def get_internal_id(user_id: str, username: str = None) -> str:
 
 
 class MessageRequest(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=256)
-    message: str = Field(..., min_length=1, max_length=10000)
+    user_id: str = Field(..., min_length=1, max_length=256, pattern=r"^\S+.*\S+$|^\S$")
+    message: str = Field(
+        ..., min_length=1, max_length=10000, pattern=r"^\S+.*\S+$|^\S$"
+    )
     idempotency_key: str = None  # Optional: for idempotency
     voice_response: bool = False  # Optional: request voice response
     username: str = None  # Optional: username for memory management
     # Note: streaming not yet implemented
+    # Pattern ensures no leading/trailing whitespace and non-empty content
 
 
 class MessageResponse(BaseModel):
