@@ -329,7 +329,7 @@ if commands is not None:
             bot.run(discord_token)
         except Exception as e:
             logger.error(f"Failed to start Discord bot: {e}")
-            raise RuntimeError(f"Discord bot initialization failed: {e}")
+            raise RuntimeError(f"Discord bot initialization failed: {e}") from e
 
 else:
     # Provide stub functions when discord.py is not available
