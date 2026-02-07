@@ -101,9 +101,7 @@ pip install -r requirements.txt
 ```
 
 The new dependencies include:
-- `python-gitlab` - GitLab API support
-- `requests` - HTTP client for API calls
-
+- `requests` - HTTP client for GitHub, GitLab, and Bitbucket API calls
 ### Platform-Specific Setup
 
 #### GitHub
