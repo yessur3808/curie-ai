@@ -201,6 +201,103 @@ class TestCurrencyConversion:
         assert 'EUR' in formatted
         assert '100' in formatted
         assert '85.50' in formatted
+    
+    @pytest.mark.asyncio
+    async def test_currency_conversion_with_api(self):
+        """Test currency conversion with mocked API."""
+        from unittest.mock import patch, AsyncMock, Mock
+        
+        with patch('utils.conversions.httpx.AsyncClient') as mock_client:
+            # Mock HTTP response
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json = Mock(return_value={
+                'success': True,
+                'rates': {
+                    'EUR': 0.85,
+                    'GBP': 0.73,
+                    'JPY': 110.0
+                }
+            })
+            
+            mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
+            mock_client_instance.__aexit__.return_value = AsyncMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client.return_value = mock_client_instance
+            
+            # Test conversion
+            result = await convert_currency(100, 'USD', 'EUR')
+            assert result is not None
+            assert result['original_amount'] == 100
+            assert result['original_currency'] == 'USD'
+            assert result['converted_amount'] == 85.0
+            assert result['converted_currency'] == 'EUR'
+            assert result['exchange_rate'] == 0.85
+    
+    @pytest.mark.asyncio
+    async def test_currency_conversion_unknown_currency(self):
+        """Test conversion with unknown target currency."""
+        from unittest.mock import patch, AsyncMock, Mock
+        
+        with patch('utils.conversions.httpx.AsyncClient') as mock_client:
+            # Mock HTTP response with limited currencies
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json = Mock(return_value={
+                'success': True,
+                'rates': {
+                    'EUR': 0.85,
+                    'GBP': 0.73
+                }
+            })
+            
+            mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
+            mock_client_instance.__aexit__.return_value = AsyncMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client.return_value = mock_client_instance
+            
+            # Test conversion to unknown currency
+            result = await convert_currency(100, 'USD', 'XYZ')
+            assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_currency_conversion_caching(self):
+        """Test that exchange rates are cached properly."""
+        from unittest.mock import patch, AsyncMock, Mock
+        import utils.conversions
+        
+        # Clear cache before test
+        utils.conversions._rate_cache.clear()
+        
+        with patch('utils.conversions.httpx.AsyncClient') as mock_client:
+            # Mock HTTP response
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json = Mock(return_value={
+                'success': True,
+                'rates': {
+                    'EUR': 0.85,
+                    'GBP': 0.73
+                }
+            })
+            
+            mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
+            mock_client_instance.__aexit__.return_value = AsyncMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client.return_value = mock_client_instance
+            
+            # First call should fetch from API
+            result1 = await convert_currency(100, 'USD', 'EUR')
+            assert result1 is not None
+            assert mock_client_instance.get.call_count == 1
+            
+            # Second call should use cache (no additional API call)
+            result2 = await convert_currency(100, 'USD', 'EUR')
+            assert result2 is not None
+            assert mock_client_instance.get.call_count == 1  # Still 1, not 2
 
 
 class TestHandleConversion:
