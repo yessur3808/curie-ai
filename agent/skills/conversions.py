@@ -179,4 +179,12 @@ def is_conversion_query(message: str) -> bool:
     # Check for numbers
     has_number = bool(re.search(r'\d', message))
     
+    # Special case: "X unit to unit" pattern without explicit keywords
+    # E.g., "50 pounds to kg"
+    if not has_keyword and has_to_in and has_number:
+        # Check if it matches a simple conversion pattern
+        pattern = r'^\s*[\d.,]+\s+[a-z\s/]+\s+(?:to|into)\s+[a-z\s/]+\s*[?.!]?\s*$'
+        if re.match(pattern, message):
+            return True
+    
     return has_keyword and has_to_in and has_number
