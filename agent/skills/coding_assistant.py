@@ -46,9 +46,44 @@ class CodingAssistant:
             - 'update': User wants code updates/changes
             - 'self_update': User wants to update the system
             - 'info': User wants information about code changes
+            - 'git_op': User wants to perform git operations
+            - 'edit_file': User wants to edit a file
             - None: Not a coding-related query
         """
         message_lower = message.lower()
+        
+        # Git operations (commit, push, pull, fetch, cherry-pick, add)
+        git_op_patterns = [
+            r'\b(git\s+)?(commit|push|pull|fetch|add|cherry[- ]?pick)\b',
+            r'\bstage\s+(files?|changes)\b',
+            r'\bpush\s+(to\s+)?(github|remote|origin)\b',
+            r'\bpull\s+(from\s+)?(github|remote|origin)\b',
+            r'\bfetch\s+(from\s+)?(github|remote|origin)\b',
+            r'\bcreate\s+(a\s+)?branch\b',
+            r'\bcheckout\s+branch\b',
+            r'\bgit\s+status\b',
+            r'\bshow\s+(git\s+)?diff\b'
+        ]
+        
+        for pattern in git_op_patterns:
+            if re.search(pattern, message_lower):
+                return 'git_op'
+        
+        # File editing operations
+        edit_file_patterns = [
+            r'\bedit\s+(the\s+)?file\b',
+            r'\bmodify\s+(the\s+)?file\b',
+            r'\bchange\s+(the\s+)?file\b',
+            r'\bwrite\s+to\s+(the\s+)?file\b',
+            r'\b(create|delete|remove)\s+(a\s+)?file\b',
+            r'\bupdate\s+.*\.py\b',  # Mentions specific file extensions
+            r'\bupdate\s+.*\.js\b',
+            r'\breplace\s+.*in\s+file\b'
+        ]
+        
+        for pattern in edit_file_patterns:
+            if re.search(pattern, message_lower):
+                return 'edit_file'
         
         # Review requests
         review_patterns = [
@@ -77,7 +112,7 @@ class CodingAssistant:
         
         # Update/change requests
         update_patterns = [
-            r'\b(update|modify|change|enhance|improve)\s+(code|file|function)',
+            r'\b(update|modify|change|enhance|improve)\s+(code|function)',
             r'\bcode\s+(change|update|modification)',
             r'\bmake\s+(a\s+)?change\s+to\b',
             r'\bcan\s+you\s+(update|modify|change|fix)\b.*\bcode'
@@ -105,7 +140,8 @@ class CodingAssistant:
             r'\btell\s+me\s+about\s+(the\s+)?(recent\s+)?changes\b',
             r'\bwhat\s+(did|have)\s+you\s+(change|update)',
             r'\bshow\s+me\s+(the\s+)?changes\b',
-            r'\bcode\s+history\b'
+            r'\bcode\s+history\b',
+            r'\bgit\s+log\b'
         ]
         
         for pattern in info_patterns:
@@ -265,22 +301,150 @@ class CodingAssistant:
         Returns response message
         """
         try:
-            from services.coding_service import CodingService
+            from agent.skills.github_integration import GitHubIntegration
             
-            return (
-                "📊 **Recent Code Changes**\n\n"
-                "I can show you information about:\n\n"
-                "- Recent commits in the repository\n"
-                "- Open PRs/MRs across platforms\n"
-                "- Code changes made by the coding service\n"
-                "- Files modified recently\n\n"
-                "What specific information would you like to see?"
-            )
+            # Check if we can access git
+            try:
+                gh = GitHubIntegration()
+                # Get recent commits
+                commits = gh.git_log(max_count=5)
+                
+                commit_list = "\n".join([
+                    f"- `{c['sha']}` {c['message']} by {c['author']}"
+                    for c in commits
+                ])
+                
+                return (
+                    f"📊 **Recent Code Changes**\n\n"
+                    f"**Last 5 commits:**\n{commit_list}\n\n"
+                    f"You can also ask me to:\n"
+                    f"- Show git status\n"
+                    f"- Show git diff\n"
+                    f"- List branches"
+                )
+            except Exception as e:
+                logger.debug(f"Could not get git info: {e}")
+                return (
+                    "📊 **Recent Code Changes**\n\n"
+                    "I can show you information about:\n\n"
+                    "- Recent commits in the repository\n"
+                    "- Open PRs/MRs across platforms\n"
+                    "- Code changes made by the coding service\n"
+                    "- Files modified recently\n\n"
+                    "What specific information would you like to see?"
+                )
             
         except ImportError:
             return (
                 "⚠️ Code change tracking is not available. "
                 "The coding service module may not be installed."
+            )
+    
+    def handle_git_operation(self, message: str) -> str:
+        """
+        Handle git operation requests
+        
+        Returns response message
+        """
+        try:
+            from agent.skills.github_integration import GitHubIntegration
+            gh = GitHubIntegration()
+            
+            message_lower = message.lower()
+            
+            # Git status
+            if 'status' in message_lower:
+                status = gh.git_status()
+                staged = len(status['staged'])
+                unstaged = len(status['unstaged'])
+                untracked = len(status['untracked'])
+                
+                return (
+                    f"📋 **Git Status**\n\n"
+                    f"- **Staged:** {staged} files\n"
+                    f"- **Unstaged:** {unstaged} files\n"
+                    f"- **Untracked:** {untracked} files\n\n"
+                    f"What would you like to do next?\n"
+                    f"- Stage files: \"add all files\" or \"add file.py\"\n"
+                    f"- Commit: \"commit with message: your message\"\n"
+                    f"- Push: \"push to remote\""
+                )
+            
+            # Git diff
+            elif 'diff' in message_lower:
+                cached = 'cached' in message_lower or 'staged' in message_lower
+                diff = gh.git_diff(cached=cached)
+                
+                if not diff:
+                    return "No changes to show."
+                
+                # Truncate if too long
+                if len(diff) > 1000:
+                    diff = diff[:1000] + "\n... (truncated)"
+                
+                return f"```diff\n{diff}\n```"
+            
+            # List branches
+            elif 'branch' in message_lower and 'list' in message_lower:
+                branches = gh.git_branch()
+                branch_list = "\n".join([f"- {b}" for b in branches])
+                return f"**Branches:**\n{branch_list}"
+            
+            # General git operations guide
+            else:
+                return (
+                    "🔧 **Git Operations**\n\n"
+                    "I can help you with:\n\n"
+                    "**Status & Info:**\n"
+                    "- \"Show git status\" - Check repo status\n"
+                    "- \"Show git diff\" - View unstaged changes\n"
+                    "- \"Show staged diff\" - View staged changes\n"
+                    "- \"List branches\" - Show all branches\n"
+                    "- \"Show git log\" - Recent commits\n\n"
+                    "**Making Changes:**\n"
+                    "- \"Add all files\" - Stage all changes\n"
+                    "- \"Add file.py\" - Stage specific file\n"
+                    "- \"Commit with message: description\" - Commit staged changes\n"
+                    "- \"Push to remote\" - Push commits\n"
+                    "- \"Pull from remote\" - Pull latest changes\n\n"
+                    "**Branches:**\n"
+                    "- \"Create branch name\" - Create new branch\n"
+                    "- \"Checkout branch name\" - Switch branches\n\n"
+                    "What would you like to do?"
+                )
+                
+        except Exception as e:
+            logger.error(f"Git operation failed: {e}", exc_info=True)
+            return f"❌ Git operation failed: {str(e)}"
+    
+    def handle_file_edit(self, message: str) -> str:
+        """
+        Handle file editing requests
+        
+        Returns response message
+        """
+        try:
+            from agent.skills.github_integration import GitHubIntegration
+            
+            return (
+                "📝 **File Editing**\n\n"
+                "I can help you edit files! Please provide:\n\n"
+                "**To edit a file:**\n"
+                "- File name: `auth.py`\n"
+                "- What to change: \"Replace old function with new one\"\n\n"
+                "**To create a file:**\n"
+                "Example: \"Create file new_module.py with content...\"\n\n"
+                "**To read a file:**\n"
+                "Example: \"Show me the contents of config.py\"\n\n"
+                "**To delete a file:**\n"
+                "Example: \"Delete temp_file.py\"\n\n"
+                "What would you like to do?"
+            )
+            
+        except ImportError:
+            return (
+                "⚠️ File editing is not available. "
+                "The GitHub integration module may not be installed."
             )
     
     async def handle_message(self, message: str) -> Optional[str]:
@@ -310,6 +474,10 @@ class CodingAssistant:
             return self.handle_self_update_request(message)
         elif intent == 'info':
             return self.handle_info_request(message)
+        elif intent == 'git_op':
+            return self.handle_git_operation(message)
+        elif intent == 'edit_file':
+            return self.handle_file_edit(message)
         
         return None
 
