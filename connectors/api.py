@@ -379,8 +379,6 @@ async def get_audio_file(filename: str):
     """
     # Sanitize filename to prevent path traversal
     # Only allow alphanumeric, dash, underscore, and dot
-    import re
-
     if not re.match(r"^[a-zA-Z0-9_\-]+\.(mp3|wav|ogg)$", filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
