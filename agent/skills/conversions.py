@@ -29,9 +29,9 @@ def extract_conversion_params(message: str) -> Optional[Dict[str, Any]]:
             'value': float,
             'from_unit': str,
             'to_unit': str,
-            'conversion_type': 'currency' or 'unit'
         }
         Or None if no conversion detected
+    """
     """
     message = message.lower().strip()
     
