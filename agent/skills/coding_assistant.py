@@ -529,8 +529,10 @@ class CodingAssistant:
             user_id = "default_user"  # TODO: Get from session context - see chat_workflow.py process_message()
             
             # Start session
-            if any(word in message_lower for word in ['start', 'begin']) and 'session' not in message_lower:
-                task_match = re.search(r'(?:start|begin).*?(?:on|for)?\s+(.+)', message_lower)
+            if any(word in message_lower for word in ['start', 'begin']):
+                # Only treat text after explicit "on"/"for" as the task, e.g.:
+                # "start pair programming on refactoring the API"
+                task_match = re.search(r'(?:start|begin).*?(?:on|for)\s+(.+)', message_lower)
                 task = task_match.group(1) if task_match else None
                 return pp.start_session(user_id, task)
             
