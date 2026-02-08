@@ -501,12 +501,14 @@ Curie will detect your intent and route to the appropriate skill automatically.
 - Some features may have language-specific limitations
 - Pattern-based detection may produce false positives
 - Large files may be truncated for analysis
+- **Pair programming sessions currently use a default user ID** - all users share the same session in chat mode. This is suitable for single-user deployments but needs enhancement for multi-user scenarios. Direct API usage allows proper user ID specification.
 
 ---
 
 ## Future Enhancements
 
 - Real-time collaborative editing
+- **Multi-user session isolation** - per-user session management in chat mode
 - Integration with IDEs
 - Custom bug pattern definitions
 - Machine learning-based optimization
