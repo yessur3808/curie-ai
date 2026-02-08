@@ -377,26 +377,17 @@ def main():
             
             # Get check interval from env (default: 3600 seconds = 1 hour)
             DEFAULT_PROACTIVE_CHECK_INTERVAL = 3600
-            raw_interval = os.getenv("PROACTIVE_CHECK_INTERVAL", str(DEFAULT_PROACTIVE_CHECK_INTERVAL))
-            try:
-                check_interval = int(raw_interval)
-            except ValueError:
-                logger.warning(
-                    "Invalid PROACTIVE_CHECK_INTERVAL value %r; falling back to default %s seconds",
-                    raw_interval,
-                    DEFAULT_PROACTIVE_CHECK_INTERVAL,
-                )
-                check_interval = DEFAULT_PROACTIVE_CHECK_INTERVAL
+            # Create agent for proactive messaging (reserved for future use once connectors are wired)
+            agent = Agent(persona=persona)
             
-            if not connectors:
-                logger.info(
-                    "Proactive messaging service not started because no connectors are registered yet."
-                )
-            else:
-                proactive_service = ProactiveMessagingService(agent=agent, connectors=connectors)
-                proactive_service.check_interval = check_interval
-                proactive_service.start()
-                logger.info(f"✅ Proactive messaging service started (check interval: {check_interval}s)")
+            # Get check interval from env (default: 3600 seconds = 1 hour)
+            check_interval = int(os.getenv("PROACTIVE_CHECK_INTERVAL", "3600"))
+            
+            # Proactive connectors are not yet registered in this process, so do not start the service.
+            # This avoids pretending the service might have started while no connectors are actually wired.
+            logger.info(
+                "Proactive messaging service not started because no connectors are registered yet."
+            )
         except Exception as e:
             logger.error(f"❌ Failed to start proactive messaging service: {e}", exc_info=True)
     elif not enable_proactive:
