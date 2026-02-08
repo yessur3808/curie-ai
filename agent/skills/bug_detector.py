@@ -85,9 +85,9 @@ class BugDetector:
             ),
             BugPattern(
                 "sql_injection",
-                r"execute\s*\(\s*['\"].*%s.*['\"]",
+                r"execute\s*\(\s*['\"].*['\"]\s*(?:%|\.\s*format\s*\()",
                 "critical",
-                "Potential SQL injection vulnerability - use parameterized queries",
+                "Potential SQL injection vulnerability - avoid string formatting in SQL; use parameterized queries",
                 "python"
             ),
             BugPattern(
