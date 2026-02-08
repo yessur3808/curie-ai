@@ -8,7 +8,7 @@ Analyzes code complexity, performance bottlenecks, and provides optimization sug
 import os
 import re
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from datetime import datetime
 
 # Import llm.manager conditionally
