@@ -48,6 +48,10 @@ class CodingAssistant:
             - 'info': User wants information about code changes
             - 'git_op': User wants to perform git operations
             - 'edit_file': User wants to edit a file
+            - 'pair_programming': User wants to start pair programming
+            - 'bug_detection': User wants to detect bugs
+            - 'performance_analysis': User wants performance analysis
+            - 'code_generation': User wants code generation
             - None: Not a coding-related query
         """
         message_lower = message.lower()
@@ -147,6 +151,66 @@ class CodingAssistant:
         for pattern in info_patterns:
             if re.search(pattern, message_lower):
                 return 'info'
+        
+        # Pair programming requests
+        pair_prog_patterns = [
+            r'\b(start|begin)\s+(pair\s+)?programming\b',
+            r'\bpair\s+program(ming)?\b',
+            r'\bcode\s+together\b',
+            r'\bcollaborate\s+on\s+code\b',
+            r'\bworking\s+on\s+code\b',
+            r'\bend\s+(pair\s+)?session\b'
+        ]
+        
+        for pattern in pair_prog_patterns:
+            if re.search(pattern, message_lower):
+                return 'pair_programming'
+        
+        # Bug detection requests
+        bug_detection_patterns = [
+            r'\b(find|detect|check|scan)\s+(for\s+)?(bugs|issues|problems)\b',
+            r'\bbug\s+(detection|finding|checking|scanning)\b',
+            r'\banalyze\s+(for\s+)?(bugs|issues)\b',
+            r'\bcheck\s+(for\s+)?vulnerabilities\b',
+            r'\bsecurity\s+scan\b',
+            r'\bproactive\s+(bug\s+)?finding\b'
+        ]
+        
+        for pattern in bug_detection_patterns:
+            if re.search(pattern, message_lower):
+                return 'bug_detection'
+        
+        # Performance analysis requests
+        performance_patterns = [
+            r'\b(analyze|check|review)\s+(performance|speed|efficiency)\b',
+            r'\bperformance\s+(analysis|review|check)\b',
+            r'\boptimize\s+(my\s+)?code\b',
+            r'\bcode\s+optimization\b',
+            r'\bcheck\s+complexity\b',
+            r'\bbig\s+o\b',
+            r'\btime\s+complexity\b',
+            r'\bmake.*faster\b',
+            r'\bimprove\s+performance\b'
+        ]
+        
+        for pattern in performance_patterns:
+            if re.search(pattern, message_lower):
+                return 'performance_analysis'
+        
+        # Code generation requests
+        code_gen_patterns = [
+            r'\bgenerate\s+code\b',
+            r'\bcreate\s+(a\s+)?function\b',
+            r'\bwrite\s+(a\s+)?(function|class|module)\b',
+            r'\bcode\s+generation\b',
+            r'\bscaffold\b',
+            r'\bboilerplate\b',
+            r'\btemplate\s+code\b'
+        ]
+        
+        for pattern in code_gen_patterns:
+            if re.search(pattern, message_lower):
+                return 'code_generation'
         
         return None
     
@@ -447,6 +511,232 @@ class CodingAssistant:
                 "The GitHub integration module may not be installed."
             )
     
+    def handle_pair_programming(self, message: str) -> str:
+        """
+        Handle pair programming requests
+        
+        Returns response message
+        """
+        try:
+            from agent.skills.pair_programming import get_pair_programming
+            
+            pp = get_pair_programming()
+            message_lower = message.lower()
+            
+            # Detect user ID (use a simple approach for now)
+            # In production, this would come from the session context
+            user_id = "default_user"  # TODO: Get from session context
+            
+            # Start session
+            if any(word in message_lower for word in ['start', 'begin']) and 'session' not in message_lower:
+                task_match = re.search(r'(?:start|begin).*?(?:on|for)?\s+(.+)', message_lower)
+                task = task_match.group(1) if task_match else None
+                return pp.start_session(user_id, task)
+            
+            # End session
+            elif 'end' in message_lower:
+                return pp.end_session(user_id)
+            
+            # Status
+            elif 'status' in message_lower:
+                return pp.get_session_status(user_id)
+            
+            # Add file
+            elif 'add file' in message_lower:
+                file_match = re.search(r'add file\s+(.+)', message_lower)
+                if file_match:
+                    filepath = file_match.group(1).strip()
+                    return pp.add_file_to_session(user_id, filepath)
+            
+            # Default response
+            return (
+                "🤝 **Pair Programming**\n\n"
+                "I can help you code collaboratively! Commands:\n\n"
+                "- **Start session:** \"Start pair programming [task]\"\n"
+                "- **End session:** \"End pair programming\"\n"
+                "- **Add file:** \"Add file path/to/file.py\"\n"
+                "- **Get status:** \"Pair programming status\"\n\n"
+                "Let's code together!"
+            )
+            
+        except ImportError as e:
+            logger.error(f"Pair programming module not available: {e}")
+            return (
+                "⚠️ Pair programming is not available. "
+                "The pair programming module may not be installed."
+            )
+    
+    def handle_bug_detection(self, message: str) -> str:
+        """
+        Handle bug detection requests
+        
+        Returns response message
+        """
+        try:
+            from agent.skills.bug_detector import get_bug_detector
+            
+            detector = get_bug_detector()
+            message_lower = message.lower()
+            
+            # Extract file path if provided
+            file_match = re.search(r'(?:file|in)\s+([^\s]+\.(?:py|js|ts|java|go|rs|rb|php))', message_lower)
+            
+            if file_match:
+                filepath = file_match.group(1)
+                try:
+                    results = detector.detect_bugs_in_file(filepath)
+                    return detector.format_findings_report(results)
+                except Exception as e:
+                    return f"❌ Error analyzing file: {str(e)}"
+            
+            # Proactive scan
+            elif 'scan' in message_lower or 'proactive' in message_lower:
+                dir_match = re.search(r'(?:scan|in)\s+directory\s+([^\s]+)', message_lower)
+                directory = dir_match.group(1) if dir_match else '.'
+                
+                return (
+                    f"🔍 **Proactive Bug Scanning**\n\n"
+                    f"Starting scan of `{directory}`...\n"
+                    f"This will analyze all code files for potential bugs.\n\n"
+                    f"Note: For best results, specify a file path:\n"
+                    f"\"Find bugs in file path/to/file.py\""
+                )
+            
+            # General help
+            else:
+                return (
+                    "🐛 **Bug Detection**\n\n"
+                    "I can help find bugs in your code! Options:\n\n"
+                    "**Analyze a file:**\n"
+                    "Example: \"Find bugs in file auth.py\"\n\n"
+                    "**Proactive scanning:**\n"
+                    "Example: \"Scan for bugs in directory src/\"\n\n"
+                    "**What I check for:**\n"
+                    "- Security vulnerabilities\n"
+                    "- Common anti-patterns\n"
+                    "- Potential bugs\n"
+                    "- Code quality issues\n\n"
+                    "What would you like me to check?"
+                )
+                
+        except ImportError as e:
+            logger.error(f"Bug detector module not available: {e}")
+            return (
+                "⚠️ Bug detection is not available. "
+                "The bug detector module may not be installed."
+            )
+    
+    def handle_performance_analysis(self, message: str) -> str:
+        """
+        Handle performance analysis requests
+        
+        Returns response message
+        """
+        try:
+            from agent.skills.performance_analyzer import get_performance_analyzer
+            
+            analyzer = get_performance_analyzer()
+            message_lower = message.lower()
+            
+            # Extract file path if provided
+            file_match = re.search(r'(?:file|in)\s+([^\s]+\.(?:py|js|ts|java|go|rs|rb|php))', message_lower)
+            
+            if file_match:
+                filepath = file_match.group(1)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        code = f.read()
+                    
+                    # Detect language
+                    ext = filepath.split('.')[-1]
+                    lang_map = {'py': 'python', 'js': 'javascript', 'ts': 'typescript'}
+                    language = lang_map.get(ext)
+                    
+                    report = analyzer.generate_optimization_report(code, language, filepath)
+                    return report
+                except Exception as e:
+                    return f"❌ Error analyzing file: {str(e)}"
+            
+            # General help
+            else:
+                return (
+                    "⚡ **Performance Analysis**\n\n"
+                    "I can analyze your code for performance issues!\n\n"
+                    "**Analyze a file:**\n"
+                    "Example: \"Analyze performance of file utils.py\"\n\n"
+                    "**What I analyze:**\n"
+                    "- Time complexity (Big O)\n"
+                    "- Space complexity\n"
+                    "- Performance bottlenecks\n"
+                    "- Optimization suggestions\n"
+                    "- Code complexity metrics\n\n"
+                    "**Optimization tips:**\n"
+                    "- Algorithm improvements\n"
+                    "- Data structure suggestions\n"
+                    "- Memory optimizations\n"
+                    "- Caching opportunities\n\n"
+                    "Which file would you like me to analyze?"
+                )
+                
+        except ImportError as e:
+            logger.error(f"Performance analyzer module not available: {e}")
+            return (
+                "⚠️ Performance analysis is not available. "
+                "The performance analyzer module may not be installed."
+            )
+    
+    def handle_code_generation(self, message: str) -> str:
+        """
+        Handle code generation requests
+        
+        Returns response message
+        """
+        try:
+            # Extract what to generate
+            message_lower = message.lower()
+            
+            # Detect type of code to generate
+            if 'function' in message_lower:
+                code_type = 'function'
+            elif 'class' in message_lower:
+                code_type = 'class'
+            elif 'module' in message_lower:
+                code_type = 'module'
+            elif 'api' in message_lower:
+                code_type = 'API endpoint'
+            else:
+                code_type = 'code'
+            
+            # Extract language if specified
+            language = None
+            for lang in ['python', 'javascript', 'typescript', 'java', 'go', 'rust']:
+                if lang in message_lower:
+                    language = lang
+                    break
+            
+            lang_str = f" in {language.title()}" if language else ""
+            
+            return (
+                f"💻 **Code Generation**\n\n"
+                f"I can help generate {code_type}{lang_str}!\n\n"
+                f"**To get started, please provide:**\n\n"
+                f"1. **Purpose:** What should the {code_type} do?\n"
+                f"   Example: \"Calculate Fibonacci numbers\"\n\n"
+                f"2. **Language:** {language.title() if language else 'Which language?'}\n\n"
+                f"3. **Specifications:**\n"
+                f"   - Input parameters\n"
+                f"   - Return type\n"
+                f"   - Special requirements\n\n"
+                f"**Example request:**\n"
+                f"\"Generate a Python function that validates email addresses\n"
+                f"with regex, takes a string input, and returns a boolean.\"\n\n"
+                f"What would you like me to generate?"
+            )
+            
+        except Exception as e:
+            logger.error(f"Code generation failed: {e}")
+            return f"❌ Code generation failed: {str(e)}"
+    
     async def handle_message(self, message: str) -> Optional[str]:
         """
         Main entry point for handling coding-related messages
@@ -478,6 +768,14 @@ class CodingAssistant:
             return self.handle_git_operation(message)
         elif intent == 'edit_file':
             return self.handle_file_edit(message)
+        elif intent == 'pair_programming':
+            return self.handle_pair_programming(message)
+        elif intent == 'bug_detection':
+            return self.handle_bug_detection(message)
+        elif intent == 'performance_analysis':
+            return self.handle_performance_analysis(message)
+        elif intent == 'code_generation':
+            return self.handle_code_generation(message)
         
         return None
 
