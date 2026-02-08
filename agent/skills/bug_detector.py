@@ -8,7 +8,7 @@ Analyzes code for common bugs, anti-patterns, and potential issues
 import os
 import re
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from datetime import datetime
 
 # Import llm.manager conditionally
