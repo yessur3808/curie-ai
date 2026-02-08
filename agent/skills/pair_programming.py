@@ -7,7 +7,7 @@ Enables collaborative coding sessions with context sharing and live assistance
 
 import os
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
