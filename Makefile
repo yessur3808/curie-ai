@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: install install-optional run start test migrate migrate-down lint format shell verify help
 .PHONY: db-start db-stop db-restart db-status setup-db
 .PHONY: run-telegram run-discord run-whatsapp run-api run-all
-.PHONY: check-ports test-imports clean sync-env restart-clean
+.PHONY: check-ports test-imports clean sync-env sync-env-add sync-env-clean sync-env-backup restart-clean
 
 # Installation targets
 install:  ## Install all dependencies from requirements.txt
