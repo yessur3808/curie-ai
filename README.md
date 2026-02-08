@@ -22,6 +22,13 @@ It is inspired by conversational assistants like Jarvis from Iron Man, but runs 
   - **Multi-Platform PR/MR**: Support for GitHub, GitLab, and Bitbucket
   - **Self-Update**: Safe self-update mechanism with rollback capability
   - **Standalone Coding Service**: Run code operations independently in parallel
+- **🆕 Advanced Coding Features**:
+  - **Pair Programming**: Real-time collaborative coding sessions with context tracking
+  - **Code Generation**: AI-powered code generation for multiple languages
+  - **Bug Detection**: Static analysis with pattern matching for common bugs and vulnerabilities
+  - **Proactive Bug Finding**: Automated directory scanning and continuous quality monitoring
+  - **Performance Analysis**: Complexity analysis, Big O estimation, and bottleneck detection
+  - **Code Optimization**: Intelligent suggestions for algorithms, data structures, and refactoring
 - **🆕 Currency & Unit Conversions**:
   - **Currency Conversion**: Real-time exchange rates for 150+ currencies
   - **Unit Conversion**: Length, mass, volume, temperature, speed, area conversions
@@ -81,6 +88,7 @@ Supported categories:
 ## 📚 Documentation
 
 - **[Quick Start Guide](docs/QUICK_START.md)** - Get up and running in 5 minutes ⚡
+- **[Advanced Coding Features](docs/ADVANCED_CODING_FEATURES.md)** - Pair programming, bug detection, performance analysis ✨
 - [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Fix common setup and runtime issues
 - [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) - Platform-specific setup
 - [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) - Advanced coding features
