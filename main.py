@@ -374,14 +374,6 @@ def main():
             # We'll populate this as connectors are initialized
             # Note: do not start the service unless at least one connector is registered
             
-            # Get check interval from env (default: 3600 seconds = 1 hour)
-            DEFAULT_PROACTIVE_CHECK_INTERVAL = 3600
-            # Create agent for proactive messaging (reserved for future use once connectors are wired)
-            agent = Agent(persona=persona)
-            
-            # Get check interval from env (default: 3600 seconds = 1 hour)
-            check_interval = int(os.getenv("PROACTIVE_CHECK_INTERVAL", "3600"))
-            
             # Proactive connectors are not yet registered in this process, so do not start the service.
             # This avoids pretending the service might have started while no connectors are actually wired.
             logger.info(
