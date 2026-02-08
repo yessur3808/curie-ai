@@ -523,9 +523,10 @@ class CodingAssistant:
             pp = get_pair_programming()
             message_lower = message.lower()
             
-            # Detect user ID (use a simple approach for now)
-            # In production, this would come from the session context
-            user_id = "default_user"  # TODO: Get from session context
+            # FIXME: User ID should come from the chat session context
+            # Currently hardcoded for demonstration - this means all users share the same session
+            # In production, extract from normalized_input or session context in chat_workflow
+            user_id = "default_user"  # TODO: Get from session context - see chat_workflow.py process_message()
             
             # Start session
             if any(word in message_lower for word in ['start', 'begin']) and 'session' not in message_lower:

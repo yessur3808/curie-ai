@@ -517,7 +517,8 @@ class PerformanceAnalyzer:
         suggestions = []
         
         # Suggest memoization for recursive functions
-        if re.search(r'def\s+\w+\([^)]*\):.*\1\(', code, re.DOTALL):
+        # Look for function definitions and check if function name appears in body
+        if re.search(r'def\s+(\w+)\([^)]*\):.*\b\1\(', code, re.DOTALL):
             suggestions.append({
                 'title': 'Add Memoization to Recursive Function',
                 'priority': 'high',
