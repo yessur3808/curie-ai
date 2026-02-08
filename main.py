@@ -376,7 +376,17 @@ def main():
             # Note: do not start the service unless at least one connector is registered
             
             # Get check interval from env (default: 3600 seconds = 1 hour)
-            check_interval = int(os.getenv("PROACTIVE_CHECK_INTERVAL", "3600"))
+            DEFAULT_PROACTIVE_CHECK_INTERVAL = 3600
+            raw_interval = os.getenv("PROACTIVE_CHECK_INTERVAL", str(DEFAULT_PROACTIVE_CHECK_INTERVAL))
+            try:
+                check_interval = int(raw_interval)
+            except ValueError:
+                logger.warning(
+                    "Invalid PROACTIVE_CHECK_INTERVAL value %r; falling back to default %s seconds",
+                    raw_interval,
+                    DEFAULT_PROACTIVE_CHECK_INTERVAL,
+                )
+                check_interval = DEFAULT_PROACTIVE_CHECK_INTERVAL
             
             if not connectors:
                 logger.info(
