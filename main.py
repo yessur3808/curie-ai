@@ -6,6 +6,7 @@ import threading
 import sys
 import json
 import logging
+import time
 
 # Check for critical dependencies early to provide helpful error messages
 try:
@@ -358,6 +359,31 @@ def main():
 
     threads = []
     
+    # Initialize proactive messaging service (only if any connectors are running)
+    proactive_service = None
+    enable_proactive = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
+    
+    if enable_proactive and (run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag):
+        try:
+            logger.info("Initializing proactive messaging service...")
+            # Create agent for proactive messaging
+            agent = Agent(persona=persona)
+            
+            # Build connector map for proactive messaging
+            connectors = {}
+            # We'll populate this as connectors are initialized
+            # Note: do not start the service unless at least one connector is registered
+            
+            # Proactive connectors are not yet registered in this process, so do not start the service.
+            # This avoids pretending the service might have started while no connectors are actually wired.
+            logger.info(
+                "Proactive messaging service not started because no connectors are registered yet."
+            )
+        except Exception as e:
+            logger.error(f"❌ Failed to start proactive messaging service: {e}", exc_info=True)
+    elif not enable_proactive:
+        logger.info("ℹ️  Proactive messaging is disabled via ENABLE_PROACTIVE_MESSAGING env variable")
+    
     # Start Discord bot in thread
     if run_discord_flag:
         if DISCORD_AVAILABLE:
@@ -409,8 +435,13 @@ def main():
         run_telegram(workflow)
     else:
         # If Telegram is not running, join other threads to prevent main from exiting
-        for t in threads:
-            t.join()
+        try:
+            for t in threads:
+                t.join()
+        except KeyboardInterrupt:
+            logger.info("Shutting down...")
+            if proactive_service:
+                proactive_service.stop()
         
         
 if __name__ == "__main__":

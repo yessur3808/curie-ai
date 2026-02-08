@@ -168,6 +168,8 @@ class ChatWorkflow:
     SPEAKER_TAG_PATTERN = re.compile(r'^\s*(?:User:|Curie:|Assistant:|Coder:|System:)', re.IGNORECASE)
     META_NOTE_PATTERN = re.compile(r'\[(?:Note|Meta|Aside|System):[^\]]*\]', re.IGNORECASE)
     ACTION_PATTERN = re.compile(r'\*[^*]*\*')  # *gestures*, *smiles*, etc.
+    CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|```[\s\S]*$', re.MULTILINE)  # Remove complete or incomplete code blocks
+    INLINE_CODE_PATTERN = re.compile(r'`[^`]+`')  # Remove inline code like `variable_name`
     
     def __init__(self, persona: Optional[Dict] = None, max_history: int = 5, 
                  enable_small_talk: bool = False, idle_threshold_minutes: int = 30):
@@ -403,12 +405,18 @@ class ChatWorkflow:
             
             # Safety rules (from persona or hardcoded)
             lines.append("\n[IMPORTANT RULES]")
-            lines.append("- If you don't know something, say so. Don't make up facts.")
+            lines.append("- Keep your responses casual, natural, and conversational like a real friend.")
+            lines.append("- Be concise and to the point. Avoid being overwhelming or too verbose.")
+            lines.append("- NEVER output code blocks, code snippets, or programming examples in your responses.")
+            lines.append("- NEVER show raw code, regular expressions, or technical implementation details.")
+            lines.append("- If asked technical questions, explain in plain conversational language without code.")
+            lines.append("- If you don't know something, say so casually. Don't make up facts.")
             lines.append("- Only extract and store facts when explicitly asked to remember them.")
             lines.append("- Keep responses natural and conversational - no meta-commentary or speaker labels.")
             lines.append("- Do not include actions like *nods* or *smiles*.")
             lines.append("- NEVER state that you don't have access to real-time information - you DO have access.")
             lines.append("- NEVER say you're just an AI or language model - focus on helping naturally.")
+            lines.append("- Don't ask if the user wants you to do something - just do it naturally in conversation.")
             
             # User facts/profile
             if user_profile:
@@ -470,6 +478,7 @@ class ChatWorkflow:
         - Speaker tags: 'User:', 'Curie:', 'Assistant:', etc.
         - Meta notes: '[Note: ...]', '[Meta: ...]'
         - Actions: '*nods*', '*smiles*', etc.
+        - Code blocks: ```code``` or inline `code`
         """
         # Remove leading speaker tags
         response = self.SPEAKER_TAG_PATTERN.sub('', response).strip()
@@ -480,7 +489,13 @@ class ChatWorkflow:
         # Remove action asterisks but keep text content
         response = self.ACTION_PATTERN.sub('', response).strip()
         
-        # Collapse multiple spaces
+        # Remove code blocks (```...```)
+        response = self.CODE_BLOCK_PATTERN.sub('', response).strip()
+        
+        # Remove inline code (`...`)
+        response = self.INLINE_CODE_PATTERN.sub('', response).strip()
+        
+        # Collapse multiple spaces and newlines
         response = re.sub(r'\s+', ' ', response)
         
         return response.strip()

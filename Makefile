@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: install install-optional run start test migrate migrate-down lint format shell verify help
 .PHONY: db-start db-stop db-restart db-status setup-db
 .PHONY: run-telegram run-discord run-whatsapp run-api run-all
-.PHONY: check-ports test-imports clean
+.PHONY: check-ports test-imports clean sync-env sync-env-add sync-env-clean sync-env-backup restart-clean
 
 # Installation targets
 install:  ## Install all dependencies from requirements.txt
@@ -92,6 +92,27 @@ clean:  ## Remove Python cache files and logs
 	find . -type f -name "*.log" -delete
 	@echo "Cache and log files cleaned!"
 
+restart-clean:  ## Clean cache/logs, restart databases, and restart application
+	@echo "Cleaning cache and logs..."
+	@$(MAKE) clean
+	@echo "Restarting databases..."
+	@$(MAKE) db-restart
+	@echo "Starting application..."
+	@$(MAKE) run
+
+# Environment management
+sync-env:  ## Sync .env file with .env.example (check differences)
+	python scripts/sync_env.py
+
+sync-env-add:  ## Add missing variables from .env.example to .env
+	python scripts/sync_env.py --sync
+
+sync-env-clean:  ## Interactively remove obsolete variables from .env
+	python scripts/sync_env.py --clean
+
+sync-env-backup:  ## Sync .env with backup
+	python scripts/sync_env.py --sync --backup
+
 # Help
 help:  ## Show available commands
 	@echo "Available make targets:"
@@ -107,6 +128,14 @@ help:  ## Show available commands
 	@echo ""
 	@echo "  3. Verify installation:"
 	@echo "     make verify"
+	@echo ""
+	@echo "  4. Sync .env file:"
+	@echo "     make sync-env          # Check differences"
+	@echo "     make sync-env-add      # Add missing variables"
+	@echo "     make sync-env-clean    # Remove obsolete variables"
+	@echo ""
+	@echo "  5. Clean restart:"
+	@echo "     make restart-clean     # Clean, restart DB, and run"
 	@echo ""
 
 	

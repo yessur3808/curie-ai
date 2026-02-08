@@ -301,18 +301,21 @@ class ProactiveMessagingService:
         persona = self.agent.persona
         prompt = (
             f"{persona.get('system_prompt', '')}\n\n"
-            "You are checking in on a friend proactively, like a caring friend would. "
-            "Generate a brief, warm, and natural check-in message (1-2 sentences). "
-            "Be genuine and caring. Maybe ask how they're doing, reference something from past conversations, "
-            "or share something interesting. Keep it casual and friendly.\n"
-            "IMPORTANT: Do NOT say you're an AI or mention you're checking in automatically. "
-            "Just be natural like a real friend would be.\n"
+            "You are reaching out to a friend naturally and casually. "
+            "Generate a brief, warm check-in message (1-2 sentences max). "
+            "Be genuine, casual, and friendly like texting a friend. "
+            "DON'T be formal or overwhelming. DON'T offer multiple options. "
+            "DON'T say things like 'Would you like me to...' or 'What would you like me to do?'. "
+            "Just be natural and caring. Examples: 'Hey! How's your day going?', "
+            "'Thought of you today, hope you're doing well!', 'What's new with you?'\n"
+            "CRITICAL: Do NOT reveal you're checking in automatically. Just be natural, be a real genuine, caring friend.\n"
+            "Keep it SHORT and CASUAL - 1-2 sentences only!\n"
         )
         
         if user_profile:
             prompt += "\nWhat you know about them:\n"
             for k, v in user_profile.items():
-                if k not in ['_id', 'internal_id', 'busy', 'proactive_messaging_enabled']:
+                if k not in ['_id', 'internal_id', 'busy', 'proactive_messaging_enabled', 'proactive_interval_hours']:
                     prompt += f"- {k}: {v}\n"
         
         if history:
@@ -321,14 +324,14 @@ class ProactiveMessagingService:
             for role, msg in history[-3:]:
                 prompt += f"{role.capitalize()}: {msg[:100]}...\n"
         
-        prompt += "\nYour friendly check-in message:"
+        prompt += "\nYour casual, friendly check-in (1-2 sentences max):"
         
         # Generate message
         message = await asyncio.to_thread(
             manager.ask_llm,
             prompt,
             temperature=0.9,  # Higher temperature for more natural variation
-            max_tokens=150
+            max_tokens=100  # Reduced to ensure brevity
         )
         
         return message.strip()
