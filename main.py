@@ -18,7 +18,6 @@ try:
 
     from agent.core import Agent
     from agent.chat_workflow import ChatWorkflow
-    from services.proactive_messaging import ProactiveMessagingService
     from utils.persona import load_persona, list_available_personas
     import asyncio
 except ModuleNotFoundError as e:
