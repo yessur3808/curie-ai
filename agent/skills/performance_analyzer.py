@@ -255,19 +255,53 @@ class PerformanceAnalyzer:
         return count
     
     def _calculate_max_nesting_depth(self, code: str) -> int:
-        """Calculate maximum nesting depth"""
-        max_depth = 0
-        current_depth = 0
-        
-        # Simple brace/indent counting
+        """Calculate maximum control-flow/block nesting depth."""
+        # First, approximate block nesting for brace-based languages using '{' and '}'.
+        brace_depth = 0
+        max_brace_depth = 0
         for char in code:
-            if char in '{([':
-                current_depth += 1
-                max_depth = max(max_depth, current_depth)
-            elif char in '})]':
-                current_depth = max(0, current_depth - 1)
+            if char == '{':
+                brace_depth += 1
+                if brace_depth > max_brace_depth:
+                    max_brace_depth = brace_depth
+            elif char == '}':
+                # Ensure depth does not go negative on unmatched braces.
+                brace_depth = max(0, brace_depth - 1)
         
-        return max_depth
+        # Next, approximate block nesting for indentation-based code (e.g., Python).
+        lines = code.splitlines()
+        indent_stack = [0]  # stack of indentation levels
+        max_indent_depth = 0
+        
+        for line in lines:
+            # Skip empty or whitespace-only lines.
+            if not line.strip():
+                continue
+            
+            stripped = line.lstrip()
+            # Skip obvious full-line comments so they don't affect nesting.
+            if stripped.startswith(('#', '//', '/*', '*')):
+                continue
+            
+            indent = len(line) - len(stripped)
+            
+            if indent > indent_stack[-1]:
+                # Increased indentation => deeper nesting level.
+                indent_stack.append(indent)
+                # Depth is number of active indentation levels minus the base level.
+                current_depth = len(indent_stack) - 1
+                if current_depth > max_indent_depth:
+                    max_indent_depth = current_depth
+            else:
+                # Reduced or equal indentation => unwind to the matching level.
+                while indent_stack and indent < indent_stack[-1]:
+                    indent_stack.pop()
+                if not indent_stack:
+                    # Reset stack if we popped everything due to malformed indentation.
+                    indent_stack = [indent]
+        
+        # Use the maximum of brace-based and indentation-based estimates.
+        return max(max_brace_depth, max_indent_depth)
     
     def _count_functions(self, code: str, language: Optional[str]) -> int:
         """Count number of functions"""
