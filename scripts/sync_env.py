@@ -327,8 +327,6 @@ def main():
             print(f"✅ Created .env at {manager.env_path}")
             print("   Please review and update the values as needed.")
         else:
-            if args.backup:
-                manager.create_backup()
             manager.add_missing_variables(dry_run=False)
         return
     
