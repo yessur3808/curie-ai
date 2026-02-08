@@ -53,31 +53,37 @@ class EnvManager:
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.rstrip('\n')
+                stripped = line.strip()
                 
-                # Skip empty lines
-                if not line.strip():
+                # Skip empty lines and reset accumulated comments
+                if not stripped:
                     current_comments = []
                     continue
                 
-                # Collect comment lines
-                if line.strip().startswith('#'):
-                    current_comments.append(line)
+                # Determine if this line (possibly commented) is an assignment
+                if stripped.startswith('#'):
+                    # Could be a pure comment or a commented-out assignment "# VAR=value"
+                    potential = stripped.lstrip('#').strip()
+                    is_commented = True
+                else:
+                    potential = stripped
+                    is_commented = False
+                
+                if '=' in potential:
+                    # Handle both "VAR=value" and "# VAR=value" (commented out vars)
+                    key, value = potential.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Store with comments and whether it's commented out
+                    env_vars[key] = (value, current_comments.copy(), is_commented)
+                    current_comments = []
                     continue
                 
-                # Parse variable assignment
-                if '=' in line:
-                    # Handle both "VAR=value" and "# VAR=value" (commented out vars)
-                    is_commented = line.strip().startswith('#')
-                    clean_line = line.strip().lstrip('#').strip()
-                    
-                    if '=' in clean_line:
-                        key, value = clean_line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip()
-                        
-                        # Store with comments and whether it's commented out
-                        env_vars[key] = (value, current_comments.copy(), is_commented)
-                        current_comments = []
+                # Collect pure comment lines (no assignment present)
+                if stripped.startswith('#'):
+                    current_comments.append(line)
+                    continue
         
         return env_vars
     
