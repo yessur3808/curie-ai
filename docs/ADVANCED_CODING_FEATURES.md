@@ -212,7 +212,7 @@ Automated background scanning and continuous code quality monitoring.
 
 ```
 Scan directory:
-"Scan for bugs in directory src/"
+"Scan for bugs in directory agent/"
 "Check all files for issues"
 "Proactive scan"
 
@@ -224,10 +224,10 @@ Scan with filters:
 ### Example Usage
 
 ```
-User: Scan for bugs in directory src/
+User: Scan for bugs in directory agent/
 Curie: 🔍 Proactive Bug Scanning
        
-       Starting scan of src/...
+       Starting scan of agent/...
        This will analyze all code files for potential bugs.
        
        [Scans directory]

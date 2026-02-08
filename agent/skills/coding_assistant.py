@@ -597,13 +597,12 @@ class CodingAssistant:
                 dir_match = re.search(r'(?:scan|in)\s+directory\s+([^\s]+)', message_lower)
                 directory = dir_match.group(1) if dir_match else '.'
                 
-                return (
-                    f"🔍 **Proactive Bug Scanning**\n\n"
-                    f"Starting scan of `{directory}`...\n"
-                    f"This will analyze all code files for potential bugs.\n\n"
-                    f"Note: For best results, specify a file path:\n"
-                    f"\"Find bugs in file path/to/file.py\""
-                )
+                try:
+                    # Actually perform the scan
+                    results = detector.proactive_scan_directory(directory)
+                    return detector.format_proactive_scan_report(results)
+                except Exception as e:
+                    return f"❌ Error scanning directory: {str(e)}"
             
             # General help
             else:
@@ -647,7 +646,19 @@ class CodingAssistant:
             if file_match:
                 filepath = file_match.group(1)
                 try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
+                    # Validate path to prevent directory traversal
+                    if os.path.isabs(filepath):
+                        return "❌ Absolute paths are not allowed. Please use a relative path."
+                    
+                    # Resolve and validate path
+                    repo_path = os.getcwd()
+                    full_path = os.path.abspath(os.path.join(repo_path, filepath))
+                    repo_path_abs = os.path.abspath(repo_path)
+                    
+                    if not full_path.startswith(repo_path_abs + os.sep) and full_path != repo_path_abs:
+                        return f"❌ Path escapes repository: {filepath}"
+                    
+                    with open(full_path, 'r', encoding='utf-8') as f:
                         code = f.read()
                     
                     # Detect language
@@ -657,6 +668,8 @@ class CodingAssistant:
                     
                     report = analyzer.generate_optimization_report(code, language, filepath)
                     return report
+                except ValueError as e:
+                    return f"❌ Invalid path: {str(e)}"
                 except Exception as e:
                     return f"❌ Error analyzing file: {str(e)}"
             
