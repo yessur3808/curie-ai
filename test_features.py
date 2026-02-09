@@ -18,7 +18,9 @@ def test_code_sanitization():
     print("TEST 1: Code Sanitization")
     print("=" * 70)
     
-    # Define sanitization patterns (same as in chat_workflow.py)
+    # Define sanitization patterns for this demo.
+    # NOTE: These are intentionally more aggressive than ChatWorkflow._sanitize_output():
+    # they always strip code and collapse all whitespace into single spaces.
     CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|```[\s\S]*$', re.MULTILINE)
     INLINE_CODE_PATTERN = re.compile(r'`[^`]+`')
     
