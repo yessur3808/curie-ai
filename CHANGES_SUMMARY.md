@@ -16,11 +16,9 @@ def get_weather_info():
 ```
 
 **Solution:** 
-- Added comprehensive output sanitization in `agent/chat_workflow.py`
-- Removes complete code blocks: ` ```...``` `
-- Removes incomplete code blocks: ` ```... ` (unclosed)
-- Removes inline code: `` `code` ``
-
+- Added comprehensive output sanitization in `agent/chat_workflow.py` with two modes:
+  - **Minimal sanitization (default, `minimal_sanitization=True`)**: preserves code blocks/inline code while applying basic safety filtering.
+  - **Aggressive sanitization (`minimal_sanitization=False`)**: removes complete code blocks: ` ```...``` `, incomplete/unclosed code blocks: ` ```... `, and inline code: `` `code` ``.
 ### 2. Verbose and Overwhelming Responses
 **Problem:** Responses were too formal, verbose, and offered too many options.
 
