@@ -366,14 +366,6 @@ def main():
     if enable_proactive and (run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag):
         try:
             logger.info("Initializing proactive messaging service...")
-            # Create agent for proactive messaging
-            agent = Agent(persona=persona)
-            
-            # Build connector map for proactive messaging
-            connectors = {}
-            # We'll populate this as connectors are initialized
-            # Note: do not start the service unless at least one connector is registered
-            
             # Proactive connectors are not yet registered in this process, so do not start the service.
             # This avoids pretending the service might have started while no connectors are actually wired.
             logger.info(
