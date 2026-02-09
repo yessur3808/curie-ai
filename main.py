@@ -345,7 +345,14 @@ def main():
     # Load persona and initialize ChatWorkflow
     persona_arg = getattr(args, "persona", None)
     persona = load_persona(filename=persona_arg)
-    workflow = ChatWorkflow(persona=persona, max_history=5, enable_small_talk=False)
+    # Use minimal_sanitization from env or default to True for natural chat
+    minimal_sanitization = os.getenv("MINIMAL_SANITIZATION", "true").lower() == "true"
+    workflow = ChatWorkflow(
+        persona=persona, 
+        max_history=5, 
+        enable_small_talk=False,
+        minimal_sanitization=minimal_sanitization
+    )
     logger.info(f"✅ ChatWorkflow initialized with persona: {workflow.persona.get('name')}")
     
     # Share workflow with connectors
