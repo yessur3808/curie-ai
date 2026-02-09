@@ -165,7 +165,10 @@ class ChatWorkflow:
     ]
     
     # Output sanitation patterns
-    SPEAKER_TAG_PATTERN = re.compile(r'^\s*(?:User:|Curie:|Assistant:|Coder:|System:)', re.IGNORECASE)
+    SPEAKER_TAG_PATTERN = re.compile(
+        r'^\s*(?:User:|Curie:|Assistant:|Coder:|System:)',
+        re.IGNORECASE | re.MULTILINE,
+    )
     META_NOTE_PATTERN = re.compile(r'\[(?:Note|Meta|Aside|System):[^\]]*\]', re.IGNORECASE)
     ACTION_PATTERN = re.compile(r'\*[^*]*\*')  # *gestures*, *smiles*, etc.
     CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|```[\s\S]*$', re.MULTILINE)  # Remove complete or incomplete code blocks
