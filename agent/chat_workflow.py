@@ -172,7 +172,8 @@ class ChatWorkflow:
     INLINE_CODE_PATTERN = re.compile(r'`[^`]+`')  # Remove inline code like `variable_name`
     
     def __init__(self, persona: Optional[Dict] = None, max_history: int = 5, 
-                 enable_small_talk: bool = False, idle_threshold_minutes: int = 30):
+                 enable_small_talk: bool = False, idle_threshold_minutes: int = 30,
+                 minimal_sanitization: bool = True):
         """
         Initialize chat workflow.
         
@@ -181,11 +182,14 @@ class ChatWorkflow:
             max_history: Number of conversation exchanges to include
             enable_small_talk: Whether to add small talk to responses
             idle_threshold_minutes: Minutes of inactivity before adding small talk
+            minimal_sanitization: If True, only remove obvious artifacts (speaker tags, meta notes).
+                                 If False, also remove code blocks and inline code.
         """
         self.persona = persona or self._load_default_persona()
         self.max_history = max_history
         self.enable_small_talk = enable_small_talk
         self.idle_threshold_minutes = idle_threshold_minutes
+        self.minimal_sanitization = minimal_sanitization
         
         # Shared caches
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
@@ -405,22 +409,18 @@ class ChatWorkflow:
             
             # Safety rules (from persona or hardcoded)
             lines.append("\n[IMPORTANT RULES]")
-            lines.append("- Keep your responses casual, natural, and conversational like a real friend.")
-            lines.append("- Be concise and to the point. Avoid being overwhelming or too verbose.")
-            # Some personas (e.g., non-technical chat) may wish to avoid code entirely.
-            # This can be configured per persona via the `disallow_code` flag.
-            disallow_code = self.persona.get("disallow_code", True)
+            lines.append("- Be natural, conversational, and helpful like talking to a friend.")
+            lines.append("- Be concise but complete - answer questions fully without being overwhelming.")
+            lines.append("- If you don't know something, just say so naturally.")
+            lines.append("- Avoid meta-commentary like 'As an AI...' or '[Note: ...]' - just respond directly.")
+            lines.append("- Don't include action descriptions like *nods* or *gestures*.")
+            
+            # Code output handling - make it context-aware instead of blanket ban
+            disallow_code = self.persona.get("disallow_code", False)  # Changed default to False
             if disallow_code:
-                lines.append("- NEVER output code blocks, code snippets, or programming examples in your responses.")
-                lines.append("- NEVER show raw code, regular expressions, or technical implementation details.")
-                lines.append("- If asked technical questions, explain in plain conversational language without code.")
-            lines.append("- If you don't know something, say so casually. Don't make up facts.")
-            lines.append("- Only extract and store facts when explicitly asked to remember them.")
-            lines.append("- Keep responses natural and conversational - no meta-commentary or speaker labels.")
-            lines.append("- Do not include actions like *nods* or *smiles*.")
-            lines.append("- NEVER state that you don't have access to real-time information - you DO have access.")
-            lines.append("- NEVER say you're just an AI or language model - focus on helping naturally.")
-            lines.append("- Don't ask if the user wants you to do something - just do it naturally in conversation.")
+                lines.append("- When discussing technical topics, explain concepts clearly without code examples.")
+            else:
+                lines.append("- Use code examples when helpful for technical discussions, but explain them in plain language too.")
             
             # User facts/profile
             if user_profile:
@@ -478,29 +478,35 @@ class ChatWorkflow:
     
     def _sanitize_output(self, response: str) -> str:
         """
-        Clean output to remove unwanted artifacts:
-        - Speaker tags: 'User:', 'Curie:', 'Assistant:', etc.
-        - Meta notes: '[Note: ...]', '[Meta: ...]'
-        - Actions: '*nods*', '*smiles*', etc.
-        - Code blocks: ```code``` or inline `code`
+        Clean output to remove unwanted artifacts.
+        
+        With minimal_sanitization=True (default for natural chat):
+        - Only removes obvious artifacts: speaker tags, meta notes, actions
+        - Preserves code blocks and inline code for technical discussions
+        
+        With minimal_sanitization=False (legacy behavior):
+        - Also removes code blocks and inline code
         """
-        # Remove leading speaker tags
+        # Always remove speaker tags (these are artifacts from the model)
         response = self.SPEAKER_TAG_PATTERN.sub('', response).strip()
         
-        # Remove meta notes
+        # Always remove meta notes (these are internal comments)
         response = self.META_NOTE_PATTERN.sub('', response).strip()
         
-        # Remove action asterisks but keep text content
+        # Always remove action descriptions (these feel unnatural in text)
         response = self.ACTION_PATTERN.sub('', response).strip()
         
-        # Remove code blocks (```...```)
-        response = self.CODE_BLOCK_PATTERN.sub('', response).strip()
+        # Only remove code if minimal_sanitization is False
+        if not self.minimal_sanitization:
+            # Remove code blocks (```...```)
+            response = self.CODE_BLOCK_PATTERN.sub('', response).strip()
+            
+            # Remove inline code (`...`)
+            response = self.INLINE_CODE_PATTERN.sub('', response).strip()
         
-        # Remove inline code (`...`)
-        response = self.INLINE_CODE_PATTERN.sub('', response).strip()
-        
-        # Collapse multiple spaces and newlines
-        response = re.sub(r'\s+', ' ', response)
+        # Collapse multiple spaces but preserve intentional line breaks
+        response = re.sub(r' +', ' ', response)  # Multiple spaces to single
+        response = re.sub(r'\n\n\n+', '\n\n', response)  # Multiple newlines to double
         
         return response.strip()
     
