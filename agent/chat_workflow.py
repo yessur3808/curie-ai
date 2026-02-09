@@ -407,9 +407,13 @@ class ChatWorkflow:
             lines.append("\n[IMPORTANT RULES]")
             lines.append("- Keep your responses casual, natural, and conversational like a real friend.")
             lines.append("- Be concise and to the point. Avoid being overwhelming or too verbose.")
-            lines.append("- NEVER output code blocks, code snippets, or programming examples in your responses.")
-            lines.append("- NEVER show raw code, regular expressions, or technical implementation details.")
-            lines.append("- If asked technical questions, explain in plain conversational language without code.")
+            # Some personas (e.g., non-technical chat) may wish to avoid code entirely.
+            # This can be configured per persona via the `disallow_code` flag.
+            disallow_code = self.persona.get("disallow_code", True)
+            if disallow_code:
+                lines.append("- NEVER output code blocks, code snippets, or programming examples in your responses.")
+                lines.append("- NEVER show raw code, regular expressions, or technical implementation details.")
+                lines.append("- If asked technical questions, explain in plain conversational language without code.")
             lines.append("- If you don't know something, say so casually. Don't make up facts.")
             lines.append("- Only extract and store facts when explicitly asked to remember them.")
             lines.append("- Keep responses natural and conversational - no meta-commentary or speaker labels.")
