@@ -73,7 +73,8 @@ class MessageDedupeCache:
 class PromptCache:
     """
     LRU cache for tokenized prompts to avoid repeated tokenization.
-    Keys are hashes of (system_prompt + user_facts + recent_history).
+    Keys are hashes of (internal_id + system_prompt + user_facts + recent_history).
+    internal_id is included so different users never share a cache entry.
     """
     
     def __init__(self, max_size=100):
@@ -83,23 +84,21 @@ class PromptCache:
         self.hits = 0
         self.misses = 0
     
-    def _make_key(self, system_prompt: str, user_facts: Dict, history_str: str, time_bucket: str = "") -> str:
+    def _make_key(self, system_prompt: str, user_facts: Dict, history_str: str,
+                  time_bucket: str = "", internal_id: str = "") -> str:
         """
         Create a hash key from prompt components.
-        
-        Args:
-            system_prompt: The system prompt text
-            user_facts: User profile dictionary
-            history_str: Conversation history string
-            time_bucket: Optional time bucket (e.g., "2026-02-07-15") for cache invalidation
+        internal_id is included so two users with identical profiles never
+        share a cache entry.
         """
         facts_str = json.dumps(user_facts, sort_keys=True) if user_facts else ""
-        combined = f"{system_prompt}|||{facts_str}|||{history_str}|||{time_bucket}"
+        combined = f"{internal_id}|||{system_prompt}|||{facts_str}|||{history_str}|||{time_bucket}"
         return str(hash(combined))
     
-    def get(self, system_prompt: str, user_facts: Dict, history_str: str, time_bucket: str = "") -> Optional[Tuple]:
+    def get(self, system_prompt: str, user_facts: Dict, history_str: str,
+            time_bucket: str = "", internal_id: str = "") -> Optional[Tuple]:
         """Returns (prompt_text, token_count) or None."""
-        key = self._make_key(system_prompt, user_facts, history_str, time_bucket)
+        key = self._make_key(system_prompt, user_facts, history_str, time_bucket, internal_id)
         with self.lock:
             if key in self.cache:
                 self.hits += 1
@@ -109,9 +108,10 @@ class PromptCache:
             self.misses += 1
         return None
     
-    def set(self, system_prompt: str, user_facts: Dict, history_str: str, prompt_text: str, token_count: int, time_bucket: str = ""):
+    def set(self, system_prompt: str, user_facts: Dict, history_str: str,
+            prompt_text: str, token_count: int, time_bucket: str = "", internal_id: str = ""):
         """Store a tokenized prompt."""
-        key = self._make_key(system_prompt, user_facts, history_str, time_bucket)
+        key = self._make_key(system_prompt, user_facts, history_str, time_bucket, internal_id)
         with self.lock:
             if key in self.cache:
                 del self.cache[key]
@@ -171,30 +171,18 @@ class ChatWorkflow:
     )
     META_NOTE_PATTERN = re.compile(r'\[(?:Note|Meta|Aside|System):[^\]]*\]', re.IGNORECASE)
     ACTION_PATTERN = re.compile(r'\*[^*]*\*')  # *gestures*, *smiles*, etc.
-    CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|```[\s\S]*$', re.MULTILINE)  # Remove complete or incomplete code blocks
-    INLINE_CODE_PATTERN = re.compile(r'`[^`]+`')  # Remove inline code like `variable_name`
+    CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|```[\s\S]*$', re.MULTILINE)
+    INLINE_CODE_PATTERN = re.compile(r'`[^`]+`')
     
     def __init__(self, persona: Optional[Dict] = None, max_history: int = 5, 
                  enable_small_talk: bool = False, idle_threshold_minutes: int = 30,
                  minimal_sanitization: bool = True):
-        """
-        Initialize chat workflow.
-        
-        Args:
-            persona: Dict with 'name', 'system_prompt', 'french_phrases', etc.
-            max_history: Number of conversation exchanges to include
-            enable_small_talk: Whether to add small talk to responses
-            idle_threshold_minutes: Minutes of inactivity before adding small talk
-            minimal_sanitization: If True, only remove obvious artifacts (speaker tags, meta notes).
-                                 If False, also remove code blocks and inline code.
-        """
         self.persona = persona or self._load_default_persona()
         self.max_history = max_history
         self.enable_small_talk = enable_small_talk
         self.idle_threshold_minutes = idle_threshold_minutes
         self.minimal_sanitization = minimal_sanitization
         
-        # Shared caches
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
         self.prompt_cache = PromptCache(max_size=100)
         
@@ -215,18 +203,9 @@ class ChatWorkflow:
     async def process_message(self, normalized_input: Dict) -> Dict:
         """
         Main entry point: process a normalized message and return structured response.
-        
-        This is the ONLY method connectors should call.
-        
-        Args:
-            normalized_input: {platform, external_user_id, external_chat_id, message_id, text, timestamp, internal_id (optional)}
-        
-        Returns:
-            {text, timestamp, model_used, processing_time_ms}
         """
         start_time = time.time()
         
-        # Extract fields with validation
         platform = normalized_input.get('platform', 'unknown')
         external_user_id = normalized_input.get('external_user_id')
         external_chat_id = normalized_input.get('external_chat_id')
@@ -242,8 +221,7 @@ class ChatWorkflow:
                 'processing_time_ms': 0
             }
         
-        # Get internal user ID for persistence
-        # If internal_id is provided (e.g., via /identify), use it; otherwise lookup/create
+        # Resolve internal_id — use pre-identified one if provided, otherwise lookup/create
         internal_id = normalized_input.get('internal_id')
         if not internal_id:
             internal_id = UserManager.get_or_create_user_internal_id(
@@ -253,7 +231,7 @@ class ChatWorkflow:
                 updated_by="chat_workflow",
             )
         
-        # Check deduplication cache
+        # Deduplication cache check
         cached_response = self.dedupe_cache.get(platform, str(external_chat_id), message_id)
         if cached_response:
             processing_time = (time.time() - start_time) * 1000
@@ -263,22 +241,48 @@ class ChatWorkflow:
                 'model_used': 'dedupe_cache',
                 'processing_time_ms': round(processing_time, 2)
             }
-        
+
+        # ── Per-user session commands ─────────────────────────────────────────
+        # Any user can manage their own conversation history.
+        # These are handled before the LLM so they never consume tokens.
+        command = user_text.strip().lower()
+
+        if command in ("/reset", "/new"):
+            ConversationManager.clear_conversation(internal_id)
+            reset_response = "✅ Your conversation history has been cleared. Fresh start!"
+            processing_time = (time.time() - start_time) * 1000
+            return {
+                "text": reset_response,
+                "timestamp": datetime.utcnow(),
+                "model_used": "system",
+                "processing_time_ms": round(processing_time, 2),
+            }
+
+        if command == "/history":
+            count = ConversationManager.get_conversation_count(internal_id)
+            stats_response = (
+                f"📊 Your session: {count} messages stored.\n"
+                f"Use /reset to clear your history."
+            )
+            processing_time = (time.time() - start_time) * 1000
+            return {
+                "text": stats_response,
+                "timestamp": datetime.utcnow(),
+                "model_used": "system",
+                "processing_time_ms": round(processing_time, 2),
+            }
+        # ─────────────────────────────────────────────────────────────────────
+
         try:
             # Check for coding-related queries first (before LLM)
             try:
                 from agent.skills.coding_assistant import handle_coding_query
                 coding_response = await handle_coding_query(user_text)
                 if coding_response:
-                    # Found a coding intent, return the response
                     logger.info(f"Coding skill handled the query")
-                    # Save to conversation history
                     ConversationManager.save_conversation(internal_id, "user", user_text)
                     ConversationManager.save_conversation(internal_id, "assistant", coding_response)
-                    
-                    # Cache response for deduplication
                     self.dedupe_cache.set(platform, str(external_chat_id), message_id, coding_response)
-                    
                     processing_time = (time.time() - start_time) * 1000
                     return {
                         'text': coding_response,
@@ -287,14 +291,15 @@ class ChatWorkflow:
                         'processing_time_ms': round(processing_time, 2)
                     }
             except Exception as e:
-                # Log but don't fail - fall back to normal LLM processing
                 logger.debug(f"Coding skill check failed: {e}")
             
             # Load user profile and conversation history in parallel
             user_profile, history = await self._batch_load_context(internal_id)
             
-            # Build structured prompt
-            prompt = self._build_structured_prompt(user_profile, history, user_text)
+            # Build structured prompt — internal_id scopes the prompt cache per user
+            prompt = self._build_structured_prompt(
+                user_profile, history, user_text, internal_id=internal_id
+            )
             
             # Call LLM
             response = llm_manager.ask_llm(
@@ -306,16 +311,13 @@ class ChatWorkflow:
             # Sanitize output
             response = self._sanitize_output(response)
             
-            # Check if small talk should be added (idle time check)
             if self.enable_small_talk and self._should_add_small_talk(history):
-                # Add small talk instruction to response
                 response = self._append_small_talk_thoughtfully(response)
             
             # Save to conversation history
             ConversationManager.save_conversation(internal_id, "user", user_text)
             ConversationManager.save_conversation(internal_id, "assistant", response)
             
-            # Cache response for deduplication
             self.dedupe_cache.set(platform, str(external_chat_id), message_id, response)
             
             processing_time = (time.time() - start_time) * 1000
@@ -340,11 +342,9 @@ class ChatWorkflow:
     async def _batch_load_context(self, internal_id: str) -> Tuple[Dict, list]:
         """
         Batch-load user profile and conversation history in parallel.
-        Reduces from 4+ sequential queries to 2 parallel queries.
         """
         loop = asyncio.get_running_loop()
         
-        # Run blocking DB calls in thread pool
         user_profile_task = loop.run_in_executor(None, UserManager.get_user_profile, internal_id)
         history_task = loop.run_in_executor(
             None, 
@@ -356,32 +356,14 @@ class ChatWorkflow:
         user_profile, history = await asyncio.gather(user_profile_task, history_task)
         return user_profile or {}, history or []
     
-    def _build_structured_prompt(self, user_profile: Dict, history: list, user_text: str) -> str:
+    def _build_structured_prompt(self, user_profile: Dict, history: list,
+                                  user_text: str, internal_id: str = "") -> str:
         """
-        Build prompt using structured chat format instead of raw concatenation.
-        This prevents speaker tag leakage and format derailments.
-        
-        Format:
-        [SYSTEM]
-        {system_prompt}
-        
-        [CONTEXT]
-        {verified_facts}
-        
-        [CONVERSATION]
-        User: ...
-        Assistant: ...
-        ...
-        
-        [INPUT]
-        User: {user_text}
+        Build prompt using structured chat format.
+        internal_id is used to scope the prompt cache so users never share entries.
         """
-        
-        # Build history string for cache key
         history_str = "\n".join([f"{role}: {msg[:50]}" for role, msg in history[-5:]])
         
-        # Create time bucket for cache (hourly granularity)
-        # This ensures datetime context stays fresh (max 1 hour stale)
         user_tz = user_profile.get('timezone', 'UTC') if user_profile else 'UTC'
         try:
             tz = pytz.timezone(user_tz)
@@ -390,27 +372,24 @@ class ChatWorkflow:
             tz = pytz.UTC
             now = datetime.now(pytz.UTC)
         
-        time_bucket = now.strftime('%Y-%m-%d-%H')  # Hourly cache invalidation
+        time_bucket = now.strftime('%Y-%m-%d-%H')
         
-        # Try to get cached prompt (base prompt without datetime)
         cached = self.prompt_cache.get(
             self.persona.get('system_prompt', ''),
             user_profile,
             history_str,
-            time_bucket
+            time_bucket,
+            internal_id=internal_id,
         )
         
         if cached:
             base_prompt, _ = cached
         else:
-            # Build new base prompt (without datetime - that's added dynamically)
             lines = []
             
-            # System prompt
             system_prompt = self.persona.get('system_prompt', 'You are a helpful assistant.')
             lines.append(system_prompt)
             
-            # Safety rules (from persona or hardcoded)
             lines.append("\n[IMPORTANT RULES]")
             lines.append("- Be natural, conversational, and helpful like talking to a friend.")
             lines.append("- Be concise but complete - answer questions fully without being overwhelming.")
@@ -418,20 +397,17 @@ class ChatWorkflow:
             lines.append("- Avoid meta-commentary like 'As an AI...' or '[Note: ...]' - just respond directly.")
             lines.append("- Don't include action descriptions like *nods* or *gestures*.")
             
-            # Code output handling - make it context-aware instead of blanket ban
-            disallow_code = self.persona.get("disallow_code", False)  # Changed default to False
+            disallow_code = self.persona.get("disallow_code", False)
             if disallow_code:
                 lines.append("- When discussing technical topics, explain concepts clearly without code examples.")
             else:
                 lines.append("- Use code examples when helpful for technical discussions, but explain them in plain language too.")
             
-            # User facts/profile
             if user_profile:
                 lines.append("\n[VERIFIED FACTS ABOUT USER]")
                 for key, value in user_profile.items():
                     lines.append(f"- {key}: {value}")
             
-            # Conversation history
             if history:
                 lines.append("\n[CONVERSATION HISTORY]")
                 for role, msg in history:
@@ -440,26 +416,24 @@ class ChatWorkflow:
             
             base_prompt = "\n".join(lines)
             
-            # Cache the base prompt (without datetime)
             self.prompt_cache.set(
                 self.persona.get('system_prompt', ''),
                 user_profile,
                 history_str,
                 base_prompt,
                 len(base_prompt.split()),
-                time_bucket
+                time_bucket,
+                internal_id=internal_id,
             )
         
-        # NOW add current datetime context (always fresh, never cached)
+        # Add current datetime (always fresh, never cached)
         datetime_lines = []
         try:
-            # Use the timezone and datetime we already calculated
             datetime_lines.append(f"\n[CURRENT DATE AND TIME]")
             datetime_lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
             datetime_lines.append(f"- Current time: {now.strftime('%I:%M %p %Z')}")
             datetime_lines.append(f"- Timezone: {user_tz}")
         except Exception as e:
-            # Extra safety fallback
             logger.warning(f"Error formatting datetime: {e}, using UTC")
             utc_now = datetime.now(pytz.UTC)
             datetime_lines.append(f"\n[CURRENT DATE AND TIME]")
@@ -467,7 +441,6 @@ class ChatWorkflow:
             datetime_lines.append(f"- Current time: {utc_now.strftime('%I:%M %p UTC')}")
             datetime_lines.append(f"- Timezone: UTC")
         
-        # Build final prompt: base + datetime + current message
         prompt_parts = [
             base_prompt,
             "\n".join(datetime_lines),
@@ -475,65 +448,29 @@ class ChatWorkflow:
             "Assistant:"
         ]
         
-        prompt_text = "\n".join(prompt_parts)
-        
-        return prompt_text
+        return "\n".join(prompt_parts)
     
     def _sanitize_output(self, response: str) -> str:
-        """
-        Clean output to remove unwanted artifacts.
-        
-        With minimal_sanitization=True (default for natural chat):
-        - Only removes obvious artifacts: speaker tags, meta notes, actions
-        - Preserves code blocks and inline code for technical discussions
-        
-        With minimal_sanitization=False (legacy behavior):
-        - Also removes code blocks and inline code
-        """
-        # Always remove speaker tags (these are artifacts from the model)
+        """Clean output to remove unwanted artifacts."""
         response = self.SPEAKER_TAG_PATTERN.sub('', response).strip()
-        
-        # Always remove meta notes (these are internal comments)
         response = self.META_NOTE_PATTERN.sub('', response).strip()
-        
-        # Always remove action descriptions (these feel unnatural in text)
         response = self.ACTION_PATTERN.sub('', response).strip()
         
-        # Only remove code if minimal_sanitization is False
         if not self.minimal_sanitization:
-            # Remove code blocks (```...```)
             response = self.CODE_BLOCK_PATTERN.sub('', response).strip()
-            
-            # Remove inline code (`...`)
             response = self.INLINE_CODE_PATTERN.sub('', response).strip()
         
-        # Collapse multiple spaces but preserve intentional line breaks
-        response = re.sub(r' +', ' ', response)  # Multiple spaces to single
-        response = re.sub(r'\n\n\n+', '\n\n', response)  # Multiple newlines to double
+        response = re.sub(r' +', ' ', response)
+        response = re.sub(r'\n\n\n+', '\n\n', response)
         
         return response.strip()
     
     def _should_add_small_talk(self, history: list) -> bool:
-        """
-        Determine if small talk should be added based on conversation history.
-        Returns True if: > idle_threshold_minutes since last message
-        """
         if not history or len(history) < 2:
             return False
-        
-        # This would need timestamp info from history to check properly
-        # For now, return False to avoid extra LLM calls
-        # TODO: Add timestamp tracking to conversation history
         return False
     
     def _append_small_talk_thoughtfully(self, main_response: str) -> str:
-        """
-        Add a small talk element to the response if appropriate.
-        This is integrated into one response, not a separate LLM call.
-        
-        For now, this is a placeholder - small talk is handled via prompt instruction
-        in the system prompt rather than a separate call.
-        """
         return main_response
     
     def change_persona(self, persona_name: str) -> bool:
