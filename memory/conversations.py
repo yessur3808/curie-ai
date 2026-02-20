@@ -24,8 +24,7 @@ class ConversationManager:
             )
             results = cur.fetchall()
             return list(reversed([(row['role'], row['message']) for row in results]))
-        
-        
+
     @staticmethod
     def clear_conversation(user_internal_id=None):
         with get_pg_conn() as conn:
@@ -35,3 +34,15 @@ class ConversationManager:
             else:
                 cur.execute("DELETE FROM conversation_memory")
             conn.commit()
+
+    @staticmethod
+    def get_conversation_count(user_internal_id: str) -> int:
+        """Return the total number of stored messages for this user."""
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) as cnt FROM conversation_memory WHERE user_internal_id = %s",
+                (str(user_internal_id),)
+            )
+            row = cur.fetchone()
+            return row["cnt"] if row else 0
