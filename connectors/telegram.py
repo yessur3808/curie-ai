@@ -174,7 +174,7 @@ async def handle_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from memory import ConversationManager
+    from memory.session_store import get_session_manager
     from utils.db import is_master_user
 
     tg_user_id = update.message.from_user.id
@@ -187,12 +187,13 @@ async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
+    sm = get_session_manager()
     args = context.args if hasattr(context, "args") else []
     if args and args[0] == "all":
-        ConversationManager.clear_conversation()
+        sm.clear_all_sessions()
         await update.message.reply_text("🧹 All conversational memory cleared.")
     else:
-        ConversationManager.clear_conversation(internal_id)
+        sm.reset_user_all_channels(internal_id)
         await update.message.reply_text(
             "🧹 Your conversational memory has been cleared."
         )

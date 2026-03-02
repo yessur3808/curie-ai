@@ -18,7 +18,8 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from agent.chat_workflow import ChatWorkflow
-from memory import ConversationManager, UserManager
+from memory import UserManager
+from memory.session_store import get_session_manager
 from utils.db import is_master_user
 
 load_dotenv()
@@ -422,5 +423,5 @@ async def clear_memory_api(req: ClearMemoryRequest):
     internal_id = get_internal_id(user_id, username)
     if not is_master_user(internal_id):
         raise HTTPException(status_code=403, detail="Not authorized to clear memory")
-    ConversationManager.clear_conversation(internal_id)
+    get_session_manager().reset_user_all_channels(internal_id)
     return {"status": "ok", "message": "Memory cleared."}

@@ -241,5 +241,19 @@ class SessionManager:
         key = self._session_key(channel, user_id)
         return self._col.count_documents({"_id": key}) > 0
 
+    def reset_user_all_channels(self, user_id: str | int) -> None:
+        """Wipe conversation history for a user across all channels."""
+        uid = str(user_id)
+        result = self._col.update_many(
+            {"user_id": uid},
+            {"$set": {"messages": [], "updated_at": self._now()}},
+        )
+        logger.info("Reset all sessions for user_id=%s  count=%d", uid, result.modified_count)
+
+    def clear_all_sessions(self) -> None:
+        """Wipe all conversation history across every session (admin use)."""
+        result = self._col.update_many({}, {"$set": {"messages": [], "updated_at": self._now()}})
+        logger.info("All sessions cleared  count=%d", result.modified_count)
+
     def close(self) -> None:
         self._client.close()

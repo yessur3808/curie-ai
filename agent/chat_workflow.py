@@ -22,7 +22,8 @@ from typing import Optional, Dict, Tuple
 from collections import OrderedDict
 from threading import Lock
 
-from memory import ConversationManager, UserManager
+from memory import UserManager
+from memory.session_store import get_session_manager
 from llm import manager as llm_manager
 
 logger = logging.getLogger(__name__)
@@ -249,7 +250,9 @@ class ChatWorkflow:
 
         if command in ("/reset", "/new"):
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, ConversationManager.clear_conversation, internal_id)
+            await loop.run_in_executor(
+                None, get_session_manager().reset_session, platform, internal_id
+            )
             reset_response = "✅ Your conversation history has been cleared. Fresh start!"
             processing_time = (time.time() - start_time) * 1000
             return {
@@ -263,8 +266,7 @@ class ChatWorkflow:
             loop = asyncio.get_running_loop()
             count = await loop.run_in_executor(
                 None,
-                ConversationManager.get_conversation_count,
-                internal_id,
+                lambda: len(get_session_manager().get_history(platform, internal_id)),
             )
             stats_response = (
                 f"📊 Your session: {count} messages stored.\n"
@@ -286,8 +288,9 @@ class ChatWorkflow:
                 coding_response = await handle_coding_query(user_text)
                 if coding_response:
                     logger.info(f"Coding skill handled the query")
-                    ConversationManager.save_conversation(internal_id, "user", user_text)
-                    ConversationManager.save_conversation(internal_id, "assistant", coding_response)
+                    sm = get_session_manager()
+                    sm.add_message(platform, internal_id, "user", user_text)
+                    sm.add_message(platform, internal_id, "assistant", coding_response)
                     self.dedupe_cache.set(platform, str(external_chat_id), message_id, coding_response)
                     processing_time = (time.time() - start_time) * 1000
                     return {
@@ -300,7 +303,7 @@ class ChatWorkflow:
                 logger.debug(f"Coding skill check failed: {e}")
             
             # Load user profile and conversation history in parallel
-            user_profile, history = await self._batch_load_context(internal_id)
+            user_profile, history = await self._batch_load_context(internal_id, platform)
             
             # Build structured prompt — internal_id scopes the prompt cache per user
             prompt = self._build_structured_prompt(
@@ -321,8 +324,9 @@ class ChatWorkflow:
                 response = self._append_small_talk_thoughtfully(response)
             
             # Save to conversation history
-            ConversationManager.save_conversation(internal_id, "user", user_text)
-            ConversationManager.save_conversation(internal_id, "assistant", response)
+            sm = get_session_manager()
+            sm.add_message(platform, internal_id, "user", user_text)
+            sm.add_message(platform, internal_id, "assistant", response)
             
             self.dedupe_cache.set(platform, str(external_chat_id), message_id, response)
             
@@ -345,20 +349,21 @@ class ChatWorkflow:
                 'processing_time_ms': round(processing_time, 2)
             }
     
-    async def _batch_load_context(self, internal_id: str) -> Tuple[Dict, list]:
+    async def _batch_load_context(self, internal_id: str, platform: str = "unknown") -> Tuple[Dict, list]:
         """
         Batch-load user profile and conversation history in parallel.
+        History is returned as a list of (role, content) tuples.
         """
         loop = asyncio.get_running_loop()
-        
+
         user_profile_task = loop.run_in_executor(None, UserManager.get_user_profile, internal_id)
-        history_task = loop.run_in_executor(
-            None, 
-            ConversationManager.load_recent_conversation,
-            internal_id,
-            self.max_history * 2
-        )
-        
+
+        def load_history():
+            messages = get_session_manager().get_history(platform, internal_id)
+            return [(m["role"], m["content"]) for m in messages]
+
+        history_task = loop.run_in_executor(None, load_history)
+
         user_profile, history = await asyncio.gather(user_profile_task, history_task)
         return user_profile or {}, history or []
     
