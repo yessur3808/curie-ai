@@ -231,10 +231,25 @@ class SessionManager:
         )
 
     def list_sessions(self, channel: str | None = None) -> list[dict]:
-        """List all sessions, optionally filtered by channel."""
-        query = {}
+        """List all sessions, optionally filtered by channel when scope is channel-specific.
+
+        Notes
+        -----
+        The `channel` filter is only meaningful when the session scope includes the
+        channel in its key (e.g. "per_channel_user"). For non-channel-scoped modes
+        such as "per_user" or "single", the `channel` argument is ignored to avoid
+        misleading results.
+        """
+        query: dict[str, Any] = {}
         if channel:
-            query["channel"] = channel.lower()
+            if getattr(self, "_scope", None) == "per_channel_user":
+                query["channel"] = channel.lower()
+            else:
+                logger.debug(
+                    "Ignoring channel filter in list_sessions for non-channel-scoped "
+                    "session scope %r",
+                    getattr(self, "_scope", None),
+                )
         return list(
             self._col.find(query, {"messages": 0}).sort("updated_at", -1)
         )
