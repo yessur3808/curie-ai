@@ -116,6 +116,7 @@ class SessionManager:
 
     def _ensure_indexes(self) -> None:
         self._col.create_index([("channel", ASCENDING), ("user_id", ASCENDING)])
+        self._col.create_index([("user_id", ASCENDING)])
         self._col.create_index([("updated_at", ASCENDING)])
 
     def _now(self) -> datetime:
@@ -242,7 +243,16 @@ class SessionManager:
         return self._col.count_documents({"_id": key}) > 0
 
     def reset_user_all_channels(self, user_id: str | int) -> None:
-        """Wipe conversation history for a user across all channels."""
+        """Wipe conversation history for a user across all channels.
+
+        When SESSION_SCOPE is ``single`` every user shares the ``global:default``
+        document, so filtering by ``user_id`` may return no matches.  In that
+        mode the method falls back to clearing that shared document instead.
+        """
+        if self._scope == "single":
+            self.reset_session("global", "default")
+            logger.info("Reset shared single-scope session for user_id=%s", user_id)
+            return
         uid = str(user_id)
         result = self._col.update_many(
             {"user_id": uid},
