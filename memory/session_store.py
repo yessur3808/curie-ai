@@ -28,7 +28,11 @@ def get_session_manager() -> SessionManager:
     """Return the module-level SessionManager singleton, creating it if needed."""
     global _instance
     if _instance is None:
-        mongo_uri = os.environ["MONGODB_URI"]
+        mongo_uri = os.getenv("MONGODB_URI")
+        if not mongo_uri:
+            raise RuntimeError(
+                "MONGODB_URI environment variable is required for SessionManager but was not set"
+            )
         db_name   = os.environ.get("MONGODB_DB", "assistant_db")
         collection = os.environ.get("SESSION_COLLECTION", "sessions")
         _instance = SessionManager(
