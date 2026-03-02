@@ -124,20 +124,24 @@ class SessionManager:
 
     def _get_or_create(self, channel: str, user_id: str | int) -> dict:
         key = self._session_key(channel, user_id)
-        doc = self._col.find_one({"_id": key})
-        if doc is None:
-            doc = {
+        now_created = self._now()
+        now_updated = self._now()
+        update_doc = {
+            "$setOnInsert": {
                 "_id": key,
                 "channel": channel.lower(),
                 "user_id": str(user_id),
                 "scope": self._scope,
-                "created_at": self._now(),
-                "updated_at": self._now(),
+                "created_at": now_created,
+                "updated_at": now_updated,
                 "messages": [],
                 "metadata": {},
             }
-            self._col.insert_one(doc)
+        }
+        result = self._col.update_one({"_id": key}, update_doc, upsert=True)
+        if result.upserted_id is not None:
             logger.debug("Created new session  key=%s", key)
+        doc = self._col.find_one({"_id": key})
         return doc
 
     # ------------------------------------------------------------------
