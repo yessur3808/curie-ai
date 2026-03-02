@@ -255,26 +255,36 @@ class ChatWorkflow:
             )
             reset_response = "✅ Your conversation history has been cleared. Fresh start!"
             processing_time = (time.time() - start_time) * 1000
-            return {
-                "text": reset_response,
-                "timestamp": datetime.utcnow(),
-                "model_used": "system",
-                "processing_time_ms": round(processing_time, 2),
-            }
+        try:
+            if command in ("/reset", "/new"):
+                ConversationManager.clear_conversation(internal_id)
+                reset_response = "✅ Your conversation history has been cleared. Fresh start!"
+                processing_time = (time.time() - start_time) * 1000
+                return {
+                    "text": reset_response,
+                    "timestamp": datetime.utcnow(),
+                    "model_used": "system",
+                    "processing_time_ms": round(processing_time, 2),
+                }
 
-        if command == "/history":
-            loop = asyncio.get_running_loop()
-            count = await loop.run_in_executor(
-                None,
-                lambda: len(get_session_manager().get_history(platform, internal_id)),
-            )
-            stats_response = (
-                f"📊 Your session: {count} messages stored.\n"
-                f"Use /reset to clear your history."
-            )
+            if command == "/history":
+                count = ConversationManager.get_conversation_count(internal_id)
+                stats_response = (
+                    f"📊 Your session: {count} messages stored.\n"
+                    f"Use /reset to clear your history."
+                )
+                processing_time = (time.time() - start_time) * 1000
+                return {
+                    "text": stats_response,
+                    "timestamp": datetime.utcnow(),
+                    "model_used": "system",
+                    "processing_time_ms": round(processing_time, 2),
+                }
+        except Exception as e:
+            logger.exception("Error while handling session command '%s' for user %s", command, internal_id)
             processing_time = (time.time() - start_time) * 1000
             return {
-                "text": stats_response,
+                "text": "[Error: Unable to manage conversation history right now. Please try again later.]",
                 "timestamp": datetime.utcnow(),
                 "model_used": "system",
                 "processing_time_ms": round(processing_time, 2),
