@@ -248,7 +248,8 @@ class ChatWorkflow:
         command = user_text.strip().lower()
 
         if command in ("/reset", "/new"):
-            ConversationManager.clear_conversation(internal_id)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, ConversationManager.clear_conversation, internal_id)
             reset_response = "✅ Your conversation history has been cleared. Fresh start!"
             processing_time = (time.time() - start_time) * 1000
             return {
