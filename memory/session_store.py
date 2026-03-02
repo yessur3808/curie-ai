@@ -40,6 +40,11 @@ def get_session_manager() -> SessionManager:
             db_name=db_name,
             collection_name=collection,
         )
+        logger.debug(
+            "SessionManager singleton created (db=%s, collection=%s)",
+            db_name,
+            collection,
+        )
     return _instance
 
 
@@ -49,3 +54,4 @@ def reset_session_manager() -> None:
     if _instance is not None:
         _instance.close()
         _instance = None
+        logger.debug("SessionManager singleton has been reset")
