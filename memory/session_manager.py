@@ -97,7 +97,9 @@ class SessionManager:
     """
 
     def __init__(self, mongo_uri: str, db_name: str, collection_name: str = "sessions"):
-        self._client: MongoClient = MongoClient(mongo_uri)
+        self._client: MongoClient = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
+        # Force an early connection attempt so startup failures are fast and explicit.
+        self._client.admin.command("ping")
         self._db = self._client[db_name]
         self._col: Collection = self._db[collection_name]
         self._max_history = _get_max_history()
