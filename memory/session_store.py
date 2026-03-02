@@ -33,7 +33,7 @@ def get_session_manager() -> SessionManager:
             raise RuntimeError(
                 "MONGODB_URI environment variable is required for SessionManager but was not set"
             )
-        db_name   = os.environ.get("MONGODB_DB", "assistant_db")
+        db_name = os.environ.get("MONGODB_DB", "assistant_db")
         collection = os.environ.get("SESSION_COLLECTION", "sessions")
         _instance = SessionManager(
             mongo_uri=mongo_uri,
