@@ -259,7 +259,12 @@ class ChatWorkflow:
             }
 
         if command == "/history":
-            count = ConversationManager.get_conversation_count(internal_id)
+            loop = asyncio.get_running_loop()
+            count = await loop.run_in_executor(
+                None,
+                ConversationManager.get_conversation_count,
+                internal_id,
+            )
             stats_response = (
                 f"📊 Your session: {count} messages stored.\n"
                 f"Use /reset to clear your history."
