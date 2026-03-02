@@ -485,5 +485,136 @@ class TestSessionManagerIntegration:
         mock_sm.get_history.assert_called_once_with("telegram", "user-uuid-55")
 
 
+class TestSessionCommandEdgeCases:
+    """
+    Edge-case tests for ChatWorkflow session commands.
+
+    These complement the happy-path coverage in TestSessionManagerIntegration
+    by checking response structure, case/whitespace tolerance, and boundary
+    values.
+    """
+
+    def _make_workflow(self):
+        return ChatWorkflow(
+            persona={"name": "TestBot", "system_prompt": "You are a helpful assistant."},
+        )
+
+    def _run_command(self, text, platform="telegram", external_user_id="1",
+                     external_chat_id="10", message_id="m1",
+                     internal_id="uid-1", mock_sm=None):
+        """Helper: run process_message for a single command and return result."""
+        if mock_sm is None:
+            mock_sm = MagicMock()
+            mock_sm.get_history.return_value = []
+
+        workflow = self._make_workflow()
+        normalized_input = {
+            "platform": platform,
+            "external_user_id": external_user_id,
+            "external_chat_id": external_chat_id,
+            "message_id": message_id,
+            "text": text,
+            "internal_id": internal_id,
+        }
+
+        with patch("agent.chat_workflow.get_session_manager", return_value=mock_sm):
+            async def run():
+                return await workflow.process_message(normalized_input)
+
+            return asyncio.run(run()), mock_sm
+
+    # ------------------------------------------------------------------
+    # model_used field
+    # ------------------------------------------------------------------
+
+    def test_reset_response_model_used_is_system(self):
+        """/reset response has model_used == 'system' (never consumes LLM tokens)."""
+        result, _ = self._run_command("/reset")
+        assert result["model_used"] == "system"
+
+    def test_history_response_model_used_is_system(self):
+        """/history response has model_used == 'system'."""
+        result, _ = self._run_command("/history")
+        assert result["model_used"] == "system"
+
+    # ------------------------------------------------------------------
+    # processing_time_ms field
+    # ------------------------------------------------------------------
+
+    def test_reset_response_processing_time_non_negative(self):
+        """/reset includes a non-negative processing_time_ms."""
+        result, _ = self._run_command("/reset")
+        assert result["processing_time_ms"] >= 0
+
+    def test_history_response_processing_time_non_negative(self):
+        """/history includes a non-negative processing_time_ms."""
+        result, _ = self._run_command("/history")
+        assert result["processing_time_ms"] >= 0
+
+    # ------------------------------------------------------------------
+    # Case-insensitivity (code does user_text.strip().lower())
+    # ------------------------------------------------------------------
+
+    def test_reset_command_uppercase_triggers_reset(self):
+        """/RESET (uppercase) also clears history — commands are case-insensitive."""
+        result, mock_sm = self._run_command("/RESET")
+        mock_sm.reset_session.assert_called_once()
+        assert "cleared" in result["text"].lower()
+
+    def test_new_command_mixed_case_triggers_reset(self):
+        """/New (mixed case) also clears history."""
+        result, mock_sm = self._run_command("/New")
+        mock_sm.reset_session.assert_called_once()
+
+    def test_history_command_uppercase_returns_count(self):
+        """/HISTORY (uppercase) still returns session statistics."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = [{"role": "user", "content": "hi"}]
+        result, _ = self._run_command("/HISTORY", mock_sm=mock_sm)
+        assert "1" in result["text"]
+
+    # ------------------------------------------------------------------
+    # Whitespace tolerance (code does user_text.strip())
+    # ------------------------------------------------------------------
+
+    def test_reset_command_with_surrounding_whitespace(self):
+        """'  /reset  ' (padded with spaces) is treated as /reset."""
+        result, mock_sm = self._run_command("  /reset  ")
+        mock_sm.reset_session.assert_called_once()
+        assert "cleared" in result["text"].lower()
+
+    def test_history_command_with_surrounding_whitespace(self):
+        """'  /history  ' (padded with spaces) is treated as /history."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = []
+        result, _ = self._run_command("  /history  ", mock_sm=mock_sm)
+        assert result["model_used"] == "system"
+
+    # ------------------------------------------------------------------
+    # /history response text content
+    # ------------------------------------------------------------------
+
+    def test_history_response_includes_reset_hint(self):
+        """/history response always reminds the user they can /reset."""
+        result, _ = self._run_command("/history")
+        assert "/reset" in result["text"].lower()
+
+    def test_history_empty_session_shows_zero(self):
+        """/history with an empty session reports 0 messages."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = []
+        result, _ = self._run_command("/history", mock_sm=mock_sm)
+        assert "0" in result["text"]
+
+    # ------------------------------------------------------------------
+    # /reset response text content
+    # ------------------------------------------------------------------
+
+    def test_reset_response_includes_fresh_start(self):
+        """/reset response includes 'Fresh start' confirmation text."""
+        result, _ = self._run_command("/reset")
+        assert "fresh start" in result["text"].lower()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
