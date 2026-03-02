@@ -295,7 +295,7 @@ if commands is not None:
         @bot.command(name="clear_memory")
         async def clear_memory_command(ctx):
             """Clear conversation memory (master users only)."""
-            from memory import ConversationManager
+            from memory.session_store import get_session_manager
             from utils.db import is_master_user
 
             discord_user_id = ctx.author.id
@@ -306,7 +306,7 @@ if commands is not None:
                 await ctx.send("❌ You are not authorized to use this command.")
                 return
 
-            ConversationManager.clear_conversation(internal_id)
+            get_session_manager().reset_user_all_channels(internal_id)
             await ctx.send("🧹 Your conversational memory has been cleared.")
 
         return bot
