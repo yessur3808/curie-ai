@@ -4,7 +4,11 @@ memory/session_manager.py
 Per-user session isolation for Curie AI.
 
 Provides a SessionManager that keys all conversation history and context
-by a composite session key:  <scope>:<channel>:<user_id>
+by a session key whose format depends on SESSION_SCOPE:
+
+  - "single"            →  "global:default"
+  - "per_user"          →  "user:<user_id>"
+  - "per_channel_user"  →  "<channel>:<user_id>"
 
 Scope modes (set SESSION_SCOPE in .env):
   - "single"            : all users share one context (original Curie behaviour)
