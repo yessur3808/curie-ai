@@ -221,7 +221,30 @@ def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
     if steps:
         lines.append("\n📌 *Directions:*")
         for i, step in enumerate(steps, 1):
-            lines.append(f"  {i}. {step}")
+            # Steps may be simple strings or dicts (e.g., from ORS)
+            if isinstance(step, dict):
+                instruction = step.get("instruction") or str(step)
+                # Distance may be in meters under different keys
+                dist_m = step.get("distance_m", step.get("distance"))
+                dist_str = format_distance(dist_m) if dist_m is not None else None
+                # Duration may be in seconds under different keys
+                dur_s = step.get("duration_s", step.get("duration"))
+                dur_str = format_duration(dur_s) if dur_s is not None else None
+
+                extras = []
+                if dist_str:
+                    extras.append(dist_str)
+                if dur_str:
+                    extras.append(f"~{dur_str}")
+
+                if extras:
+                    step_text = f"{instruction} ({', '.join(extras)})"
+                else:
+                    step_text = instruction
+            else:
+                step_text = str(step)
+
+            lines.append(f"  {i}. {step_text}")
 
     # Alternative routes
     if len(routes) > 1:
