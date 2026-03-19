@@ -217,6 +217,54 @@ async def health_check():
     }
 
 
+@app.get("/reminders")
+async def list_reminders_api(user_id: str):
+    """
+    List upcoming reminders for a user.
+
+    Example: GET /reminders?user_id=user123
+    """
+    if not _workflow:
+        raise HTTPException(status_code=500, detail="System not initialized")
+
+    message_id = str(uuid.uuid4())
+    normalized_input = {
+        "platform": "api",
+        "external_user_id": user_id,
+        "external_chat_id": user_id,
+        "message_id": message_id,
+        "text": "list my reminders",
+        "timestamp": datetime.datetime.utcnow(),
+    }
+    result = await _workflow.process_message(normalized_input)
+    return {"text": result["text"], "model_used": result["model_used"]}
+
+
+@app.delete("/reminders")
+async def delete_reminders_api(user_id: str, index: Optional[int] = None):
+    """
+    Delete a reminder (or all reminders) for a user.
+
+    - DELETE /reminders?user_id=user123          → delete all
+    - DELETE /reminders?user_id=user123&index=1  → delete reminder #1
+    """
+    if not _workflow:
+        raise HTTPException(status_code=500, detail="System not initialized")
+
+    text = f"delete reminder {index}" if index is not None else "cancel all reminders"
+    message_id = str(uuid.uuid4())
+    normalized_input = {
+        "platform": "api",
+        "external_user_id": user_id,
+        "external_chat_id": user_id,
+        "message_id": message_id,
+        "text": text,
+        "timestamp": datetime.datetime.utcnow(),
+    }
+    result = await _workflow.process_message(normalized_input)
+    return {"text": result["text"], "model_used": result["model_used"]}
+
+
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     """

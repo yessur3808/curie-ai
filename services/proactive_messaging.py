@@ -92,11 +92,14 @@ class ProactiveMessagingService:
             time.sleep(self.check_interval)
     
     async def _check_and_send_messages(self):
-        """Check all users and send proactive messages if appropriate."""
+        """Check all users and send proactive messages / due reminders if appropriate."""
         try:
             # Clean up old contact history periodically
             self._cleanup_old_contacts()
-            
+
+            # Deliver any due reminders first (time-sensitive)
+            await self._deliver_due_reminders()
+
             # Get all users who have the proactive_messaging preference enabled
             # For now, we'll check users from recent conversations
             users = self._get_eligible_users()
@@ -109,6 +112,72 @@ class ProactiveMessagingService:
         
         except Exception as e:
             logger.error(f"Error checking users for proactive messaging: {e}", exc_info=True)
+
+    async def _deliver_due_reminders(self):
+        """Check MongoDB for due reminders and deliver them to users."""
+        try:
+            from memory.database import mongo_db
+            from datetime import timezone as tz_module
+
+            now = datetime.now(tz_module.utc)
+            col = mongo_db.reminders
+            due_docs = list(col.find({"fired": False, "due_at": {"$lte": now}}))
+
+            if not due_docs:
+                return
+
+            logger.info("Found %d due reminder(s) to deliver", len(due_docs))
+
+            for doc in due_docs:
+                try:
+                    internal_id = doc.get("internal_id")
+                    platform = doc.get("platform", "unknown")
+                    message_text = doc.get("message", "your reminder")
+                    reminder_msg = f"⏰ Reminder: **{message_text}**"
+
+                    # Find the connector for this platform
+                    connector = self.connectors.get(platform)
+                    if connector:
+                        # Look up external user ID
+                        from memory.database import get_pg_conn
+                        external_user_id = None
+                        try:
+                            with get_pg_conn() as conn:
+                                cur = conn.cursor()
+                                cur.execute(
+                                    "SELECT * FROM users WHERE internal_id = %s",
+                                    (str(internal_id),),
+                                )
+                                row = cur.fetchone()
+                                if row:
+                                    external_user_id = row.get(f"{platform}_id")
+                        except Exception as db_err:
+                            logger.warning("Could not look up external_user_id for reminder: %s", db_err)
+
+                        if external_user_id:
+                            await self._send_via_connector(connector, external_user_id, reminder_msg)
+                        else:
+                            logger.warning(
+                                "No external_user_id for internal_id=%s on platform=%s — reminder not delivered",
+                                internal_id,
+                                platform,
+                            )
+                    else:
+                        logger.warning(
+                            "No connector available for platform=%s — reminder not delivered (internal_id=%s)",
+                            platform,
+                            internal_id,
+                        )
+
+                    # Mark as fired regardless of delivery so we don't loop forever
+                    col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True}})
+                    logger.info("Reminder %s marked as fired (internal_id=%s)", doc["_id"], internal_id)
+
+                except Exception as rem_err:
+                    logger.error("Error delivering reminder %s: %s", doc.get("_id"), rem_err)
+
+        except Exception as exc:
+            logger.debug("_deliver_due_reminders skipped (non-critical): %s", exc)
     
     def _get_eligible_users(self):
         """

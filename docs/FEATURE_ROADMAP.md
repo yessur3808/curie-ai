@@ -2,6 +2,55 @@
 
 This document outlines planned features, their implementation approach, required integrations, and potential enhancements for Curie AI Assistant.
 
+## ✅ Recently Implemented
+
+### Multi-Provider LLM Support ✅
+Local llama.cpp models can now be combined with **Anthropic Claude**, **OpenAI GPT**, and **Google Gemini**.
+- Configure priority order with `LLM_PROVIDER_PRIORITY=anthropic,openai,gemini,llama.cpp`
+- Simple queries are automatically routed to the local model to reduce API costs
+- All cloud callers gracefully fall back to local if API key is missing or call fails
+- See `llm/providers.py` and `.env.example` for configuration
+
+### Reminders & Scheduling ✅
+Users can set, list, and delete personal reminders using natural language on **every connector**.
+- "remind me in 30 minutes to call mom" → stored in MongoDB, delivered by proactive service
+- `/reminders` Telegram command + `GET /reminders` REST API endpoint
+- `DELETE /reminders` REST API for programmatic deletion
+- See `agent/skills/scheduler.py` and `services/proactive_messaging.py`
+
+### Trip & Vacation Planning ✅
+AI-powered trip planner for itineraries, packing lists, and budget estimates.
+- "plan a 5-day budget trip to Barcelona" → full day-by-day itinerary
+- "what should I pack for a ski trip?" → categorised packing list
+- Uses cloud LLMs when available for richer, more detailed plans
+- See `agent/skills/trip_planner.py`
+
+### Proactive Filtered Learning ✅
+Curie automatically extracts and persists user preferences from conversations.
+- Learns names, timezones, interests, dietary preferences, occupation, etc.
+- Lightweight regex fast-path + LLM extraction for high-signal messages only
+- Stored facts inform future responses and proactive messages
+- Configurable via `ENABLE_LEARNING` and `LEARNING_MAX_FACTS`
+- See `memory/learning.py`
+
+### Long-Conversation Handling ✅
+Conversation histories exceeding `HISTORY_SUMMARISE_THRESHOLD` turns are automatically
+compressed into a short prose summary while keeping the most recent turns verbatim.
+This lets Curie handle weeks/months-long conversations without context overflow.
+- See `ChatWorkflow._maybe_summarise_history()` in `agent/chat_workflow.py`
+
+### Seamless Cross-Connector Feature Integration ✅
+All features (reminders, trip planning, navigation, conversions, coding) are
+triggered via natural language and work identically on **Telegram, Discord, WhatsApp,
+REST API, and WebSocket** without any connector-specific changes.
+- Telegram: Markdown rendered correctly for all skill responses + `/reminders` command
+- Discord: Full Markdown rendered; long messages auto-chunked at 2000 chars
+- WhatsApp: All Markdown stripped cleanly for plain-text rendering
+- REST API: `model_used` field returned so clients can apply formatting
+- See `utils/formatting.py` `MARKDOWN_SKILL_MODELS` and connector files
+
+---
+
 ## Table of Contents
 1. [Navigation & Traffic](#1-navigation--traffic)
 2. [Financial Data & Trading](#2-financial-data--trading)

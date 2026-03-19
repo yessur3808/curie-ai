@@ -8,6 +8,10 @@ Centralized chat workflow: handles all chat intelligence independent of connecto
 - LLM inference with output sanitation
 - Deduplication at the chat level
 - Coding assistant skill integration
+- Reminders & scheduling skill integration
+- Trip / vacation planning skill integration
+- Proactive filtered learning (auto-extract user preferences)
+- Long-conversation summarisation to stay within context limits
 """
 
 import asyncio
@@ -318,8 +322,9 @@ class ChatWorkflow:
                 nav_response = await handle_navigation_query(user_text)
                 if nav_response:
                     logger.info("Navigation skill handled the query")
-                    ConversationManager.save_conversation(internal_id, "user", user_text)
-                    ConversationManager.save_conversation(internal_id, "assistant", nav_response)
+                    sm = get_session_manager()
+                    sm.add_message(platform, internal_id, "user", user_text)
+                    sm.add_message(platform, internal_id, "assistant", nav_response)
                     self.dedupe_cache.set(platform, str(external_chat_id), message_id, nav_response)
                     processing_time = (time.time() - start_time) * 1000
                     return {
@@ -331,21 +336,71 @@ class ChatWorkflow:
             except Exception as e:
                 logger.debug(f"Navigation skill check failed: {e}")
 
+            # Check for reminders / scheduling queries
+            try:
+                from agent.skills.scheduler import handle_reminder_query
+                reminder_response = await handle_reminder_query(
+                    user_text, internal_id=internal_id, platform=platform
+                )
+                if reminder_response:
+                    logger.info("Scheduler skill handled the query")
+                    sm = get_session_manager()
+                    sm.add_message(platform, internal_id, "user", user_text)
+                    sm.add_message(platform, internal_id, "assistant", reminder_response)
+                    self.dedupe_cache.set(platform, str(external_chat_id), message_id, reminder_response)
+                    processing_time = (time.time() - start_time) * 1000
+                    return {
+                        'text': reminder_response,
+                        'timestamp': datetime.utcnow(),
+                        'model_used': 'scheduler_skill',
+                        'processing_time_ms': round(processing_time, 2)
+                    }
+            except Exception as e:
+                logger.debug(f"Scheduler skill check failed: {e}")
+
+            # Check for trip / vacation planning queries
+            try:
+                from agent.skills.trip_planner import handle_trip_query
+                trip_response = await handle_trip_query(user_text, internal_id=internal_id)
+                if trip_response:
+                    logger.info("Trip planner skill handled the query")
+                    sm = get_session_manager()
+                    sm.add_message(platform, internal_id, "user", user_text)
+                    sm.add_message(platform, internal_id, "assistant", trip_response)
+                    self.dedupe_cache.set(platform, str(external_chat_id), message_id, trip_response)
+                    processing_time = (time.time() - start_time) * 1000
+                    return {
+                        'text': trip_response,
+                        'timestamp': datetime.utcnow(),
+                        'model_used': 'trip_planner_skill',
+                        'processing_time_ms': round(processing_time, 2)
+                    }
+            except Exception as e:
+                logger.debug(f"Trip planner skill check failed: {e}")
+
             # Load user profile and conversation history in parallel
             user_profile, history = await self._batch_load_context(internal_id, platform)
-            
+
+            # Summarise very long histories to stay within the context window
+            history = self._maybe_summarise_history(history)
+
             # Build structured prompt — internal_id scopes the prompt cache per user
             prompt = self._build_structured_prompt(
                 user_profile, history, user_text, internal_id=internal_id
             )
-            
-            # Call LLM
-            response = llm_manager.ask_llm(
-                prompt,
-                max_tokens=512,
-                temperature=0.7
-            )
-            
+
+            # Call the best available LLM provider (cloud or local)
+            response: Optional[str] = None
+            try:
+                from llm.providers import ask_best_provider
+                response = ask_best_provider(prompt, temperature=0.7, max_tokens=512)
+            except Exception:
+                pass
+
+            # Hard fallback: local llama.cpp
+            if response is None or response.startswith("[Error"):
+                response = llm_manager.ask_llm(prompt, max_tokens=512, temperature=0.7)
+
             # Sanitize output
             response = self._sanitize_output(response)
             
@@ -356,6 +411,16 @@ class ChatWorkflow:
             sm = get_session_manager()
             sm.add_message(platform, internal_id, "user", user_text)
             sm.add_message(platform, internal_id, "assistant", response)
+
+            # Proactive learning: extract user preferences from this exchange
+            try:
+                from memory.learning import learn_from_exchange
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(
+                    None, learn_from_exchange, internal_id, user_text, response
+                )
+            except Exception:
+                pass
             
             self.dedupe_cache.set(platform, str(external_chat_id), message_id, response)
             
@@ -408,7 +473,67 @@ class ChatWorkflow:
 
         user_profile, history = await asyncio.gather(user_profile_task, history_task)
         return user_profile or {}, history or []
-    
+
+    # History summarisation threshold: summarise when history exceeds this many turns
+    _HISTORY_SUMMARISE_THRESHOLD = int(os.getenv("HISTORY_SUMMARISE_THRESHOLD", "20"))
+    # Number of recent turns to keep verbatim after summarisation
+    _HISTORY_KEEP_RECENT = int(os.getenv("HISTORY_KEEP_RECENT", "6"))
+
+    def _maybe_summarise_history(self, history: list) -> list:
+        """
+        When the conversation history is very long, compress the older portion
+        into a short prose summary so the prompt stays within the context window.
+
+        The most recent ``_HISTORY_KEEP_RECENT`` turns are always kept verbatim.
+        If the history is shorter than ``_HISTORY_SUMMARISE_THRESHOLD`` turns, it
+        is returned unchanged.
+
+        Returns a (possibly shorter) list of (role, content) tuples.
+        """
+        threshold = self._HISTORY_SUMMARISE_THRESHOLD
+        keep_recent = self._HISTORY_KEEP_RECENT
+
+        if len(history) <= threshold:
+            return history
+
+        older = history[:-keep_recent]
+        recent = history[-keep_recent:]
+
+        # Build a plain-text rendering of the older portion for summarisation
+        lines = []
+        for role, content in older:
+            label = "User" if role == "user" else "Assistant"
+            lines.append(f"{label}: {content[:200]}")
+
+        summary_prompt = (
+            "Summarise the following conversation in 3–5 concise sentences, "
+            "capturing the key topics, any important facts the user shared, "
+            "and the overall context. Be factual and neutral.\n\n"
+            + "\n".join(lines)
+            + "\n\nSummary:"
+        )
+
+        summary: Optional[str] = None
+        try:
+            from llm.providers import ask_best_provider  # noqa: PLC0415
+            summary = ask_best_provider(summary_prompt, temperature=0.3, max_tokens=200)
+        except Exception:
+            pass
+
+        if summary is None:
+            try:
+                summary = llm_manager.ask_llm(summary_prompt, temperature=0.3, max_tokens=200)
+            except Exception:
+                pass
+
+        if summary and not summary.startswith("[Error"):
+            logger.debug("Summarised %d older history turns into a context note", len(older))
+            summary_entry = ("assistant", f"[Earlier conversation summary: {summary.strip()}]")
+            return [summary_entry] + recent
+
+        # Fallback: just truncate to the recent turns
+        return recent
+
     def _build_structured_prompt(self, user_profile: Dict, history: list,
                                   user_text: str, internal_id: str = "") -> str:
         """
