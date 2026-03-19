@@ -19,18 +19,31 @@ for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions",
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
-# Stub the memory package so importing ChatWorkflow doesn't try to connect.
-_mock_memory_pkg = MagicMock()
-sys.modules.setdefault("memory", _mock_memory_pkg)
-sys.modules.setdefault("memory.database", MagicMock())
-sys.modules.setdefault("memory.users", MagicMock())
-sys.modules.setdefault("memory.conversations", MagicMock())
-sys.modules.setdefault("memory.session_store", MagicMock())
+@pytest.fixture(autouse=True, scope="module")
+def _stub_memory_and_llm(monkeypatch):
+    """
+    Stub memory-related and llm modules so importing ChatWorkflow doesn't try to connect.
 
-# Stub the llm package
-sys.modules.setdefault("llm", MagicMock())
+    Using monkeypatch ensures these stubs are confined to this test module and restored
+    after the tests complete, avoiding order-dependent behavior in the full test suite.
+    """
+    for _mod in (
+        "memory",
+        "memory.database",
+        "memory.users",
+        "memory.conversations",
+        "memory.session_store",
+        "llm",
+    ):
+        monkeypatch.setitem(sys.modules, _mod, MagicMock())
 
-from agent.chat_workflow import ChatWorkflow  # noqa: E402
+    # Import ChatWorkflow after stubbing the heavy dependencies, and expose it
+    # via a module-level name so tests can use ChatWorkflow as before.
+    global ChatWorkflow
+    from agent.chat_workflow import ChatWorkflow as _ChatWorkflow  # noqa: E402
+    ChatWorkflow = _ChatWorkflow
+
+    yield
 
 
 class TestOutputSanitization:
