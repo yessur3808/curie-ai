@@ -326,8 +326,10 @@ async def route(
     osrm_profile = _OSRM_PROFILES.get(mode_lower)
     ors_profile = _ORS_PROFILES.get(mode_lower)
     use_transit = ors_profile is not None
+    # Label based on the underlying profile we actually use; since transit
+    # currently maps to a driving profile in ORS, avoid mislabeling it as transit.
     mode_label = _MODE_LABELS.get(
-        "transit" if use_transit else (osrm_profile or "driving"),
+        osrm_profile or "driving",
         mode.capitalize(),
     )
 
