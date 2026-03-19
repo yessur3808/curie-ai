@@ -361,13 +361,60 @@ async def route(
 
     # Parse routes
     routes: List[Dict[str, Any]] = []
-    for r in raw_data.get("routes", []):
-        steps = extract_steps(r)
-        routes.append({
-            "distance_m": r.get("distance", 0),
-            "duration_s": r.get("duration", 0),
-            "steps": steps,
-        })
+
+    # Helper to parse OSRM-shaped responses into our internal route format
+    def _parse_osrm_routes(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+        parsed: List[Dict[str, Any]] = []
+        for route in raw.get("routes", []):
+            steps = extract_steps(route)
+            parsed.append({
+                "distance_m": route.get("distance", 0),
+                "duration_s": route.get("duration", 0),
+                "steps": steps,
+            })
+        return parsed
+
+    # If this is an ORS (transit) response, parse its GeoJSON-like structure.
+    # ORS v2/directions typically returns:
+    # { "type": "FeatureCollection", "features": [ { "properties": { "summary": {...}, "segments": [...] }, ... } ] }
+    if use_transit and isinstance(raw_data, dict) and raw_data.get("features"):
+        for feature in raw_data.get("features", []):
+            properties = feature.get("properties", {}) or {}
+            summary = properties.get("summary", {}) or {}
+            distance = summary.get("distance", 0)
+            duration = summary.get("duration", 0)
+
+            # Flatten all segment steps into a single list of step dicts
+            step_list: List[Dict[str, Any]] = []
+            for segment in properties.get("segments", []) or []:
+                for step in segment.get("steps", []) or []:
+                    step_list.append({
+                        "instruction": step.get("instruction"),
+                        "distance": step.get("distance"),
+                        "duration": step.get("duration"),
+                        "name": step.get("name"),
+                        "type": step.get("type"),
+                    })
+
+            routes.append({
+                "distance_m": distance,
+                "duration_s": duration,
+                "steps": step_list,
+            })
+    else:
+        # Default: assume an OSRM-shaped response
+        routes = _parse_osrm_routes(raw_data)
+
+    # If we attempted transit routing but could not parse any routes from ORS,
+    # fall back to OSRM driving directions.
+    if use_transit and not routes:
+        logger.warning(
+            "Transit routing via ORS returned no parsable routes; falling back to OSRM driving."
+        )
+        mode_label = _MODE_LABELS["driving"] + " (transit N/A – routing fallback)"
+        raw_data = await get_osrm_route(origin_geo, dest_geo, profile="driving")
+        if raw_data is not None:
+            routes = _parse_osrm_routes(raw_data)
 
     # Optionally fetch traffic at the midpoint of the origin leg
     traffic = None
