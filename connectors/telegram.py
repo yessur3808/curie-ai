@@ -250,9 +250,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Process through workflow
     result = await _workflow.process_message(normalized_input)
 
-    # Send response
+    # Send response — enable Markdown so *bold* and [text](url) render correctly
     response_text = result.get("text", "[Error: No response]")
-    await update.message.reply_text(response_text)
+    await update.message.reply_text(response_text, parse_mode="Markdown")
 
 
 def start_telegram_bot(workflow: ChatWorkflow):
