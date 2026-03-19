@@ -259,14 +259,19 @@ def _build_traffic_only_response(params: Dict[str, Any], result: Dict[str, Any])
         lines.append(f"Current speed: {cur_speed} km/h")
     if free_speed is not None:
         lines.append(f"Free-flow speed: {free_speed} km/h")
-    if cur_speed and free_speed:
-        ratio = cur_speed / free_speed if free_speed else 1
-        if ratio < _TRAFFIC_SLOWDOWN_THRESHOLD / 2:
-            lines.append("🔴 Heavy traffic – significant delays expected")
-        elif ratio < _TRAFFIC_SLOWDOWN_THRESHOLD:
-            lines.append("🟡 Moderate traffic – some delays")
+    # Only require that both speeds are present; zero is a valid value.
+    if cur_speed is not None and free_speed is not None:
+        if free_speed == 0:
+            # Cannot compute a meaningful slowdown ratio without a non-zero free-flow speed.
+            lines.append("⚠️ Traffic conditions unclear (free-flow speed unavailable).")
         else:
-            lines.append("🟢 Traffic flowing normally")
+            ratio = cur_speed / free_speed
+            if ratio < _TRAFFIC_SLOWDOWN_THRESHOLD / 2:
+                lines.append("🔴 Heavy traffic – significant delays expected")
+            elif ratio < _TRAFFIC_SLOWDOWN_THRESHOLD:
+                lines.append("🟡 Moderate traffic – some delays")
+            else:
+                lines.append("🟢 Traffic flowing normally")
     return "\n".join(lines)
 
 
