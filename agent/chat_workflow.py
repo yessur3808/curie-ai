@@ -370,7 +370,20 @@ class ChatWorkflow:
 
         def load_history():
             messages = get_session_manager().get_history(platform, internal_id)
-            return [(m["role"], m["content"]) for m in messages]
+            # Enforce a workflow-level cap on history size to avoid unbounded prompts.
+            if hasattr(self, "max_history") and self.max_history:
+                try:
+                    limit = int(self.max_history) * 2
+                    if limit > 0:
+                        messages_to_use = messages[-limit:]
+                    else:
+                        messages_to_use = messages
+                except (TypeError, ValueError):
+                    # If max_history is not a valid integer, fall back to all messages.
+                    messages_to_use = messages
+            else:
+                messages_to_use = messages
+            return [(m["role"], m["content"]) for m in messages_to_use]
 
         history_task = loop.run_in_executor(None, load_history)
 
