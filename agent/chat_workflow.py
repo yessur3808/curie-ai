@@ -248,16 +248,12 @@ class ChatWorkflow:
         # These are handled before the LLM so they never consume tokens.
         command = user_text.strip().lower()
 
-        if command in ("/reset", "/new"):
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None, lambda: get_session_manager().reset_session(platform, internal_id)
-            )
-            reset_response = "✅ Your conversation history has been cleared. Fresh start!"
-            processing_time = (time.time() - start_time) * 1000
         try:
             if command in ("/reset", "/new"):
-                ConversationManager.clear_conversation(internal_id)
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None, lambda: get_session_manager().reset_session(platform, internal_id)
+                )
                 reset_response = "✅ Your conversation history has been cleared. Fresh start!"
                 processing_time = (time.time() - start_time) * 1000
                 return {
@@ -268,7 +264,11 @@ class ChatWorkflow:
                 }
 
             if command == "/history":
-                count = ConversationManager.get_conversation_count(internal_id)
+                loop = asyncio.get_running_loop()
+                history = await loop.run_in_executor(
+                    None, lambda: get_session_manager().get_history(platform, internal_id)
+                )
+                count = len(history)
                 stats_response = (
                     f"📊 Your session: {count} messages stored.\n"
                     f"Use /reset to clear your history."
@@ -280,7 +280,7 @@ class ChatWorkflow:
                     "model_used": "system",
                     "processing_time_ms": round(processing_time, 2),
                 }
-        except Exception as e:
+        except Exception:
             logger.exception("Error while handling session command '%s' for user %s", command, internal_id)
             processing_time = (time.time() - start_time) * 1000
             return {
