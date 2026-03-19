@@ -177,14 +177,21 @@ class TestExtractNavigationParams:
         assert params["mode"] == "walk"
 
     def test_directions_to_without_origin(self):
+        # When no starting point is given, the skill returns None so the LLM
+        # can prompt the user to specify their origin.
         params = extract_navigation_params("directions to the Eiffel Tower")
-        assert params is not None
-        assert "eiffel tower" in params["destination"].lower()
+        assert params is None
 
     def test_how_do_i_get_pattern(self):
+        # Same: no origin provided → return None (LLM handles clarification)
         params = extract_navigation_params("how do I get to the train station")
+        assert params is None
+
+    def test_how_do_i_get_with_explicit_origin(self):
+        params = extract_navigation_params("how do I get to the train station from downtown")
         assert params is not None
         assert "train station" in params["destination"].lower()
+        assert "downtown" in params["origin"].lower()
 
     def test_traffic_only_pattern(self):
         params = extract_navigation_params("traffic on Highway 101")

@@ -106,7 +106,7 @@ def extract_navigation_params(message: str) -> Optional[Dict[str, Any]]:
         re.IGNORECASE,
     )
     if m:
-        origin = m.group(1).strip()
+        origin = _clean_location(m.group(1).strip())
         destination = _clean_location(m.group(2).strip())
         mode = _extract_mode(msg)
         return {"origin": origin, "destination": destination, "mode": mode}
@@ -118,7 +118,7 @@ def extract_navigation_params(message: str) -> Optional[Dict[str, Any]]:
         re.IGNORECASE,
     )
     if m:
-        origin = (m.group(1) or "").strip()
+        origin = _clean_location((m.group(1) or "").strip())
         # If no explicit origin is provided, let higher-level logic / LLM
         # handle clarification instead of defaulting to "my location".
         if not origin:
@@ -199,7 +199,7 @@ def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
     dur = format_duration(primary["duration_s"])
     lines.append(f"{mode_label} | 📍 {dist} | ⏱️ ~{dur}")
 
-    # Traffic info
+    # Traffic info (only shown when traffic data was actually fetched)
     if traffic:
         cur_speed = traffic.get("current_speed_kmh")
         free_speed = traffic.get("free_flow_speed_kmh")
@@ -215,8 +215,6 @@ def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
                 )
             else:
                 lines.append(f"\n🟢 Traffic flowing normally (~{cur_speed} km/h)")
-    elif not TOMTOM_API_KEY:
-        lines.append("\n⚠️ Real-time traffic data unavailable (set TOMTOM_API_KEY for live traffic)")
 
     # Turn-by-turn steps
     steps = primary.get("steps", [])
