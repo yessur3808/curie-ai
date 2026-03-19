@@ -74,6 +74,50 @@ def build_session_key(channel: str, user_id: str | int) -> str:
         return f"{ch}:{uid}"
 
 
+def _test_build_session_key_formats() -> None:
+    """
+    Internal sanity checks for build_session_key() formats.
+
+    These tests verify:
+      - exact key formats for supported SESSION_SCOPE values
+      - fallback behavior when SESSION_SCOPE is invalid
+    """
+    original_scope = os.environ.get("SESSION_SCOPE")
+    try:
+        # single → global:default
+        os.environ["SESSION_SCOPE"] = "single"
+        assert (
+            build_session_key("telegram", 123456789) == "global:default"
+        ), "single scope should ignore channel/user and use 'global:default'"
+
+        # per_user → user:<user_id>
+        os.environ["SESSION_SCOPE"] = "per_user"
+        assert (
+            build_session_key("telegram", 123456789) == "user:123456789"
+        ), "per_user scope should use 'user:<user_id>' format"
+
+        # per_channel_user → <channel>:<user_id>, with normalized channel
+        os.environ["SESSION_SCOPE"] = "per_channel_user"
+        assert (
+            build_session_key("Telegram", 123456789) == "telegram:123456789"
+        ), "per_channel_user scope should use '<channel>:<user_id>' with lowercased channel"
+
+        # invalid scope → fallback to per_channel_user (default)
+        os.environ["SESSION_SCOPE"] = "bogus_scope_value"
+        assert (
+            build_session_key("Telegram", 123456789) == "telegram:123456789"
+        ), "invalid SESSION_SCOPE should fall back to per_channel_user behavior"
+    finally:
+        if original_scope is None:
+            os.environ.pop("SESSION_SCOPE", None)
+        else:
+            os.environ["SESSION_SCOPE"] = original_scope
+
+
+if __name__ == "__main__":
+    _test_build_session_key_formats()
+
+
 # ---------------------------------------------------------------------------
 # SessionManager
 # ---------------------------------------------------------------------------
