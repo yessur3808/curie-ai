@@ -269,8 +269,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     result = await _workflow.process_message(normalized_input)
 
+    # Send response — enable Markdown only for controlled/escaped outputs
     response_text = result.get("text", "[Error: No response]")
-    await update.message.reply_text(response_text)
+    parse_mode = "Markdown" if result.get("model_used") == "navigation_skill" else None
+    await update.message.reply_text(response_text, parse_mode=parse_mode)
 
 
 def start_telegram_bot(workflow: ChatWorkflow):

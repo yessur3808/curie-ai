@@ -17,6 +17,7 @@ except ImportError:
     WhatsApp = None
 
 from agent.chat_workflow import ChatWorkflow
+from utils.formatting import plain_links
 from utils.session import set_busy_temporarily, clear_user_busy
 from memory import UserManager
 
@@ -180,8 +181,9 @@ async def handle_message(message):
         # Process through workflow
         result = await _workflow.process_message(normalized_input)
         
-        # Send response
-        response_text = result.get('text', '[Error: No response]')
+        # Send response — WhatsApp does not support [text](url) Markdown links,
+        # so convert them to plain "Name: url" format before sending.
+        response_text = plain_links(result.get('text', '[Error: No response]'))
         await message.reply(response_text)
         
     except Exception as e:
