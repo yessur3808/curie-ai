@@ -24,7 +24,7 @@ ORS_API_KEY = os.getenv("ORS_API_KEY", "")
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
 
 # OSRM public API (no key required)
-OSRM_BASE_URL = "http://router.project-osrm.org/route/v1"
+OSRM_BASE_URL = "https://router.project-osrm.org/route/v1"
 
 # OpenStreetMap Nominatim (no key required)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
