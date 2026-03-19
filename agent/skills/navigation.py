@@ -195,13 +195,18 @@ def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
     if traffic:
         cur_speed = traffic.get("current_speed_kmh")
         free_speed = traffic.get("free_flow_speed_kmh")
-        if cur_speed and free_speed and cur_speed < free_speed * _TRAFFIC_SLOWDOWN_THRESHOLD:
-            lines.append(
-                f"\n🚦 *Traffic Alert*: Current speed {cur_speed} km/h "
-                f"(normal: {free_speed} km/h) – expect delays!"
-            )
-        elif cur_speed and free_speed:
-            lines.append(f"\n🟢 Traffic flowing normally (~{cur_speed} km/h)")
+        if (
+            cur_speed is not None
+            and free_speed is not None
+            and free_speed != 0
+        ):
+            if cur_speed < free_speed * _TRAFFIC_SLOWDOWN_THRESHOLD:
+                lines.append(
+                    f"\n🚦 *Traffic Alert*: Current speed {cur_speed} km/h "
+                    f"(normal: {free_speed} km/h) – expect delays!"
+                )
+            else:
+                lines.append(f"\n🟢 Traffic flowing normally (~{cur_speed} km/h)")
     elif not TOMTOM_API_KEY:
         lines.append("\n⚠️ Real-time traffic data unavailable (set TOMTOM_API_KEY for live traffic)")
 
