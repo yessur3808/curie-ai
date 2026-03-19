@@ -118,7 +118,11 @@ def extract_navigation_params(message: str) -> Optional[Dict[str, Any]]:
         re.IGNORECASE,
     )
     if m:
-        origin = (m.group(1) or "").strip() or "my location"
+        origin = (m.group(1) or "").strip()
+        # If no explicit origin is provided, let higher-level logic / LLM
+        # handle clarification instead of defaulting to "my location".
+        if not origin:
+            return None
         destination = _clean_location(m.group(2).strip())
         mode = _extract_mode(msg)
         return {"origin": origin, "destination": destination, "mode": mode}
@@ -132,7 +136,11 @@ def extract_navigation_params(message: str) -> Optional[Dict[str, Any]]:
     )
     if m:
         destination = _clean_location((m.group(1) or "").strip())
-        origin = (m.group(2) or "my location").strip()
+        origin = (m.group(2) or "").strip()
+        # If the user didn't specify a starting point, avoid fabricating one;
+        # this allows a conversational fallback to ask for the origin.
+        if not origin:
+            return None
         mode = _extract_mode(msg)
         if destination:
             return {"origin": origin, "destination": destination, "mode": mode}
