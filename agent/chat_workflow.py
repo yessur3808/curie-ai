@@ -289,7 +289,26 @@ class ChatWorkflow:
             except Exception as e:
                 # Log but don't fail - fall back to normal LLM processing
                 logger.debug(f"Coding skill check failed: {e}")
-            
+
+            # Check for navigation / traffic queries
+            try:
+                from agent.skills.navigation import handle_navigation_query
+                nav_response = await handle_navigation_query(user_text)
+                if nav_response:
+                    logger.info("Navigation skill handled the query")
+                    ConversationManager.save_conversation(internal_id, "user", user_text)
+                    ConversationManager.save_conversation(internal_id, "assistant", nav_response)
+                    self.dedupe_cache.set(platform, str(external_chat_id), message_id, nav_response)
+                    processing_time = (time.time() - start_time) * 1000
+                    return {
+                        'text': nav_response,
+                        'timestamp': datetime.utcnow(),
+                        'model_used': 'navigation_skill',
+                        'processing_time_ms': round(processing_time, 2)
+                    }
+            except Exception as e:
+                logger.debug(f"Navigation skill check failed: {e}")
+
             # Load user profile and conversation history in parallel
             user_profile, history = await self._batch_load_context(internal_id)
             
