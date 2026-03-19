@@ -231,6 +231,13 @@ def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
             alt_dur = format_duration(alt["duration_s"])
             lines.append(f"  • Route {i + 1}: {alt_dist} | ~{alt_dur}")
 
+    # Map provider links
+    map_links = result.get("map_links", {})
+    if map_links:
+        lines.append("\n🗺️ *Open in Maps:*")
+        for name, url in map_links.items():
+            lines.append(f"  • [{name}]({url})")
+
     # Transit note
     if "transit" in mode_label.lower() and not ORS_API_KEY:
         lines.append(

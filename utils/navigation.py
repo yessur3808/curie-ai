@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 from typing import Optional, Dict, Any, List
+from urllib.parse import quote_plus
 
 import httpx
 
@@ -256,6 +257,134 @@ def format_distance(meters: float) -> str:
     return f"{int(km)} km"
 
 
+# ------------------------------------------------------------------
+# Map provider mode mappings (used by generate_map_links)
+# ------------------------------------------------------------------
+
+_GOOGLE_MODES: Dict[str, str] = {
+    "drive": "driving",
+    "walk": "walking",
+    "bike": "bicycling",
+    "transit": "transit",
+}
+_APPLE_FLAGS: Dict[str, str] = {
+    "drive": "d",
+    "walk": "w",
+    "bike": "b",
+    "transit": "r",
+}
+_BING_MODES: Dict[str, str] = {
+    "drive": "D",
+    "walk": "W",
+    "bike": "B",
+    "transit": "T",
+}
+_NAVER_MODES: Dict[str, str] = {
+    "drive": "car",
+    "walk": "foot",
+    "bike": "bicycle",
+    "transit": "transit",
+}
+_KAKAO_MODES: Dict[str, str] = {
+    "drive": "CAR",
+    "walk": "WALK",
+    "bike": "BICYCLE",
+    "transit": "BUS",
+}
+
+
+def generate_map_links(
+    origin_name: str,
+    destination_name: str,
+    origin_coords: Dict[str, float],
+    dest_coords: Dict[str, float],
+    mode: str = "drive",
+) -> Dict[str, str]:
+    """
+    Generate deep-link URLs to popular map services with the route pre-filled.
+
+    Supported providers:
+        - Google Maps (all modes)
+        - Apple Maps (all modes)
+        - Waze (drive/transit only)
+        - Bing Maps (all modes)
+        - OpenStreetMap (all modes)
+        - HERE Maps (all modes)
+        - Naver Maps (all modes; popular in South Korea)
+        - Kakao Maps (destination pin; popular in South Korea)
+
+    Returns:
+        dict mapping provider name → URL string
+    """
+    mode_key = mode.lower().strip()
+    slat, slon = origin_coords["lat"], origin_coords["lon"]
+    dlat, dlon = dest_coords["lat"], dest_coords["lon"]
+
+    links: Dict[str, str] = {}
+
+    # Google Maps — full origin→destination routing with travel mode
+    gmode = _GOOGLE_MODES.get(mode_key, "driving")
+    links["Google Maps"] = (
+        f"https://www.google.com/maps/dir/?api=1"
+        f"&origin={slat},{slon}"
+        f"&destination={dlat},{dlon}"
+        f"&travelmode={gmode}"
+    )
+
+    # Apple Maps — full routing with direction flag
+    aflag = _APPLE_FLAGS.get(mode_key, "d")
+    links["Apple Maps"] = (
+        f"https://maps.apple.com/?saddr={slat},{slon}"
+        f"&daddr={dlat},{dlon}"
+        f"&dirflg={aflag}"
+    )
+
+    # Waze — navigate-to-destination (driving/transit only)
+    if mode_key in ("drive", "transit"):
+        links["Waze"] = f"https://waze.com/ul?ll={dlat},{dlon}&navigate=yes"
+
+    # Bing Maps — full routing with travel mode
+    bmode = _BING_MODES.get(mode_key, "D")
+    links["Bing Maps"] = (
+        f"https://bing.com/maps/default.aspx"
+        f"?rtp=pos.{slat}_{slon}~pos.{dlat}_{dlon}"
+        f"&mode={bmode}"
+    )
+
+    # OpenStreetMap — open-source routing (OSRM-backed)
+    links["OpenStreetMap"] = (
+        f"https://www.openstreetmap.org/directions"
+        f"?from={slat},{slon}&to={dlat},{dlon}"
+    )
+
+    # HERE Maps — share-link with named waypoints
+    sname_enc = quote_plus(origin_name[:64])
+    dname_enc = quote_plus(destination_name[:64])
+    links["HERE Maps"] = (
+        f"https://share.here.com/r/{slat},{slon},{sname_enc}"
+        f"/{dlat},{dlon},{dname_enc}"
+    )
+
+    # Naver Maps (popular in South Korea) — direction link with mode
+    nmode = _NAVER_MODES.get(mode_key, "car")
+    sname_nv = quote_plus(origin_name[:32])
+    dname_nv = quote_plus(destination_name[:32])
+    links["Naver Maps"] = (
+        f"https://map.naver.com/v5/directions/-/"
+        f"loc:{slon},{slat},{sname_nv}"
+        f"/-/loc:{dlon},{dlat},{dname_nv}"
+        f"/-/{nmode}"
+    )
+
+    # Kakao Maps (popular in South Korea) — destination pin link
+    dname_kk = quote_plus(destination_name[:32])
+    links["Kakao Maps"] = (
+        f"https://map.kakao.com/link/to/{dname_kk},{dlat},{dlon}"
+    )
+
+    return links
+
+
 def extract_steps(route: Dict[str, Any], max_steps: int = 8) -> List[str]:
     """
     Extract turn-by-turn directions from an OSRM route object.
@@ -431,4 +560,11 @@ async def route(
         "mode_label": mode_label,
         "routes": routes,
         "traffic": traffic,
+        "map_links": generate_map_links(
+            origin_geo["display_name"].split(",")[0].strip(),
+            dest_geo["display_name"].split(",")[0].strip(),
+            origin_geo,
+            dest_geo,
+            mode=mode_lower,
+        ),
     }

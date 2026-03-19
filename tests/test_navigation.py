@@ -14,6 +14,7 @@ from utils.navigation import (  # noqa: E402
     format_duration,
     format_distance,
     extract_steps,
+    generate_map_links,
 )
 from agent.skills.navigation import (  # noqa: E402
     is_navigation_query,
@@ -225,6 +226,122 @@ class TestCleanLocation:
 
 
 # ---------------------------------------------------------------------------
+# generate_map_links
+# ---------------------------------------------------------------------------
+
+_ORIGIN_COORDS = {"lat": 40.7128, "lon": -74.0060}
+_DEST_COORDS = {"lat": 42.3601, "lon": -71.0589}
+
+
+class TestGenerateMapLinks:
+    def _links(self, mode="drive"):
+        return generate_map_links("New York", "Boston", _ORIGIN_COORDS, _DEST_COORDS, mode=mode)
+
+    # --- Provider presence ---
+
+    def test_google_maps_present(self):
+        assert "Google Maps" in self._links()
+
+    def test_apple_maps_present(self):
+        assert "Apple Maps" in self._links()
+
+    def test_bing_maps_present(self):
+        assert "Bing Maps" in self._links()
+
+    def test_openstreetmap_present(self):
+        assert "OpenStreetMap" in self._links()
+
+    def test_here_maps_present(self):
+        assert "HERE Maps" in self._links()
+
+    def test_naver_maps_present(self):
+        assert "Naver Maps" in self._links()
+
+    def test_kakao_maps_present(self):
+        assert "Kakao Maps" in self._links()
+
+    # --- Waze only for drive/transit ---
+
+    def test_waze_present_for_drive(self):
+        assert "Waze" in self._links(mode="drive")
+
+    def test_waze_present_for_transit(self):
+        assert "Waze" in self._links(mode="transit")
+
+    def test_waze_absent_for_walk(self):
+        assert "Waze" not in self._links(mode="walk")
+
+    def test_waze_absent_for_bike(self):
+        assert "Waze" not in self._links(mode="bike")
+
+    # --- Mode mapping: Google Maps ---
+
+    def test_google_driving_mode(self):
+        url = self._links(mode="drive")["Google Maps"]
+        assert "travelmode=driving" in url
+
+    def test_google_walking_mode(self):
+        url = self._links(mode="walk")["Google Maps"]
+        assert "travelmode=walking" in url
+
+    def test_google_bicycling_mode(self):
+        url = self._links(mode="bike")["Google Maps"]
+        assert "travelmode=bicycling" in url
+
+    def test_google_transit_mode(self):
+        url = self._links(mode="transit")["Google Maps"]
+        assert "travelmode=transit" in url
+
+    # --- Mode mapping: Apple Maps ---
+
+    def test_apple_driving_flag(self):
+        url = self._links(mode="drive")["Apple Maps"]
+        assert "dirflg=d" in url
+
+    def test_apple_walking_flag(self):
+        url = self._links(mode="walk")["Apple Maps"]
+        assert "dirflg=w" in url
+
+    def test_apple_cycling_flag(self):
+        url = self._links(mode="bike")["Apple Maps"]
+        assert "dirflg=b" in url
+
+    def test_apple_transit_flag(self):
+        url = self._links(mode="transit")["Apple Maps"]
+        assert "dirflg=r" in url
+
+    # --- Coordinates in URLs ---
+
+    def test_google_contains_origin_coords(self):
+        url = self._links()["Google Maps"]
+        assert "40.7128" in url and "-74.006" in url
+
+    def test_google_contains_dest_coords(self):
+        url = self._links()["Google Maps"]
+        assert "42.3601" in url and "-71.0589" in url
+
+    def test_openstreetmap_contains_coords(self):
+        url = self._links()["OpenStreetMap"]
+        assert "40.7128" in url and "42.3601" in url
+
+    # --- Name encoding in HERE / Naver / Kakao ---
+
+    def test_here_contains_names(self):
+        url = self._links()["HERE Maps"]
+        assert "New+York" in url
+
+    def test_kakao_contains_destination(self):
+        url = self._links()["Kakao Maps"]
+        assert "boston" in url.lower()
+
+    # --- All values are https URLs ---
+
+    def test_all_links_are_https(self):
+        for name, url in self._links().items():
+            assert url.startswith("https://"), f"{name} URL is not HTTPS: {url}"
+
+
+# ---------------------------------------------------------------------------
 # handle_navigation_query (integration with mocked route())
 # ---------------------------------------------------------------------------
 
@@ -249,6 +366,33 @@ MOCK_ROUTE_RESULT = {
         },
     ],
     "traffic": None,
+    "map_links": {
+        "Google Maps": (
+            "https://www.google.com/maps/dir/?api=1"
+            "&origin=40.7128,-74.006&destination=42.3601,-71.0589&travelmode=driving"
+        ),
+        "Apple Maps": (
+            "https://maps.apple.com/?saddr=40.7128,-74.006&daddr=42.3601,-71.0589&dirflg=d"
+        ),
+        "Waze": "https://waze.com/ul?ll=42.3601,-71.0589&navigate=yes",
+        "Bing Maps": (
+            "https://bing.com/maps/default.aspx"
+            "?rtp=pos.40.7128_-74.006~pos.42.3601_-71.0589&mode=D"
+        ),
+        "OpenStreetMap": (
+            "https://www.openstreetmap.org/directions"
+            "?from=40.7128,-74.006&to=42.3601,-71.0589"
+        ),
+        "HERE Maps": (
+            "https://share.here.com/r/40.7128,-74.006,New+York"
+            "/42.3601,-71.0589,Boston"
+        ),
+        "Naver Maps": (
+            "https://map.naver.com/v5/directions/-/"
+            "loc:-74.006,40.7128,New+York/-/loc:-71.0589,42.3601,Boston/-/car"
+        ),
+        "Kakao Maps": "https://map.kakao.com/link/to/Boston,42.3601,-71.0589",
+    },
 }
 
 
@@ -308,6 +452,15 @@ class TestHandleNavigationQuery:
                 result = await handle_navigation_query("route from New York to Boston")
                 assert result is not None
                 assert "Traffic" in result or "traffic" in result
+
+    @pytest.mark.asyncio
+    async def test_map_links_section_in_response(self):
+        with patch("agent.skills.navigation.route", new=AsyncMock(return_value=MOCK_ROUTE_RESULT)):
+            result = await handle_navigation_query("route from New York to Boston")
+            assert result is not None
+            assert "Open in Maps" in result
+            assert "Google Maps" in result
+            assert "Apple Maps" in result
 
     @pytest.mark.asyncio
     async def test_exception_returns_error_message(self):
