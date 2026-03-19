@@ -30,6 +30,30 @@ OSRM_BASE_URL = "https://router.project-osrm.org/route/v1"
 # OpenStreetMap Nominatim (no key required)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
+# Normalize common mode variants (e.g., "driving", "walking") to canonical keys
+# used throughout this module: "drive", "walk", "bike", "transit".
+_MODE_ALIASES = {
+    # Driving / car
+    "driving": "drive",
+    "drive": "drive",
+    "car": "drive",
+    "auto": "drive",
+    # Walking / on foot
+    "walking": "walk",
+    "walk": "walk",
+    "foot": "walk",
+    "pedestrian": "walk",
+    # Cycling / biking
+    "biking": "bike",
+    "cycling": "bike",
+    "bike": "bike",
+    "bicycle": "bike",
+    # Transit / public transport
+    "transit": "transit",
+    "public_transit": "transit",
+    "public-transport": "transit",
+}
+
 # OpenRouteService (key required for full support, free tier available)
 ORS_BASE_URL = "https://api.openrouteservice.org/v2/directions"
 
@@ -322,8 +346,11 @@ def generate_map_links(
 
     links: Dict[str, str] = {}
 
+    # Normalize the mode key to the canonical form expected by provider mappings
+    normalized_mode = _MODE_ALIASES.get(str(mode_key).lower(), str(mode_key).lower())
+
     # Google Maps — full origin→destination routing with travel mode
-    gmode = _GOOGLE_MODES.get(mode_key, "driving")
+    gmode = _GOOGLE_MODES.get(normalized_mode, "driving")
     links["Google Maps"] = (
         f"https://www.google.com/maps/dir/?api=1"
         f"&origin={slat},{slon}"
@@ -332,7 +359,7 @@ def generate_map_links(
     )
 
     # Apple Maps — full routing with direction flag
-    aflag = _APPLE_FLAGS.get(mode_key, "d")
+    aflag = _APPLE_FLAGS.get(normalized_mode, "d")
     links["Apple Maps"] = (
         f"https://maps.apple.com/?saddr={slat},{slon}"
         f"&daddr={dlat},{dlon}"
@@ -340,11 +367,11 @@ def generate_map_links(
     )
 
     # Waze — navigate-to-destination (driving/transit only)
-    if mode_key in ("drive", "transit"):
+    if normalized_mode in ("drive", "transit"):
         links["Waze"] = f"https://waze.com/ul?ll={dlat},{dlon}&navigate=yes"
 
     # Bing Maps — full routing with travel mode
-    bmode = _BING_MODES.get(mode_key, "D")
+    bmode = _BING_MODES.get(normalized_mode, "D")
     links["Bing Maps"] = (
         f"https://bing.com/maps/default.aspx"
         f"?rtp=pos.{slat}_{slon}~pos.{dlat}_{dlon}"
