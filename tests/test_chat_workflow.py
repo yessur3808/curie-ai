@@ -3,14 +3,47 @@
 Tests for ChatWorkflow output sanitization and response generation.
 """
 
+import asyncio
 import pytest
 import sys
 import os
+from unittest.mock import MagicMock, patch
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from agent.chat_workflow import ChatWorkflow
+# Stub heavyweight dependencies that are unavailable in unit-test environments
+# (psycopg2 / pymongo / real LLM) before any application module is imported.
+for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions",
+             "pymongo", "pymongo.collection", "pymongo.errors"):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
+
+@pytest.fixture(autouse=True, scope="module")
+def _stub_memory_and_llm(monkeypatch):
+    """
+    Stub memory-related and llm modules so importing ChatWorkflow doesn't try to connect.
+
+    Using monkeypatch ensures these stubs are confined to this test module and restored
+    after the tests complete, avoiding order-dependent behavior in the full test suite.
+    """
+    for _mod in (
+        "memory",
+        "memory.database",
+        "memory.users",
+        "memory.conversations",
+        "memory.session_store",
+        "llm",
+    ):
+        monkeypatch.setitem(sys.modules, _mod, MagicMock())
+
+    # Import ChatWorkflow after stubbing the heavy dependencies, and expose it
+    # via a module-level name so tests can use ChatWorkflow as before.
+    global ChatWorkflow
+    from agent.chat_workflow import ChatWorkflow as _ChatWorkflow  # noqa: E402
+    ChatWorkflow = _ChatWorkflow
+
+    yield
 
 
 class TestOutputSanitization:
@@ -320,6 +353,280 @@ class TestMinimalSanitizationConfiguration:
         monkeypatch.setenv("MINIMAL_SANITIZATION", "TRUE")
         minimal_sanitization = os.getenv("MINIMAL_SANITIZATION", "true").lower() == "true"
         assert minimal_sanitization is True
+
+
+class TestSessionManagerIntegration:
+    """
+    Tests for ChatWorkflow's SessionManager integration.
+
+    All tests stub ``agent.chat_workflow.get_session_manager`` so no real
+    MongoDB connection is required.
+    """
+
+    def _make_workflow(self):
+        return ChatWorkflow(
+            persona={"name": "TestBot", "system_prompt": "You are a helpful assistant."},
+        )
+
+    # ------------------------------------------------------------------
+    # _batch_load_context
+    # ------------------------------------------------------------------
+
+    def test_batch_load_context_uses_platform_and_internal_id(self):
+        """History is fetched with (platform, internal_id) and converted to tuples."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = [
+            {"role": "user", "content": "hello", "ts": "2024-01-01T00:00:00"},
+            {"role": "assistant", "content": "hi there", "ts": "2024-01-01T00:00:01"},
+        ]
+
+        workflow = self._make_workflow()
+
+        with patch("agent.chat_workflow.get_session_manager", return_value=mock_sm), \
+             patch("agent.chat_workflow.UserManager") as mock_um:
+            mock_um.get_user_profile.return_value = {"timezone": "UTC"}
+
+            async def run():
+                # signature: _batch_load_context(internal_id, platform)
+                return await workflow._batch_load_context("user-42", "telegram")
+
+            profile, history = asyncio.run(run())
+
+        mock_sm.get_history.assert_called_once_with("telegram", "user-42")
+        assert history == [("user", "hello"), ("assistant", "hi there")]
+
+    def test_batch_load_context_returns_empty_list_when_no_history(self):
+        """Empty history from SessionManager is returned as an empty list."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = []
+
+        workflow = self._make_workflow()
+
+        with patch("agent.chat_workflow.get_session_manager", return_value=mock_sm), \
+             patch("agent.chat_workflow.UserManager") as mock_um:
+            mock_um.get_user_profile.return_value = {}
+
+            async def run():
+                return await workflow._batch_load_context("user-99", "discord")
+
+            _, history = asyncio.run(run())
+
+        assert history == []
+
+    # ------------------------------------------------------------------
+    # /reset command
+    # ------------------------------------------------------------------
+
+    def test_process_message_reset_calls_reset_session(self):
+        """/reset command calls reset_session(platform, internal_id)."""
+        mock_sm = MagicMock()
+
+        workflow = self._make_workflow()
+
+        normalized_input = {
+            "platform": "telegram",
+            "external_user_id": "42",
+            "external_chat_id": "100",
+            "message_id": "1",
+            "text": "/reset",
+            "internal_id": "user-uuid-42",
+        }
+
+        with patch("agent.chat_workflow.get_session_manager", return_value=mock_sm):
+            async def run():
+                return await workflow.process_message(normalized_input)
+
+            result = asyncio.run(run())
+
+        mock_sm.reset_session.assert_called_once_with("telegram", "user-uuid-42")
+        assert "cleared" in result["text"].lower()
+
+    def test_process_message_new_calls_reset_session(self):
+        """/new command also calls reset_session(platform, internal_id)."""
+        mock_sm = MagicMock()
+
+        workflow = self._make_workflow()
+
+        normalized_input = {
+            "platform": "discord",
+            "external_user_id": "77",
+            "external_chat_id": "200",
+            "message_id": "2",
+            "text": "/new",
+            "internal_id": "user-uuid-77",
+        }
+
+        with patch("agent.chat_workflow.get_session_manager", return_value=mock_sm):
+            async def run():
+                return await workflow.process_message(normalized_input)
+
+            asyncio.run(run())
+
+        mock_sm.reset_session.assert_called_once_with("discord", "user-uuid-77")
+
+    # ------------------------------------------------------------------
+    # /history command
+    # ------------------------------------------------------------------
+
+    def test_process_message_history_returns_count(self):
+        """/history reports the number of messages in the session."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = [
+            {"role": "user", "content": "a"},
+            {"role": "assistant", "content": "b"},
+            {"role": "user", "content": "c"},
+        ]
+
+        workflow = self._make_workflow()
+
+        normalized_input = {
+            "platform": "telegram",
+            "external_user_id": "55",
+            "external_chat_id": "300",
+            "message_id": "3",
+            "text": "/history",
+            "internal_id": "user-uuid-55",
+        }
+
+        with patch("agent.chat_workflow.get_session_manager", return_value=mock_sm):
+            async def run():
+                return await workflow.process_message(normalized_input)
+
+            result = asyncio.run(run())
+
+        assert "3" in result["text"]
+        mock_sm.get_history.assert_called_once_with("telegram", "user-uuid-55")
+
+
+class TestSessionCommandEdgeCases:
+    """
+    Edge-case tests for ChatWorkflow session commands.
+
+    These complement the happy-path coverage in TestSessionManagerIntegration
+    by checking response structure, case/whitespace tolerance, and boundary
+    values.
+    """
+
+    def _make_workflow(self):
+        return ChatWorkflow(
+            persona={"name": "TestBot", "system_prompt": "You are a helpful assistant."},
+        )
+
+    def _run_command(self, text, platform="telegram", external_user_id="1",
+                     external_chat_id="10", message_id="m1",
+                     internal_id="uid-1", mock_sm=None):
+        """Helper: run process_message for a single command and return result."""
+        if mock_sm is None:
+            mock_sm = MagicMock()
+            mock_sm.get_history.return_value = []
+
+        workflow = self._make_workflow()
+        normalized_input = {
+            "platform": platform,
+            "external_user_id": external_user_id,
+            "external_chat_id": external_chat_id,
+            "message_id": message_id,
+            "text": text,
+            "internal_id": internal_id,
+        }
+
+        with patch("agent.chat_workflow.get_session_manager", return_value=mock_sm):
+            async def run():
+                return await workflow.process_message(normalized_input)
+
+            return asyncio.run(run()), mock_sm
+
+    # ------------------------------------------------------------------
+    # model_used field
+    # ------------------------------------------------------------------
+
+    def test_reset_response_model_used_is_system(self):
+        """/reset response has model_used == 'system' (never consumes LLM tokens)."""
+        result, _ = self._run_command("/reset")
+        assert result["model_used"] == "system"
+
+    def test_history_response_model_used_is_system(self):
+        """/history response has model_used == 'system'."""
+        result, _ = self._run_command("/history")
+        assert result["model_used"] == "system"
+
+    # ------------------------------------------------------------------
+    # processing_time_ms field
+    # ------------------------------------------------------------------
+
+    def test_reset_response_processing_time_non_negative(self):
+        """/reset includes a non-negative processing_time_ms."""
+        result, _ = self._run_command("/reset")
+        assert result["processing_time_ms"] >= 0
+
+    def test_history_response_processing_time_non_negative(self):
+        """/history includes a non-negative processing_time_ms."""
+        result, _ = self._run_command("/history")
+        assert result["processing_time_ms"] >= 0
+
+    # ------------------------------------------------------------------
+    # Case-insensitivity (code does user_text.strip().lower())
+    # ------------------------------------------------------------------
+
+    def test_reset_command_uppercase_triggers_reset(self):
+        """/RESET (uppercase) also clears history — commands are case-insensitive."""
+        result, mock_sm = self._run_command("/RESET")
+        mock_sm.reset_session.assert_called_once()
+        assert "cleared" in result["text"].lower()
+
+    def test_new_command_mixed_case_triggers_reset(self):
+        """/New (mixed case) also clears history."""
+        result, mock_sm = self._run_command("/New")
+        mock_sm.reset_session.assert_called_once()
+
+    def test_history_command_uppercase_returns_count(self):
+        """/HISTORY (uppercase) still returns session statistics."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = [{"role": "user", "content": "hi"}]
+        result, _ = self._run_command("/HISTORY", mock_sm=mock_sm)
+        assert "1" in result["text"]
+
+    # ------------------------------------------------------------------
+    # Whitespace tolerance (code does user_text.strip())
+    # ------------------------------------------------------------------
+
+    def test_reset_command_with_surrounding_whitespace(self):
+        """'  /reset  ' (padded with spaces) is treated as /reset."""
+        result, mock_sm = self._run_command("  /reset  ")
+        mock_sm.reset_session.assert_called_once()
+        assert "cleared" in result["text"].lower()
+
+    def test_history_command_with_surrounding_whitespace(self):
+        """'  /history  ' (padded with spaces) is treated as /history."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = []
+        result, _ = self._run_command("  /history  ", mock_sm=mock_sm)
+        assert result["model_used"] == "system"
+
+    # ------------------------------------------------------------------
+    # /history response text content
+    # ------------------------------------------------------------------
+
+    def test_history_response_includes_reset_hint(self):
+        """/history response always reminds the user they can /reset."""
+        result, _ = self._run_command("/history")
+        assert "/reset" in result["text"].lower()
+
+    def test_history_empty_session_shows_zero(self):
+        """/history with an empty session reports 0 messages."""
+        mock_sm = MagicMock()
+        mock_sm.get_history.return_value = []
+        result, _ = self._run_command("/history", mock_sm=mock_sm)
+        assert "0" in result["text"]
+
+    # ------------------------------------------------------------------
+    # /reset response text content
+    # ------------------------------------------------------------------
+
+    def test_reset_response_includes_fresh_start(self):
+        """/reset response includes 'Fresh start' confirmation text."""
+        result, _ = self._run_command("/reset")
+        assert "fresh start" in result["text"].lower()
 
 
 if __name__ == "__main__":
