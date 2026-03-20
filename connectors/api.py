@@ -162,6 +162,9 @@ async def chat_api(req: MessageRequest):
         )
 
     # Normalize to standard ChatWorkflow format
+    # Compute internal_id upfront using the same helper as /clear_memory so
+    # all API endpoints resolve to the same profile for a given user_id.
+    internal_id = get_internal_id(req.user_id, req.username)
     normalized_input = {
         "platform": "api",
         "external_user_id": req.user_id,
@@ -169,6 +172,7 @@ async def chat_api(req: MessageRequest):
         "message_id": message_id,
         "text": req.message,
         "timestamp": datetime.datetime.utcnow(),
+        "internal_id": internal_id,
     }
 
     # Process through workflow
@@ -228,6 +232,7 @@ async def list_reminders_api(user_id: str):
         raise HTTPException(status_code=500, detail="System not initialized")
 
     message_id = str(uuid.uuid4())
+    internal_id = get_internal_id(user_id)
     normalized_input = {
         "platform": "api",
         "external_user_id": user_id,
@@ -235,6 +240,7 @@ async def list_reminders_api(user_id: str):
         "message_id": message_id,
         "text": "list my reminders",
         "timestamp": datetime.datetime.utcnow(),
+        "internal_id": internal_id,
     }
     result = await _workflow.process_message(normalized_input)
     return {"text": result["text"], "model_used": result["model_used"]}
@@ -253,6 +259,7 @@ async def delete_reminders_api(user_id: str, index: Optional[int] = None):
 
     text = f"delete reminder {index}" if index is not None else "cancel all reminders"
     message_id = str(uuid.uuid4())
+    internal_id = get_internal_id(user_id)
     normalized_input = {
         "platform": "api",
         "external_user_id": user_id,
@@ -260,6 +267,7 @@ async def delete_reminders_api(user_id: str, index: Optional[int] = None):
         "message_id": message_id,
         "text": text,
         "timestamp": datetime.datetime.utcnow(),
+        "internal_id": internal_id,
     }
     result = await _workflow.process_message(normalized_input)
     return {"text": result["text"], "model_used": result["model_used"]}

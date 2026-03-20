@@ -71,7 +71,10 @@ _lock = threading.Lock()
 # Monotonic timestamp of the last internet check attempt.
 _last_check_mono: float = 0.0
 
-# True if the most recent internet check succeeded and drift was acceptable.
+# True if the most recent internet check succeeded (HTTP 200 + parseable time field).
+# Note: _internet_ok is set True even when drift exceeds DRIFT_WARN_SECONDS — that
+# threshold only triggers a log warning; the internet time source is still considered
+# available.  Set to False on any network or parse error.
 _internet_ok: bool = False
 
 # Measured UTC offset (system_utc - internet_utc) from the last check, in seconds.
