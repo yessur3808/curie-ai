@@ -254,7 +254,7 @@ def delete_reminder(internal_id: str, index: Optional[int] = None) -> str:
 
     target = docs[index - 1]
     col.delete_one({"_id": target["_id"]})
-    return f"🗑️ Deleted reminder: _{target['message']}_"
+    return f"🗑️ Deleted reminder: _{escape_markdown(target['message'])}_"
 
 
 def get_due_reminders(internal_id: str) -> list[dict]:
