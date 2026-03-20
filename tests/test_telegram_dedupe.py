@@ -8,9 +8,8 @@ behaviour through the public interface exposed by ChatWorkflow.
 
 import sys
 import os
-import time
 import threading
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -70,15 +69,26 @@ def test_different_chats_are_independent():
 
 
 def test_ttl_expiry():
-    """Entries whose TTL has elapsed must no longer be returned."""
-    cache = MessageDedupeCache(ttl_seconds=1, max_size=100)
-    cache.set("telegram", "chat_1", "msg_1", "Cached")
-    assert cache.get("telegram", "chat_1", "msg_1") == "Cached"
+    """Entries whose TTL has elapsed must no longer be returned.
 
-    time.sleep(1.1)
-    assert cache.get("telegram", "chat_1", "msg_1") is None, (
-        "Entry should have expired after TTL"
-    )
+    We control the clock by patching ``time.time`` in the chat_workflow module
+    instead of sleeping, so the test is deterministic regardless of host load.
+    """
+    cache = MessageDedupeCache(ttl_seconds=100, max_size=100)
+    fake_start = 1_000_000.0
+
+    with patch("agent.chat_workflow.time.time", return_value=fake_start):
+        cache.set("telegram", "chat_1", "msg_1", "Cached")
+
+    # Retrieve before TTL elapses — should hit.
+    with patch("agent.chat_workflow.time.time", return_value=fake_start + 50):
+        assert cache.get("telegram", "chat_1", "msg_1") == "Cached"
+
+    # Retrieve after TTL elapses — should miss.
+    with patch("agent.chat_workflow.time.time", return_value=fake_start + 101):
+        assert cache.get("telegram", "chat_1", "msg_1") is None, (
+            "Entry should have expired after TTL"
+        )
 
 
 def test_fifo_eviction_at_max_size():

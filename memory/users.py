@@ -28,7 +28,7 @@ class UserManager:
             return str(row['internal_id']) if row else None
 
     @staticmethod
-    def get_or_create_user_internal_id(channel, external_id, secret_username=None, updated_by=None, is_master=False, roles=None):
+    def get_or_create_user_internal_id(channel, external_id, secret_username=None, updated_by=None, is_master=False, roles=None, display_name=None):
         """
         Look up or create a user based on external channel ID.
 
@@ -37,6 +37,8 @@ class UserManager:
         wrap the value in ``ARRAY[...]::TEXT[]``.
 
         If creating, must supply secret_username and updated_by.
+        An optional *display_name* (real name, nickname, or alias) can be stored
+        on creation and is used by the AI assistant to address the user naturally.
         """
         _validate_channel(channel)
         with get_pg_conn() as conn:
@@ -54,19 +56,35 @@ class UserManager:
             if not secret_username or not updated_by:
                 raise ValueError("secret_username and updated_by are required to create a new user.")
             new_uuid = str(uuid.uuid4())
-            cur.execute(
-                f"""INSERT INTO users (internal_id, {field}, secret_username, updated_by, is_master, roles)
-                    VALUES (%s, ARRAY[%s]::TEXT[], %s, %s, %s, %s)
-                    RETURNING internal_id""",
-                (
-                    new_uuid,
-                    str(external_id),
-                    secret_username,
-                    updated_by,
-                    is_master,
-                    roles if roles else []
+            if display_name:
+                cur.execute(
+                    f"""INSERT INTO users (internal_id, {field}, secret_username, updated_by, is_master, roles, display_name)
+                        VALUES (%s, ARRAY[%s]::TEXT[], %s, %s, %s, %s, %s)
+                        RETURNING internal_id""",
+                    (
+                        new_uuid,
+                        str(external_id),
+                        secret_username,
+                        updated_by,
+                        is_master,
+                        roles if roles else [],
+                        str(display_name),
+                    )
                 )
-            )
+            else:
+                cur.execute(
+                    f"""INSERT INTO users (internal_id, {field}, secret_username, updated_by, is_master, roles)
+                        VALUES (%s, ARRAY[%s]::TEXT[], %s, %s, %s, %s)
+                        RETURNING internal_id""",
+                    (
+                        new_uuid,
+                        str(external_id),
+                        secret_username,
+                        updated_by,
+                        is_master,
+                        roles if roles else []
+                    )
+                )
             conn.commit()
 
             # Initialize user profile in MongoDB with proactive messaging enabled by default
@@ -114,6 +132,21 @@ class UserManager:
                     datetime.utcnow(),
                     str(internal_id),
                 )
+            )
+            conn.commit()
+
+    @staticmethod
+    def update_display_name(internal_id: str, display_name: str) -> None:
+        """Set or update the display name (real name, nickname, or alias) for a user.
+
+        The display name is stored in the ``display_name`` column and is used
+        by the AI assistant to address the user naturally.
+        """
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE users SET display_name = %s, updated_at = %s WHERE internal_id = %s",
+                (str(display_name), datetime.utcnow(), str(internal_id)),
             )
             conn.commit()
 
@@ -170,6 +203,76 @@ class UserManager:
                 "$currentDate": {"last_updated": True}
             },
             upsert=True
+        )
+
+    @staticmethod
+    def get_contact_channels(internal_id: str) -> dict:
+        """Return the contact channel preferences for a user.
+
+        The returned dict always contains:
+
+        ``platform_priority``
+            Ordered list of platforms to try when reaching the user.
+            Defaults to ``["telegram", "discord", "whatsapp", "api"]``.
+
+        ``blocked_platforms``
+            Platforms the user does not want to be contacted on.
+            Defaults to ``[]``.
+
+        ``account_priority``
+            Per-platform ordered list of preferred account IDs.
+            Defaults to ``{}``.
+
+        These preferences are stored in MongoDB
+        ``user_profiles.facts.contact_channels`` and can be changed at any
+        time via :meth:`set_contact_channels`.
+        """
+        profile = UserManager.get_user_profile(internal_id)
+        cc = profile.get("contact_channels", {})
+        return {
+            "platform_priority": cc.get("platform_priority", ["telegram", "discord", "whatsapp", "api"]),
+            "blocked_platforms": list(cc.get("blocked_platforms", [])),
+            "account_priority": dict(cc.get("account_priority", {})),
+        }
+
+    @staticmethod
+    def set_contact_channels(
+        internal_id: str,
+        platform_priority: list = None,
+        blocked_platforms: list = None,
+        account_priority: dict = None,
+    ) -> None:
+        """Persist contact channel preferences for a user.
+
+        Only the supplied parameters are updated; omitting a parameter leaves
+        the existing value in place.
+
+        Parameters
+        ----------
+        platform_priority:
+            Ordered list of platforms to contact the user on, most preferred
+            first.  Example: ``["telegram", "discord"]``.
+        blocked_platforms:
+            List of platforms the user does not want to be contacted on.
+            Example: ``["api"]``.
+        account_priority:
+            Dict mapping platform name to an ordered list of preferred account
+            IDs for that platform.  Example:
+            ``{"telegram": ["12345"], "discord": ["67890"]}``.
+        """
+        updates: dict = {}
+        if platform_priority is not None:
+            updates["facts.contact_channels.platform_priority"] = list(platform_priority)
+        if blocked_platforms is not None:
+            updates["facts.contact_channels.blocked_platforms"] = list(blocked_platforms)
+        if account_priority is not None:
+            updates["facts.contact_channels.account_priority"] = dict(account_priority)
+        if not updates:
+            return
+        mongo_db.user_profiles.update_one(
+            {"_id": str(internal_id)},
+            {"$set": updates, "$currentDate": {"last_updated": True}},
+            upsert=True,
         )
 
     @staticmethod

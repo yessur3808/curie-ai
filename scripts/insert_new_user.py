@@ -1,6 +1,19 @@
 import uuid
 
+# Allowlist of valid channel names — these map to column identifiers in SQL so
+# we must validate before interpolating to prevent SQL injection.
+_ALLOWED_CHANNELS = frozenset(["telegram", "slack", "whatsapp", "signal", "discord", "api"])
+
+
+def _validate_channel(channel: str) -> None:
+    if channel not in _ALLOWED_CHANNELS:
+        raise ValueError(
+            f"Unknown channel {channel!r}. Must be one of: {sorted(_ALLOWED_CHANNELS)}"
+        )
+
+
 def get_or_create_user_id(channel, external_id):
+    _validate_channel(channel)
     with get_pg_conn() as conn:
         cur = conn.cursor()
         field = f"{channel}_id"

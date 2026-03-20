@@ -102,6 +102,7 @@ def init_pg():
                             api_id       TEXT[],
                             phone_number TEXT,
                             email        TEXT[],
+                            display_name TEXT,
                             secret_username TEXT NOT NULL,
                             is_master BOOLEAN NOT NULL DEFAULT FALSE,
                             roles TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -189,6 +190,14 @@ def init_pg():
                                 ALTER TABLE users
                                     ALTER COLUMN email TYPE TEXT[]
                                         USING CASE WHEN email IS NULL THEN NULL ELSE ARRAY[email] END;
+                            END IF;
+
+                            -- display_name: add the column if it is not present yet.
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'display_name'
+                            ) THEN
+                                ALTER TABLE users ADD COLUMN display_name TEXT;
                             END IF;
                         END $$;
                     """)

@@ -25,6 +25,14 @@ from utils.db import is_master_user
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Compiled UUID regex used to validate idempotency_key values.
+# Exported at module level so tests can import the production pattern
+# instead of maintaining a duplicate.
+_IDEMPOTENCY_KEY_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
 app = FastAPI(title="Curie AI API")
 
 # Shared workflow instance (set by main.py)
@@ -152,11 +160,7 @@ async def chat_api(req: MessageRequest):
 
     # Validate idempotency_key is safe for filesystem use (UUID format only)
     # This prevents path traversal attacks when generating voice files
-    if req.idempotency_key and not re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        req.idempotency_key,
-        re.IGNORECASE,
-    ):
+    if req.idempotency_key and not _IDEMPOTENCY_KEY_RE.match(req.idempotency_key):
         raise HTTPException(
             status_code=400, detail="idempotency_key must be a valid UUID format"
         )

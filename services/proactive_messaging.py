@@ -36,11 +36,44 @@ _PLATFORM_TO_COL: dict = {
     "api":      "api_id",
 }
 
+# Default order in which platforms are tried when no user preference is set.
+_DEFAULT_PLATFORM_PRIORITY: list = ["telegram", "discord", "whatsapp", "api"]
+
 # Pre-built fully-static SQL queries per platform (no dynamic SQL construction).
 _PLATFORM_QUERIES: dict = {
     platform: f"SELECT {col} FROM users WHERE internal_id = %s"
     for platform, col in _PLATFORM_TO_COL.items()
 }
+
+
+def _resolve_contact_channels(facts: dict) -> dict:
+    """Extract contact-channel preferences from a user *facts* dict.
+
+    Returns a normalised dict with three keys:
+
+    ``platform_priority``
+        Ordered list of platforms to try, most-preferred first.
+        Only platforms present in :data:`_PLATFORM_TO_COL` are kept.
+
+    ``blocked_platforms``
+        ``frozenset`` of platform names the user does not want to be
+        contacted on.
+
+    ``account_priority``
+        ``dict`` mapping platform name → ordered list of preferred
+        account IDs.  An empty list means "use all registered IDs in
+        database order".
+    """
+    cc = facts.get("contact_channels", {})
+    raw_priority = cc.get("platform_priority", _DEFAULT_PLATFORM_PRIORITY)
+    blocked = frozenset(cc.get("blocked_platforms", []))
+    # Keep only known platforms and exclude blocked ones.
+    priority = [p for p in raw_priority if p in _PLATFORM_TO_COL and p not in blocked]
+    return {
+        "platform_priority": priority,
+        "blocked_platforms": blocked,
+        "account_priority": dict(cc.get("account_priority", {})),
+    }
 
 
 class ProactiveMessagingService:
@@ -160,31 +193,51 @@ class ProactiveMessagingService:
                         f"⏰ Reminder: **{escaped_message_text}**", platform
                     )
 
-                    # Find the connector for this platform
-                    connector = self.connectors.get(platform)
+                    # Fetch the user's contact-channel preferences so we can
+                    # respect their platform priority and blocked-platform list.
+                    try:
+                        user_facts = UserManager.get_user_profile(internal_id) or {}
+                    except Exception:
+                        user_facts = {}
+                    cc = _resolve_contact_channels(user_facts)
+
+                    if platform in cc["blocked_platforms"]:
+                        # The user has opted out of this platform — try their
+                        # next preferred platform instead.
+                        logger.info(
+                            "Reminder %s: platform=%r is blocked for user %s; trying fallback platforms",
+                            doc["_id"], platform, internal_id,
+                        )
+                        fallback_platforms = [
+                            p for p in cc["platform_priority"]
+                            if p != platform and p not in cc["blocked_platforms"]
+                        ]
+                    else:
+                        # Honour the reminder's platform; ensure it comes first.
+                        fallback_platforms = [platform] + [
+                            p for p in cc["platform_priority"]
+                            if p != platform and p not in cc["blocked_platforms"]
+                        ]
+
                     delivered = False
-                    if connector:
-                        # Validate platform and look up the user's external ID using
-                        # the module-level mapping (single source of truth, no inline dicts).
-                        platform_col = _PLATFORM_TO_COL.get(platform)
-                        if platform_col is None:
-                            logger.warning("Unknown platform %r in reminder doc — skipping", platform)
+                    from memory.database import get_pg_conn  # noqa: PLC0415
+                    for attempt_platform in fallback_platforms:
+                        connector = self.connectors.get(attempt_platform)
+                        if not connector:
                             continue
 
-                        # _PLATFORM_QUERIES is built from _PLATFORM_TO_COL so if
-                        # platform_col is not None, query is guaranteed to be present.
-                        query = _PLATFORM_QUERIES[platform]
+                        platform_col = _PLATFORM_TO_COL.get(attempt_platform)
+                        if platform_col is None:
+                            continue
 
-                        from memory.database import get_pg_conn  # noqa: PLC0415
-                        external_user_ids = []
+                        query = _PLATFORM_QUERIES[attempt_platform]
+                        external_user_ids: list = []
                         try:
                             with get_pg_conn() as conn:
                                 cur = conn.cursor()
                                 cur.execute(query, (str(internal_id),))
                                 row = cur.fetchone()
                                 if row:
-                                    # Platform ID columns are TEXT[]; coerce to list
-                                    # and filter out None/empty entries.
                                     raw = row[platform_col]
                                     if isinstance(raw, list):
                                         external_user_ids = [uid for uid in raw if uid]
@@ -193,26 +246,29 @@ class ProactiveMessagingService:
                         except Exception as db_err:
                             logger.warning("Could not look up external_user_id for reminder: %s", db_err)
 
-                        if external_user_ids:
-                            # Deliver to every registered ID for this platform so the
-                            # user receives the reminder on all their linked accounts.
-                            delivered = False
-                            for ext_uid in external_user_ids:
-                                if await self._send_via_connector(connector, ext_uid, reminder_msg):
-                                    delivered = True
-                                else:
-                                    logger.warning(
-                                        "Delivery failed for reminder %s to uid=%s (internal_id=%s, platform=%s)",
-                                        doc["_id"], ext_uid, internal_id, platform,
-                                    )
+                        # Order account IDs by the user's per-platform preference.
+                        preferred_ids = cc["account_priority"].get(attempt_platform, [])
+                        if preferred_ids:
+                            ordered_ids = preferred_ids + [
+                                i for i in external_user_ids if i not in preferred_ids
+                            ]
                         else:
-                            delivered = False
-                            logger.warning(
-                                "No external_user_id for internal_id=%s on platform=%s — reminder not delivered",
-                                internal_id,
-                                platform,
-                            )
-                    else:
+                            ordered_ids = external_user_ids
+
+                        for ext_uid in ordered_ids:
+                            if await self._send_via_connector(connector, ext_uid, reminder_msg):
+                                delivered = True
+                                break  # stop after first successful account
+                            else:
+                                logger.warning(
+                                    "Delivery failed for reminder %s to uid=%s (internal_id=%s, platform=%s)",
+                                    doc["_id"], ext_uid, internal_id, attempt_platform,
+                                )
+
+                        if delivered:
+                            break  # stop after first successful platform
+
+                    if not delivered and not fallback_platforms:
                         logger.warning(
                             "No connector available for platform=%s — reminder not delivered (internal_id=%s)",
                             platform,
@@ -288,6 +344,9 @@ class ProactiveMessagingService:
                 # Skip if user is busy
                 if facts.get("busy", False):
                     continue
+
+                # Resolve contact-channel preferences for this user.
+                cc = _resolve_contact_channels(facts)
                 
                 # Get user from PostgreSQL to find their platform ID
                 try:
@@ -307,29 +366,33 @@ class ProactiveMessagingService:
                             logger.warning(f"User {internal_id} found in MongoDB but not in PostgreSQL")
                             continue
 
-                        # Determine which platform this user uses.
-                        # Platform ID columns are TEXT[]; pick the first registered ID.
+                        # Determine which platform to use, honouring the user's
+                        # contact-channel priority list and blocked-platform set.
                         platform = None
                         external_user_id = None
 
-                        for _platform, _col in [
-                            ("telegram",  "telegram_id"),
-                            ("discord",   "discord_id"),
-                            ("whatsapp",  "whatsapp_id"),
-                            ("api",       "api_id"),
-                        ]:
+                        for _platform in cc["platform_priority"]:
+                            _col = _PLATFORM_TO_COL.get(_platform)
+                            if not _col:
+                                continue
                             ids = user_row.get(_col) or []
-                            # ids is TEXT[] from Postgres, coerce scalar fallback
+                            # ids is TEXT[] from Postgres; coerce scalar fallback
                             if not isinstance(ids, list):
                                 ids = [ids] if ids else []
-                            first_id = next((uid for uid in ids if uid), None)
+                            # Prefer accounts listed in account_priority; fall back to DB order.
+                            preferred = cc["account_priority"].get(_platform, [])
+                            if preferred:
+                                ordered = preferred + [i for i in ids if i not in preferred]
+                            else:
+                                ordered = ids
+                            first_id = next((uid for uid in ordered if uid), None)
                             if first_id:
                                 platform = _platform
                                 external_user_id = first_id
                                 break
 
                         if not platform or not external_user_id:
-                            logger.warning(f"User {internal_id} has no platform ID")
+                            logger.warning(f"User {internal_id} has no reachable platform ID")
                             continue
                         
                         # Build user info dict

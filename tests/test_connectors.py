@@ -6,9 +6,9 @@ the API connector's idempotency-key validation without requiring live
 bot tokens, databases, or an LLM.
 """
 
+import ast
 import sys
 import os
-import re
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -135,7 +135,7 @@ class TestApiIdempotencyKeyValidation:
     """Tests for the UUID-format validation in POST /chat."""
 
     def setup_method(self):
-        """Import MessageRequest without starting FastAPI."""
+        """Import the production UUID validator from connectors.api."""
         if "connectors.api" in sys.modules:
             del sys.modules["connectors.api"]
 
@@ -144,10 +144,10 @@ class TestApiIdempotencyKeyValidation:
         sys.modules.setdefault("fastapi.responses", MagicMock())
         sys.modules.setdefault("pydantic", MagicMock())
 
-        self._uuid_re = re.compile(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            re.IGNORECASE,
-        )
+        # Import the production regex so this test always validates the same
+        # pattern the endpoint enforces — no duplicated pattern to drift.
+        from connectors.api import _IDEMPOTENCY_KEY_RE
+        self._uuid_re = _IDEMPOTENCY_KEY_RE
 
     def _is_valid_uuid(self, value: str) -> bool:
         return bool(self._uuid_re.match(value))
@@ -184,34 +184,58 @@ class TestApiIdempotencyKeyValidation:
 class TestWebSocketPlatformConsistency:
     """Verify the WebSocket handler uses platform='api' (same as REST /chat)."""
 
-    def test_websocket_uses_api_platform(self):
-        """Read the source to confirm 'platform' is set to 'api' in websocket_chat."""
+    @staticmethod
+    def _load_ws_func():
         connector_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "connectors", "api.py",
         )
         with open(connector_path) as fh:
-            source = fh.read()
+            tree = ast.parse(fh.read())
+        return next(
+            (
+                node for node in ast.walk(tree)
+                if isinstance(node, ast.AsyncFunctionDef) and node.name == "websocket_chat"
+            ),
+            None,
+        )
 
-        # The websocket handler must NOT use "websocket" as the platform value
-        # (that would create a separate user record for the same user_id).
-        assert '"platform": "websocket"' not in source, (
-            "WebSocket handler must not use platform='websocket'; "
-            "use 'api' to share history with REST /chat users."
+    def test_websocket_uses_api_platform(self):
+        """The websocket handler must set platform='api' in normalized_input."""
+        ws_func = self._load_ws_func()
+        assert ws_func is not None, "websocket_chat function not found in connectors/api.py"
+
+        # Walk the AST looking for a Dict literal that has a "platform" key
+        # whose value is the string constant "api".
+        found = any(
+            isinstance(node, ast.Dict)
+            and any(
+                isinstance(k, ast.Constant) and k.value == "platform"
+                and isinstance(v, ast.Constant) and v.value == "api"
+                for k, v in zip(node.keys, node.values)
+            )
+            for node in ast.walk(ws_func)
+        )
+        assert found, (
+            "websocket_chat must set platform='api' in normalized_input, not 'websocket'."
         )
 
     def test_websocket_handler_sets_internal_id(self):
-        """The websocket handler must call get_internal_id() before process_message."""
-        connector_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "connectors", "api.py",
-        )
-        with open(connector_path) as fh:
-            source = fh.read()
+        """The websocket handler must include internal_id in normalized_input."""
+        ws_func = self._load_ws_func()
+        assert ws_func is not None, "websocket_chat function not found in connectors/api.py"
 
-        # internal_id must appear in the normalized_input dict inside websocket_chat.
-        assert '"internal_id": internal_id' in source, (
-            "WebSocket handler must include internal_id in normalized_input."
+        # Walk the AST looking for a Dict literal that has an "internal_id" key.
+        found = any(
+            isinstance(node, ast.Dict)
+            and any(
+                isinstance(k, ast.Constant) and k.value == "internal_id"
+                for k in node.keys
+            )
+            for node in ast.walk(ws_func)
+        )
+        assert found, (
+            "websocket_chat must include internal_id in normalized_input."
         )
 
 
