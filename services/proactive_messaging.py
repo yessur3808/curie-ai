@@ -180,7 +180,7 @@ class ProactiveMessagingService:
                                 cur.execute(query, (str(internal_id),))
                                 row = cur.fetchone()
                                 if row:
-                                    external_user_id = row.get(platform_col)
+                                    external_user_id = row[platform_col]
                         except Exception as db_err:
                             logger.warning("Could not look up external_user_id for reminder: %s", db_err)
 
