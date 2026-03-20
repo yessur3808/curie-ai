@@ -140,8 +140,15 @@ def _maybe_refresh() -> None:
     """Trigger an internet check if the cache has expired (non-blocking)."""
     if not _ENABLED:
         return
-    if time.monotonic() - _last_check_mono < _CACHE_TTL:
-        return
+    now = time.monotonic()
+    global _last_check_mono
+    with _lock:
+        # Re-check under the lock to avoid starting multiple refresh threads.
+        if now - _last_check_mono < _CACHE_TTL:
+            return
+        # Mark the check as recently attempted before starting the background thread
+        # so other threads won't trigger additional concurrent checks.
+        _last_check_mono = now
     # Run in a daemon thread so it never blocks the caller.
     t = threading.Thread(target=_check_internet_time, daemon=True, name="time-verify")
     t.start()
