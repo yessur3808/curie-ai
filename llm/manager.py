@@ -230,8 +230,8 @@ FALLBACK_MAX_TOKENS = _get_int_env(
     "LLM_FALLBACK_MAX_TOKENS", 512
 )  # Conservative fallback if tokenization fails
 DEFAULT_MAX_TOKENS = _get_int_env(
-    "LLM_DEFAULT_MAX_TOKENS", 128
-)  # Conservative default for max_tokens in ask_llm()
+    "LLM_DEFAULT_MAX_TOKENS", 256
+)  # Default max_tokens for ask_llm() when the caller does not specify a value (default: 256)
 
 
 def preload_llama_model():

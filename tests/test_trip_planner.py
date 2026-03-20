@@ -167,6 +167,46 @@ class TestHandleTripQueryAsync:
         assert result is not None
         assert "Sorry" in result or "✈️" in result
 
+    @pytest.mark.asyncio
+    async def test_local_only_uses_compact_prompt(self):
+        """When running in local-only mode the skill must pass a shorter prompt to
+        the LLM so that more context-window space is available for the response."""
+        captured = {}
+
+        def fake_ask(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "Day 1: Explore the city centre..."
+
+        with patch("llm.providers.is_local_only", return_value=True):
+            with patch("llm.providers.compute_response_budget", return_value=512):
+                with patch("llm.providers.ask_best_provider", side_effect=fake_ask):
+                    result = await handle_trip_query("plan a trip to Rome for 3 days")
+
+        assert result is not None
+        # Compact prompt is shorter than verbose prompt
+        assert len(captured["prompt"]) < 400, (
+            f"Compact prompt should be short; got {len(captured['prompt'])} chars"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cloud_mode_uses_verbose_prompt(self):
+        """When cloud providers are available the skill should use the verbose prompt."""
+        captured = {}
+
+        def fake_ask(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return "Day 1: ..."
+
+        with patch("llm.providers.is_local_only", return_value=False):
+            with patch("llm.providers.ask_best_provider", side_effect=fake_ask):
+                result = await handle_trip_query("plan a trip to Paris for 5 days")
+
+        assert result is not None
+        # Verbose prompt is longer than compact prompt
+        assert len(captured["prompt"]) > 400, (
+            f"Verbose prompt should be long; got {len(captured['prompt'])} chars"
+        )
+
 
 def test_import_guard():
     """Confirm the trip_planner module can be imported without DB connections."""

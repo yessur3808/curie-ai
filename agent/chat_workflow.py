@@ -395,17 +395,20 @@ class ChatWorkflow:
                 user_profile, history, user_text, internal_id=internal_id
             )
 
-            # Call the best available LLM provider (cloud or local)
+            # Call the best available LLM provider (cloud or local).
+            # Use a dynamic token budget so the model always has room to reply
+            # even when the structured prompt is long (e.g. full conversation history).
             response: Optional[str] = None
             try:
-                from llm.providers import ask_best_provider
-                response = ask_best_provider(prompt, temperature=0.7, max_tokens=512)
+                from llm.providers import ask_best_provider, compute_response_budget
+                _max_tokens = compute_response_budget(prompt, max_cap=512)
+                response = ask_best_provider(prompt, temperature=0.7, max_tokens=_max_tokens)
             except Exception:
-                pass
+                _max_tokens = 512
 
             # Hard fallback: local llama.cpp
             if response is None or response.startswith("[Error"):
-                response = llm_manager.ask_llm(prompt, max_tokens=512, temperature=0.7)
+                response = llm_manager.ask_llm(prompt, max_tokens=_max_tokens, temperature=0.7)
 
             # Sanitize output
             response = self._sanitize_output(response)

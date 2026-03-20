@@ -157,10 +157,19 @@ class ProactiveMessagingService:
                         try:
                             with get_pg_conn() as conn:
                                 cur = conn.cursor()
-                                cur.execute(
-                                    f"SELECT {platform_col} FROM users WHERE internal_id = %s",
-                                    (str(internal_id),),
-                                )
+                                # Use fully static per-platform queries to avoid any
+                                # dynamic SQL construction in the hot path.
+                                _PLATFORM_QUERIES = {
+                                    "telegram": "SELECT telegram_id FROM users WHERE internal_id = %s",
+                                    "discord":  "SELECT discord_id  FROM users WHERE internal_id = %s",
+                                    "whatsapp": "SELECT whatsapp_id FROM users WHERE internal_id = %s",
+                                    "api":      "SELECT api_id      FROM users WHERE internal_id = %s",
+                                }
+                                query = _PLATFORM_QUERIES.get(platform)
+                                if query is None:
+                                    logger.warning("Unknown platform %r — cannot look up external_user_id", platform)
+                                    continue
+                                cur.execute(query, (str(internal_id),))
                                 row = cur.fetchone()
                                 if row:
                                     external_user_id = row.get(platform_col)

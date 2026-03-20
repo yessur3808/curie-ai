@@ -136,6 +136,14 @@ Keep the tone friendly and conversational, like advice from a well-travelled fri
 Do not include disclaimers or meta-commentary. Just give the plan.
 """
 
+# Compact version for local models — shorter prompt leaves more context window for the response.
+_ITINERARY_PROMPT_COMPACT = """\
+You are a travel planner. Write a concise day-by-day trip itinerary.
+Destination: {destination} | Duration: {duration} | Budget: {budget_tier}
+Include: brief intro, daily schedule (morning/afternoon/evening), 2 food tips, 3 travel tips, rough daily USD budget.
+Be brief and practical.
+"""
+
 _PACKING_PROMPT = """\
 You are a helpful travel advisor. Create a practical packing list for:
 - Destination / trip type: {destination}
@@ -150,6 +158,13 @@ Organise the list into categories:
 5. Miscellaneous / nice-to-haves
 
 Keep it concise and practical. No fluff or disclaimers.
+"""
+
+# Compact version for local models.
+_PACKING_PROMPT_COMPACT = """\
+Create a practical packing list for: {destination}, {duration}, {budget_tier} budget.
+Categories: Clothing, Electronics, Toiletries, Documents, Other.
+Be concise.
 """
 
 _GENERAL_TRAVEL_PROMPT = """\
@@ -169,24 +184,26 @@ _UNKNOWN_DESTINATION = "your chosen destination"
 _UNKNOWN_DURATION = "your trip"
 
 
-def _build_itinerary_prompt(params: dict) -> str:
+def _build_itinerary_prompt(params: dict, compact: bool = False) -> str:
     destination = params.get("destination") or _UNKNOWN_DESTINATION
     days = params.get("duration_days")
     duration = f"{days} day{'s' if days != 1 else ''}" if days else _UNKNOWN_DURATION
     budget_tier = params.get("budget_tier", "moderate")
-    return _ITINERARY_PROMPT.format(
+    template = _ITINERARY_PROMPT_COMPACT if compact else _ITINERARY_PROMPT
+    return template.format(
         destination=destination,
         duration=duration,
         budget_tier=budget_tier,
     )
 
 
-def _build_packing_prompt(params: dict) -> str:
+def _build_packing_prompt(params: dict, compact: bool = False) -> str:
     destination = params.get("destination") or "general travel"
     days = params.get("duration_days")
     duration = f"{days} day{'s' if days != 1 else ''}" if days else "a trip"
     budget_tier = params.get("budget_tier", "moderate")
-    return _PACKING_PROMPT.format(
+    template = _PACKING_PROMPT_COMPACT if compact else _PACKING_PROMPT
+    return template.format(
         destination=destination,
         duration=duration,
         budget_tier=budget_tier,
@@ -204,26 +221,52 @@ async def handle_trip_query(
     """
     Handle a trip/vacation planning query.
     Returns a formatted response string, or None if not a trip query.
+
+    When only a local llama.cpp model is available the skill automatically selects
+    compact prompt templates so that the response fits within the model's context
+    window without being truncated.
     """
     if not is_trip_query(text):
         return None
 
     params = extract_trip_params(text)
 
+    # Detect whether we are running in local-only mode so we can adapt prompts
+    # and token budgets accordingly.
+    try:
+        from llm.providers import is_local_only, compute_response_budget  # noqa: PLC0415
+        local_only = is_local_only()
+    except Exception:
+        local_only = False
+
+    # Cloud models can handle verbose prompts; local models need compact ones to
+    # leave enough context-window space for a complete response.
+    compact = local_only
+
     # Choose prompt type
     if params["packing_focus"]:
-        prompt = _build_packing_prompt(params)
+        prompt = _build_packing_prompt(params, compact=compact)
     elif params["destination"] or params["duration_days"]:
-        prompt = _build_itinerary_prompt(params)
+        prompt = _build_itinerary_prompt(params, compact=compact)
     else:
         # General travel question — pass through as-is
         prompt = _GENERAL_TRAVEL_PROMPT.format(question=text)
+
+    # Token budget: local models get a tighter cap determined by the context window;
+    # cloud models can produce longer, more detailed responses.
+    if local_only:
+        try:
+            max_tokens = compute_response_budget(prompt, max_cap=768)
+        except Exception:
+            max_tokens = 768
+    else:
+        max_tokens = 1024
 
     # Use multi-provider LLM (prefers cloud if available, falls back to local)
     response: Optional[str] = None
     try:
         from llm.providers import ask_best_provider  # noqa: PLC0415
-        response = ask_best_provider(prompt, temperature=0.75, max_tokens=1024)
+        response = ask_best_provider(prompt, temperature=0.75, max_tokens=max_tokens)
     except Exception as exc:
         logger.warning("providers.ask_best_provider failed: %s", exc)
 
@@ -231,7 +274,7 @@ async def handle_trip_query(
     if response is None:
         try:
             from llm import manager as llm_manager  # noqa: PLC0415
-            response = llm_manager.ask_llm(prompt, temperature=0.75, max_tokens=1024)
+            response = llm_manager.ask_llm(prompt, temperature=0.75, max_tokens=max_tokens)
         except Exception as exc:
             logger.error("Local LLM also failed for trip query: %s", exc)
             return (

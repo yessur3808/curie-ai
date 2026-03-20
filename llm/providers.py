@@ -205,13 +205,20 @@ _SIMPLE_KEYWORDS = re.compile(
 
 
 def _is_simple_query(prompt: str) -> bool:
-    """Return True if the query is short or matches known simple patterns."""
+    """Return True if the query is short *and* matches simple greeting/short-answer patterns.
+
+    Keyword matching is intentionally restricted to prompts that are themselves
+    short (≤ _SIMPLE_QUERY_MAX_WORDS words).  A long skill prompt that happens to
+    mention "weather" or "date" (e.g. a detailed trip-planning prompt) must NOT be
+    misclassified as simple — doing so would route it to the local model even when
+    a cloud provider is configured with higher priority.
+    """
     words = prompt.split()
-    if len(words) <= _SIMPLE_QUERY_MAX_WORDS:
-        return True
-    if _SIMPLE_KEYWORDS.search(prompt):
-        return True
-    return False
+    if len(words) > _SIMPLE_QUERY_MAX_WORDS:
+        # Long prompts are always considered complex regardless of keywords.
+        return False
+    # For short prompts, accept either the keyword match or the word-count heuristic.
+    return bool(_SIMPLE_KEYWORDS.search(prompt))
 
 
 # ---------------------------------------------------------------------------
@@ -279,3 +286,53 @@ def provider_status() -> dict:
         provider: check()
         for provider, check in PROVIDER_CHECKS.items()
     }
+
+
+def is_local_only() -> bool:
+    """Return True when the only active provider is llama.cpp (no cloud keys set).
+
+    Skills can use this to choose between verbose cloud-optimised prompts and
+    compact prompts that fit inside a typical local model's context window.
+    """
+    active = get_active_providers()
+    return active == ["llama.cpp"] or (len(active) == 1 and "llama.cpp" in active)
+
+
+# Rough token-per-word approximation; used when the model is not yet loaded.
+_AVG_TOKENS_PER_WORD = 1.3
+# Safety buffer on top of the prompt estimate (system artefacts, special tokens, …)
+_PROMPT_TOKEN_BUFFER = 32
+
+
+def compute_response_budget(prompt: str, max_cap: int = 512) -> int:
+    """Estimate a safe ``max_tokens`` value for a response to *prompt*.
+
+    Uses a lightweight word-count heuristic so the model does not need to be
+    loaded at call time.  The result is capped at *max_cap* and floored at 64
+    so the model always has room to produce a meaningful reply.
+
+    This avoids the common problem of hardcoding ``max_tokens=512`` when the
+    prompt already occupies most of the context window.
+
+    Parameters
+    ----------
+    prompt:
+        The full prompt that will be sent to the LLM.
+    max_cap:
+        Upper bound on the returned value.  Caller should set this to the
+        maximum response length they want even when the context window is large.
+
+    Returns
+    -------
+    int
+        Estimated safe value for ``max_tokens``.
+    """
+    try:
+        from llm.manager import MODEL_CONTEXT_SIZE  # lazy import avoids circular dep
+        context_size = MODEL_CONTEXT_SIZE
+    except Exception:
+        context_size = 2048  # conservative fallback
+
+    estimated_prompt_tokens = int(len(prompt.split()) * _AVG_TOKENS_PER_WORD)
+    available = context_size - estimated_prompt_tokens - _PROMPT_TOKEN_BUFFER
+    return max(64, min(max_cap, available))
