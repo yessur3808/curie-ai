@@ -13,8 +13,8 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Stub heavyweight dependencies before any application module is imported.
-# These are injected directly into sys.modules at module level so that the
-# fixture scope matches (module-level stubs, module-level fixture).
+# These are injected directly into sys.modules at module level so that all
+# imports in this test module see consistent, mocked implementations.
 for _mod in (
     "psycopg2", "psycopg2.extras", "psycopg2.extensions",
     "pymongo", "pymongo.collection", "pymongo.errors",
