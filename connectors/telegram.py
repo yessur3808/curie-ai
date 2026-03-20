@@ -40,21 +40,43 @@ def set_workflow(workflow: ChatWorkflow):
     _workflow = workflow
 
 
-async def send_message(external_user_id: str, message: str) -> bool:
+async def send_message(
+    external_user_id: str,
+    message: str,
+    parse_mode: Optional[str] = None,
+) -> bool:
     """
     Send a proactive message to a Telegram user by their Telegram user ID.
 
     Used by ProactiveMessagingService to deliver due reminders and check-ins.
     Returns True if the message was sent successfully, False otherwise.
+
+    The optional `parse_mode` parameter allows callers to enable Markdown or HTML
+    formatting (e.g. "MarkdownV2", "HTML"). Callers are responsible for
+    properly escaping any user-derived content before enabling formatting.
     """
     if _app is None:
         logger.warning("Telegram app not initialized; cannot send proactive message")
         return False
     try:
-        await _app.bot.send_message(chat_id=int(external_user_id), text=message)
+        if parse_mode:
+            await _app.bot.send_message(
+                chat_id=int(external_user_id),
+                text=message,
+                parse_mode=parse_mode,
+            )
+        else:
+            await _app.bot.send_message(
+                chat_id=int(external_user_id),
+                text=message,
+            )
         return True
     except Exception as exc:
-        logger.error("Failed to send Telegram proactive message to %s: %s", external_user_id, exc)
+        logger.error(
+            "Failed to send Telegram proactive message to %s: %s",
+            external_user_id,
+            exc,
+        )
         return False
 
 
