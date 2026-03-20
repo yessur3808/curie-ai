@@ -257,6 +257,9 @@ class ProactiveMessagingService:
                             (str(internal_id),),
                         )
                         user_row = cur.fetchone()
+                        # Normalize to a plain dict so that .get() is always available,
+                        # regardless of the exact row type returned by the cursor.
+                        user_row = dict(user_row) if user_row is not None else {}
                         
                         if not user_row:
                             logger.warning(f"User {internal_id} found in MongoDB but not in PostgreSQL")
