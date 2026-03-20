@@ -154,9 +154,10 @@ class ProactiveMessagingService:
                     platform = doc.get("platform", "unknown")
                     message_text = doc.get("message", "your reminder")
                     # Apply platform-appropriate formatting (WhatsApp needs plain text)
-                    from utils.formatting import format_for_platform  # noqa: PLC0415
+                    from utils.formatting import format_for_platform, escape_markdown  # noqa: PLC0415
+                    escaped_message_text = escape_markdown(str(message_text))
                     reminder_msg = format_for_platform(
-                        f"⏰ Reminder: **{message_text}**", platform
+                        f"⏰ Reminder: **{escaped_message_text}**", platform
                     )
 
                     # Find the connector for this platform
