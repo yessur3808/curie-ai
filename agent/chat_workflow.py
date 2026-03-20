@@ -33,6 +33,19 @@ from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Operator-configured defaults for new / anonymous users
+# ---------------------------------------------------------------------------
+# These env vars let the bot owner configure a sensible fallback timezone and
+# location so the assistant can give accurate time/date answers before a user
+# has set their own preferences through conversation.
+#
+# Set them in .env:
+#   DEFAULT_TIMEZONE=Europe/London
+#   DEFAULT_LOCATION=London, UK
+_DEFAULT_TIMEZONE: str = os.getenv("DEFAULT_TIMEZONE", "UTC").strip()
+_DEFAULT_LOCATION: str = os.getenv("DEFAULT_LOCATION", "").strip()
+
 # Dedicated small thread pool for background learning tasks.
 # max_workers=2 caps concurrent LLM-based fact extractions without starving
 # the main event-loop thread pool used for DB I/O.
@@ -69,7 +82,14 @@ def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> di
         return {}
 
     # Facts that are always injected — they provide essential context for every reply.
-    _CRITICAL_KEYS = frozenset({"name", "timezone", "language", "location", "preferred_name"})
+    _CRITICAL_KEYS = frozenset({
+        "name", "preferred_name",
+        "timezone", "location",
+        "language",
+        # Preference keys that are always relevant
+        "dietary_preferences", "travel_style", "occupation", "interests",
+        "reminders_preference",
+    })
     critical = {k: v for k, v in user_profile.items() if k in _CRITICAL_KEYS}
 
     # Score remaining facts by keyword overlap with the query
@@ -605,19 +625,41 @@ class ChatWorkflow:
         """
         Build prompt using structured chat format.
         internal_id is used to scope the prompt cache so users never share entries.
+
+        The prompt always includes:
+        1. Persona / system prompt
+        2. [USER CONTEXT] — date, time, timezone, location, key preferences
+           This block is always present so the assistant is aware of the user's
+           situation even before any facts have been learned from conversation.
+        3. [VERIFIED FACTS ABOUT USER] — additional learned profile facts
+        4. [CONVERSATION HISTORY]
+        5. Current user message
         """
         history_str = "\n".join([f"{role}: {msg[:50]}" for role, msg in history[-5:]])
-        
-        user_tz = user_profile.get('timezone', 'UTC') if user_profile else 'UTC'
+
+        # Resolve timezone: prefer learned profile → operator default → UTC
+        user_tz = (
+            (user_profile.get("timezone") if user_profile else None)
+            or _DEFAULT_TIMEZONE
+            or "UTC"
+        )
         try:
             tz = pytz.timezone(user_tz)
             now = datetime.now(tz)
         except (pytz.UnknownTimeZoneError, pytz.AmbiguousTimeError):
             tz = pytz.UTC
             now = datetime.now(pytz.UTC)
-        
+            user_tz = "UTC"
+
+        # Resolve location: prefer learned profile → operator default → unknown
+        user_location = (
+            (user_profile.get("location") if user_profile else None)
+            or _DEFAULT_LOCATION
+            or ""
+        )
+
         time_bucket = now.strftime('%Y-%m-%d-%H')
-        
+
         cached = self.prompt_cache.get(
             self.persona.get('system_prompt', ''),
             user_profile,
@@ -625,44 +667,57 @@ class ChatWorkflow:
             time_bucket,
             internal_id=internal_id,
         )
-        
+
         if cached:
             base_prompt, _ = cached
         else:
             lines = []
-            
+
             system_prompt = self.persona.get('system_prompt', 'You are a helpful assistant.')
             lines.append(system_prompt)
-            
+
             lines.append("\n[IMPORTANT RULES]")
             lines.append("- Be natural, conversational, and helpful like talking to a friend.")
             lines.append("- Be concise but complete - answer questions fully without being overwhelming.")
             lines.append("- If you don't know something, just say so naturally.")
             lines.append("- Avoid meta-commentary like 'As an AI...' or '[Note: ...]' - just respond directly.")
             lines.append("- Don't include action descriptions like *nods* or *gestures*.")
-            
+
             disallow_code = self.persona.get("disallow_code", False)
             if disallow_code:
                 lines.append("- When discussing technical topics, explain concepts clearly without code examples.")
             else:
                 lines.append("- Use code examples when helpful for technical discussions, but explain them in plain language too.")
-            
+
+            # Always include user context — even new users get date/time/location awareness
+            lines.append("\n[USER CONTEXT]")
+            lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
+            lines.append(f"- Current time: {now.strftime('%I:%M %p %Z')}")
+            lines.append(f"- Timezone: {user_tz}")
+            if user_location:
+                lines.append(f"- Location: {user_location}")
+
+            # Surface any additional learned facts the user has shared
             if user_profile:
-                lines.append("\n[VERIFIED FACTS ABOUT USER]")
-                # Use lightweight RAG: inject only facts relevant to the current
-                # message rather than the entire profile, to conserve context space.
-                relevant = _select_relevant_facts(user_profile, user_text)
-                for key, value in relevant.items():
-                    lines.append(f"- {key}: {value}")
-            
+                # Filter out keys already shown in [USER CONTEXT] to avoid duplication
+                _context_keys = frozenset({"timezone", "location"})
+                extra_relevant = {
+                    k: v for k, v in _select_relevant_facts(user_profile, user_text).items()
+                    if k not in _context_keys
+                }
+                if extra_relevant:
+                    lines.append("\n[VERIFIED FACTS ABOUT USER]")
+                    for key, value in extra_relevant.items():
+                        lines.append(f"- {key}: {value}")
+
             if history:
                 lines.append("\n[CONVERSATION HISTORY]")
                 for role, msg in history:
                     role_label = "User" if role == "user" else "Assistant"
                     lines.append(f"{role_label}: {msg}")
-            
+
             base_prompt = "\n".join(lines)
-            
+
             self.prompt_cache.set(
                 self.persona.get('system_prompt', ''),
                 user_profile,
@@ -672,29 +727,13 @@ class ChatWorkflow:
                 time_bucket,
                 internal_id=internal_id,
             )
-        
-        # Add current datetime (always fresh, never cached)
-        datetime_lines = []
-        try:
-            datetime_lines.append(f"\n[CURRENT DATE AND TIME]")
-            datetime_lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
-            datetime_lines.append(f"- Current time: {now.strftime('%I:%M %p %Z')}")
-            datetime_lines.append(f"- Timezone: {user_tz}")
-        except Exception as e:
-            logger.warning(f"Error formatting datetime: {e}, using UTC")
-            utc_now = datetime.now(pytz.UTC)
-            datetime_lines.append(f"\n[CURRENT DATE AND TIME]")
-            datetime_lines.append(f"- Current date: {utc_now.strftime('%A, %B %d, %Y')}")
-            datetime_lines.append(f"- Current time: {utc_now.strftime('%I:%M %p UTC')}")
-            datetime_lines.append(f"- Timezone: UTC")
-        
+
         prompt_parts = [
             base_prompt,
-            "\n".join(datetime_lines),
             f"\nUser: {user_text}",
             "Assistant:"
         ]
-        
+
         return "\n".join(prompt_parts)
     
     def _sanitize_output(self, response: str) -> str:
