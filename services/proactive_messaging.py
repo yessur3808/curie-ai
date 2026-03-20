@@ -11,6 +11,7 @@ This service:
 
 import asyncio
 import logging
+import os
 import random
 import threading
 import time
@@ -21,6 +22,25 @@ from memory import UserManager, ConversationManager
 from llm import manager
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Platform column mappings — single source of truth used by both the reminder
+# delivery path and the proactive messaging eligibility check.
+# ---------------------------------------------------------------------------
+
+# Maps platform name → PostgreSQL column that holds the user's external ID.
+_PLATFORM_TO_COL: dict = {
+    "telegram": "telegram_id",
+    "discord":  "discord_id",
+    "whatsapp": "whatsapp_id",
+    "api":      "api_id",
+}
+
+# Pre-built fully-static SQL queries per platform (no dynamic SQL construction).
+_PLATFORM_QUERIES: dict = {
+    platform: f"SELECT {col} FROM users WHERE internal_id = %s"
+    for platform, col in _PLATFORM_TO_COL.items()
+}
 
 
 class ProactiveMessagingService:
@@ -92,11 +112,14 @@ class ProactiveMessagingService:
             time.sleep(self.check_interval)
     
     async def _check_and_send_messages(self):
-        """Check all users and send proactive messages if appropriate."""
+        """Check all users and send proactive messages / due reminders if appropriate."""
         try:
             # Clean up old contact history periodically
             self._cleanup_old_contacts()
-            
+
+            # Deliver any due reminders first (time-sensitive)
+            await self._deliver_due_reminders()
+
             # Get all users who have the proactive_messaging preference enabled
             # For now, we'll check users from recent conversations
             users = self._get_eligible_users()
@@ -109,6 +132,112 @@ class ProactiveMessagingService:
         
         except Exception as e:
             logger.error(f"Error checking users for proactive messaging: {e}", exc_info=True)
+
+    async def _deliver_due_reminders(self):
+        """Check MongoDB for due reminders and deliver them to users."""
+        try:
+            from memory.database import mongo_db
+            from datetime import timezone as tz_module
+
+            now = datetime.now(tz_module.utc)
+            col = mongo_db.reminders
+            due_docs = list(col.find({"fired": False, "due_at": {"$lte": now}}))
+
+            if not due_docs:
+                return
+
+            logger.info("Found %d due reminder(s) to deliver", len(due_docs))
+
+            for doc in due_docs:
+                try:
+                    internal_id = doc.get("internal_id")
+                    platform = doc.get("platform", "unknown")
+                    message_text = doc.get("message", "your reminder")
+                    # Apply platform-appropriate formatting (WhatsApp needs plain text)
+                    from utils.formatting import format_for_platform, escape_markdown  # noqa: PLC0415
+                    escaped_message_text = escape_markdown(str(message_text))
+                    reminder_msg = format_for_platform(
+                        f"⏰ Reminder: **{escaped_message_text}**", platform
+                    )
+
+                    # Find the connector for this platform
+                    connector = self.connectors.get(platform)
+                    delivered = False
+                    if connector:
+                        # Validate platform and look up the user's external ID using
+                        # the module-level mapping (single source of truth, no inline dicts).
+                        platform_col = _PLATFORM_TO_COL.get(platform)
+                        if platform_col is None:
+                            logger.warning("Unknown platform %r in reminder doc — skipping", platform)
+                            continue
+
+                        # _PLATFORM_QUERIES is built from _PLATFORM_TO_COL so if
+                        # platform_col is not None, query is guaranteed to be present.
+                        query = _PLATFORM_QUERIES[platform]
+
+                        from memory.database import get_pg_conn  # noqa: PLC0415
+                        external_user_id = None
+                        try:
+                            with get_pg_conn() as conn:
+                                cur = conn.cursor()
+                                cur.execute(query, (str(internal_id),))
+                                row = cur.fetchone()
+                                if row:
+                                    external_user_id = row[platform_col]
+                        except Exception as db_err:
+                            logger.warning("Could not look up external_user_id for reminder: %s", db_err)
+
+                        if external_user_id:
+                            delivered = await self._send_via_connector(connector, external_user_id, reminder_msg)
+                            if not delivered:
+                                logger.warning(
+                                    "Delivery failed for reminder %s (internal_id=%s, platform=%s) — will retry",
+                                    doc["_id"], internal_id, platform,
+                                )
+                        else:
+                            logger.warning(
+                                "No external_user_id for internal_id=%s on platform=%s — reminder not delivered",
+                                internal_id,
+                                platform,
+                            )
+                    else:
+                        logger.warning(
+                            "No connector available for platform=%s — reminder not delivered (internal_id=%s)",
+                            platform,
+                            internal_id,
+                        )
+
+                    # Only mark as fired after a confirmed successful delivery so
+                    # the reminder is retried on the next loop cycle if delivery
+                    # failed.  To prevent an infinite retry loop for permanently
+                    # undeliverable reminders (e.g. user removed), we also track
+                    # attempt_count and give up after a configurable maximum.
+                    _MAX_REMINDER_ATTEMPTS = int(os.getenv("REMINDER_MAX_ATTEMPTS", "5"))
+                    attempt_count = doc.get("attempt_count", 0)
+                    if delivered:
+                        col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True}})
+                        logger.info("Reminder %s marked as fired (internal_id=%s)", doc["_id"], internal_id)
+                    elif attempt_count + 1 >= _MAX_REMINDER_ATTEMPTS:
+                        col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True, "delivery_failed": True}})
+                        logger.warning(
+                            "Reminder %s abandoned after %d failed attempt(s) — marked fired/failed",
+                            doc["_id"], attempt_count + 1,
+                        )
+                    else:
+                        col.update_one(
+                            {"_id": doc["_id"]},
+                            {"$inc": {"attempt_count": 1}, "$set": {"last_attempt_at": datetime.now(tz_module.utc)}},
+                        )
+                        logger.debug(
+                            "Reminder %s delivery attempt %d recorded — will retry next cycle",
+                            doc["_id"], attempt_count + 1,
+                        )
+
+                except Exception as rem_err:
+                    logger.error("Error delivering reminder %s: %s", doc.get("_id"), rem_err)
+
+        except Exception as exc:
+            logger.debug("_deliver_due_reminders skipped (non-critical): %s", exc)
     
     def _get_eligible_users(self):
         """
@@ -152,8 +281,15 @@ class ProactiveMessagingService:
                 try:
                     with get_pg_conn() as conn:
                         cur = conn.cursor()
-                        cur.execute("SELECT * FROM users WHERE internal_id = %s", (str(internal_id),))
+                        cur.execute(
+                            "SELECT telegram_id, discord_id, whatsapp_id, api_id "
+                            "FROM users WHERE internal_id = %s",
+                            (str(internal_id),),
+                        )
                         user_row = cur.fetchone()
+                        # Normalize to a plain dict so that .get() is always available,
+                        # regardless of the exact row type returned by the cursor.
+                        user_row = dict(user_row) if user_row is not None else {}
                         
                         if not user_row:
                             logger.warning(f"User {internal_id} found in MongoDB but not in PostgreSQL")

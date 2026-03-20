@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Shared ChatWorkflow instance (initialized in main.py)
 _workflow = None
+_discord_bot_instance = None  # DiscordBot instance (set in start_discord_bot)
 user_session_map = {}
 
 
@@ -35,6 +36,25 @@ def set_workflow(workflow: ChatWorkflow):
     """Set the shared ChatWorkflow instance (called from main.py)."""
     global _workflow
     _workflow = workflow
+
+
+async def send_message(external_user_id: str, message: str) -> bool:
+    """
+    Send a proactive DM to a Discord user by their Discord user ID.
+
+    Used by ProactiveMessagingService to deliver due reminders and check-ins.
+    Returns True if sent successfully, False otherwise.
+    """
+    if _discord_bot_instance is None:
+        logger.warning("Discord bot not initialized; cannot send proactive message")
+        return False
+    try:
+        user = await _discord_bot_instance.fetch_user(int(external_user_id))
+        await user.send(message)
+        return True
+    except Exception as exc:
+        logger.error("Failed to send Discord proactive message to %s: %s", external_user_id, exc)
+        return False
 
 
 def get_internal_id(
@@ -313,7 +333,7 @@ if commands is not None:
 
     def start_discord_bot(workflow: ChatWorkflow):
         """Start Discord bot with shared ChatWorkflow."""
-        global _workflow
+        global _workflow, _discord_bot_instance
         _workflow = workflow
 
         discord_token = os.getenv("DISCORD_BOT_TOKEN")
@@ -326,6 +346,7 @@ if commands is not None:
 
         try:
             bot = create_discord_bot(workflow)
+            _discord_bot_instance = bot
             bot.run(discord_token)
         except Exception as e:
             logger.error(f"Failed to start Discord bot: {e}")

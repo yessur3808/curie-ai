@@ -17,7 +17,7 @@ except ImportError:
     WhatsApp = None
 
 from agent.chat_workflow import ChatWorkflow
-from utils.formatting import plain_links
+from utils.formatting import strip_markdown
 from utils.session import set_busy_temporarily, clear_user_busy
 from memory import UserManager
 
@@ -162,11 +162,14 @@ async def handle_message(message):
             internal_id_found = UserManager.get_internal_id_by_secret_username(secret_username)
             if internal_id_found:
                 user_session_map[wa_user_id] = internal_id_found
-                await message.reply(f"✅ Identity linked to secret_username `{secret_username}`.")
+                await message.reply("✅ Identity linked successfully.")
             else:
                 await message.reply("❌ No user found with that secret_username.")
             return
-        
+
+        if user_message.startswith('/reminders'):
+            user_message = "list my reminders"
+
         # Normalize to standard ChatWorkflow format
         normalized_input = {
             'platform': 'whatsapp',
@@ -181,9 +184,8 @@ async def handle_message(message):
         # Process through workflow
         result = await _workflow.process_message(normalized_input)
         
-        # Send response — WhatsApp does not support [text](url) Markdown links,
-        # so convert them to plain "Name: url" format before sending.
-        response_text = plain_links(result.get('text', '[Error: No response]'))
+        # Strip Markdown formatting — WhatsApp renders **bold** etc. as literal characters
+        response_text = strip_markdown(result.get('text', '[Error: No response]'))
         await message.reply(response_text)
         
     except Exception as e:

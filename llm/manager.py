@@ -230,8 +230,8 @@ FALLBACK_MAX_TOKENS = _get_int_env(
     "LLM_FALLBACK_MAX_TOKENS", 512
 )  # Conservative fallback if tokenization fails
 DEFAULT_MAX_TOKENS = _get_int_env(
-    "LLM_DEFAULT_MAX_TOKENS", 128
-)  # Conservative default for max_tokens in ask_llm()
+    "LLM_DEFAULT_MAX_TOKENS", 256
+)  # Default max_tokens for ask_llm() when the caller does not specify a value (default: 256)
 
 
 def preload_llama_model():
@@ -257,11 +257,60 @@ def preload_llama_model():
     logger.info(f"Preloaded model: {model_name}")
 
 
-def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
-    # Use environment-configured default if max_tokens not specified
-    if max_tokens is None:
-        max_tokens = DEFAULT_MAX_TOKENS
+# ---------------------------------------------------------------------------
+# Response quality helpers (ML enhancement: detect poor output, enable retry)
+# ---------------------------------------------------------------------------
 
+# Minimum word count for a response to be considered non-trivial quality.
+_QUALITY_MIN_WORDS = 4
+
+
+def _response_quality_ok(response: str) -> bool:
+    """Return True when *response* passes basic quality checks.
+
+    A failed check triggers a quality-retry in ``ask_llm`` with a higher
+    temperature, giving the model a second chance to produce useful output.
+    Checks performed:
+    - Non-empty and at least ``_QUALITY_MIN_WORDS`` words
+    - Does not start with an error sentinel
+    - Is not just a sanity-filter apology with no real content
+    """
+    if not response or len(response.strip()) < 5:
+        return False
+    if response.startswith("[Error"):
+        return False
+    words = response.split()
+    if len(words) < _QUALITY_MIN_WORDS:
+        return False
+    # Sanity filter produces short apology strings when output is garbled
+    if response.startswith("I apologize") and len(words) < 20:
+        return False
+    if response.startswith("I'm having trouble") and len(words) < 20:
+        return False
+    return True
+
+
+def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
+    """Query the local llama.cpp model.
+
+    Token budget
+    ------------
+    When *max_tokens* is ``None`` (the default) the function computes the
+    maximum tokens available after the prompt:
+
+        available = MODEL_CONTEXT_SIZE - prompt_tokens - CONTEXT_BUFFER_TOKENS
+
+    and uses that as the token budget.  This means the model can produce as
+    long a response as the context window allows — no artificial cap is applied.
+    Pass an explicit integer only when you intentionally want to constrain the
+    response length (e.g. for short summaries).
+
+    Quality retry
+    -------------
+    If the first inference attempt produces a response that is too short or
+    repetitive, the call is retried once with a slightly higher temperature to
+    encourage more diverse token generation.
+    """
     # Periodically trigger garbage collection
     _trigger_garbage_collection()
 
@@ -275,8 +324,9 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
         if Llama is None:
             return "[Error: llama_cpp not installed]"
 
-        # Check response cache first
-        cached_response = ResponseCache.get(prompt, temperature, max_tokens)
+        # Check response cache first — use sentinel 0 for "dynamic" max_tokens key
+        _cache_key_tokens = max_tokens if max_tokens is not None else 0
+        cached_response = ResponseCache.get(prompt, temperature, _cache_key_tokens)
         if cached_response:
             return cached_response
 
@@ -314,46 +364,72 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
             # Clean up excess models to prevent memory bloat
             _cleanup_excess_models()
 
-        # Dynamically cap max_tokens to avoid exceeding context window
-        # Calculate prompt tokens and ensure prompt_tokens + max_tokens <= n_ctx
+        # Compute the effective token budget:
+        # - Tokenise the prompt precisely using the loaded model's tokeniser.
+        # - When max_tokens is None, use ALL available context-window space so
+        #   the response is never artificially truncated.
         try:
             prompt_tokens = len(llama_model.tokenize(prompt.encode("utf-8")))
             available_tokens = (
                 MODEL_CONTEXT_SIZE - prompt_tokens - CONTEXT_BUFFER_TOKENS
             )
 
-            # Cap max_tokens to available space, with a minimum threshold
             if available_tokens < MIN_AVAILABLE_TOKENS:
-                # Prompt is too long, return error
-                return f"[Error: Prompt too long ({prompt_tokens} tokens). Maximum context is {MODEL_CONTEXT_SIZE} tokens.]"
+                return (
+                    f"[Error: Prompt too long ({prompt_tokens} tokens). "
+                    f"Maximum context is {MODEL_CONTEXT_SIZE} tokens.]"
+                )
 
-            capped_max_tokens = min(max_tokens, available_tokens)
-        except Exception as e:
-            # If tokenization fails, use a conservative default
-            capped_max_tokens = min(max_tokens, FALLBACK_MAX_TOKENS)
+            if max_tokens is None:
+                # Dynamic mode: use all available space
+                effective_max_tokens = available_tokens
+            else:
+                # Caller-specified cap — never exceed available space
+                effective_max_tokens = min(max_tokens, available_tokens)
 
-        try:
+        except Exception as tokenize_exc:
+            logger.debug("Tokenization failed (%s); using fallback budget", tokenize_exc)
+            if max_tokens is None:
+                effective_max_tokens = FALLBACK_MAX_TOKENS
+            else:
+                effective_max_tokens = min(max_tokens, FALLBACK_MAX_TOKENS)
+
+        def _run_inference(temp: float) -> str:
             result = llama_model(
                 prompt,
-                max_tokens=capped_max_tokens,
+                max_tokens=effective_max_tokens,
                 stop=["</s>", "User:", "user:", "\nUser:", "\nuser:"],
-                temperature=temperature,
-                repeat_penalty=1.1,  # Prevent repetition
-                top_p=0.95,  # Nucleus sampling for better coherence
-                top_k=40,  # Limit token selection for quality
+                temperature=temp,
+                repeat_penalty=1.1,
+                top_p=0.95,
+                top_k=40,
             )
             if isinstance(result, dict) and "choices" in result:
-                raw_response = result["choices"][0]["text"].strip()
+                raw = result["choices"][0]["text"].strip()
             elif hasattr(result, "choices"):
-                raw_response = result.choices[0].text.strip()
+                raw = result.choices[0].text.strip()
             else:
-                raw_response = str(result)
+                raw = str(result)
+            return _sanity_filter_response(raw)
 
-            # Apply sanity filter
-            response = _sanity_filter_response(raw_response)
+        try:
+            response = _run_inference(temperature)
 
-            # Cache response
-            ResponseCache.set(prompt, temperature, max_tokens, response)
+            # Quality retry: if the first attempt produces a very short or
+            # apology-only response, retry once with a slightly higher temperature
+            # to encourage more diverse, complete output.
+            if _response_quality_ok(response) is False:
+                logger.info(
+                    "Response quality check failed (len=%d words); retrying with higher temperature",
+                    len(response.split()),
+                )
+                retry_temp = min(temperature + 0.2, 1.0)
+                response2 = _run_inference(retry_temp)
+                if _response_quality_ok(response2) or len(response2) > len(response):
+                    response = response2
+
+            # Cache the final response
+            ResponseCache.set(prompt, temperature, _cache_key_tokens, response)
 
             return response
         except Exception as e:

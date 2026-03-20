@@ -349,34 +349,28 @@ class Agent:
         """
         Get current date and time information.
         Extracts timezone from message or user profile.
-        
-        Args:
-            user_message: Optional user message to extract timezone from
-            internal_id: Optional user internal ID to get timezone from profile
-        
+
         Returns:
-            str: Formatted string with emoji prefix containing current date and time
-                 Example: "📅 Today is Saturday, February 07, 2026 at 09:55 PM HKT"
+            str: Formatted string with emoji prefix containing current date and time.
+                 Example: "📅 Today is Friday, March 20, 2026 at 05:21 AM UTC\\n(system clock)"
         """
         # Get user profile once
         user_profile = UserManager.get_user_profile(internal_id) if internal_id else {}
-        
+
         # Try to get timezone from user profile first
-        default_timezone = user_profile.get("timezone", "UTC")
-        
-        # Try to extract timezone from message if provided
+        default_timezone = user_profile.get("timezone", "UTC") or "UTC"
+
+        # Try to extract timezone from message if provided.
+        # extract_timezone_from_message returns None when no location is found.
         if user_message:
             extracted_tz = extract_timezone_from_message(user_message)
-            if extracted_tz != "UTC":
+            if extracted_tz:
                 default_timezone = extracted_tz
-        
-        # Get datetime info
-        dt_info = get_current_datetime(default_timezone)
-        
-        # Format response
-        reply = f"📅 Today is {dt_info['formatted']}"
-        
-        return reply
+
+        # get_current_datetime now returns a formatted multi-line string
+        dt_text = get_current_datetime(default_timezone)
+
+        return f"📅 {dt_text}"
 
     async def route_message(self, user_message, internal_id):
         """

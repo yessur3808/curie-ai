@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Shared ChatWorkflow instance (initialized in main.py)
 _workflow = None
+_app = None  # Telegram Application instance (set in start_telegram_bot)
 user_persona_map = {}
 user_session_map = {}
 
@@ -37,6 +38,46 @@ def set_workflow(workflow: ChatWorkflow):
     """Set the shared ChatWorkflow instance (called from main.py)."""
     global _workflow
     _workflow = workflow
+
+
+async def send_message(
+    external_user_id: str,
+    message: str,
+    parse_mode: Optional[str] = None,
+) -> bool:
+    """
+    Send a proactive message to a Telegram user by their Telegram user ID.
+
+    Used by ProactiveMessagingService to deliver due reminders and check-ins.
+    Returns True if the message was sent successfully, False otherwise.
+
+    The optional `parse_mode` parameter allows callers to enable Markdown or HTML
+    formatting (e.g. "MarkdownV2", "HTML"). Callers are responsible for
+    properly escaping any user-derived content before enabling formatting.
+    """
+    if _app is None:
+        logger.warning("Telegram app not initialized; cannot send proactive message")
+        return False
+    try:
+        if parse_mode:
+            await _app.bot.send_message(
+                chat_id=int(external_user_id),
+                text=message,
+                parse_mode=parse_mode,
+            )
+        else:
+            await _app.bot.send_message(
+                chat_id=int(external_user_id),
+                text=message,
+            )
+        return True
+    except Exception as exc:
+        logger.error(
+            "Failed to send Telegram proactive message to %s: %s",
+            external_user_id,
+            exc,
+        )
+        return False
 
 
 def get_internal_id(
@@ -269,10 +310,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     result = await _workflow.process_message(normalized_input)
 
-    # Send response — enable Markdown only for controlled/escaped outputs
+    # Enable Markdown for skill responses that return formatted content
     response_text = result.get("text", "[Error: No response]")
-    parse_mode = "Markdown" if result.get("model_used") == "navigation_skill" else None
+    from utils.formatting import MARKDOWN_SKILL_MODELS
+    parse_mode = "Markdown" if result.get("model_used") in MARKDOWN_SKILL_MODELS else None
     await update.message.reply_text(response_text, parse_mode=parse_mode)
+
+
+async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/reminders — list the user's upcoming reminders."""
+    if not _workflow:
+        await update.message.reply_text("❌ System not initialized.")
+        return
+
+    tg_user_id = update.message.from_user.id
+    telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
+    internal_id = get_internal_id(tg_user_id, telegram_username)
+
+    normalized_input = {
+        "platform": "telegram",
+        "external_user_id": tg_user_id,
+        "external_chat_id": update.message.chat_id,
+        "message_id": str(update.message.message_id),
+        "text": "list my reminders",
+        "timestamp": datetime.datetime.utcnow(),
+        "internal_id": internal_id,
+    }
+    result = await _workflow.process_message(normalized_input)
+    response_text = result.get("text", "📅 No reminders found.")
+    await update.message.reply_text(response_text, parse_mode="Markdown")
 
 
 def start_telegram_bot(workflow: ChatWorkflow):
@@ -287,14 +353,18 @@ def start_telegram_bot(workflow: ChatWorkflow):
         )
 
     app = ApplicationBuilder().token(telegram_token).build()
+    # Store the application so send_message() can use it for proactive delivery
+    global _app
+    _app = app
 
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(CommandHandler("identify", handle_identify))
     app.add_handler(CommandHandler("busy", handle_busy))
     app.add_handler(CommandHandler("resume", handle_resume))
     app.add_handler(CommandHandler("remember", handle_remember))
-    app.add_handler(CommandHandler("reset", handle_reset))          # ← NEW
-    app.add_handler(CommandHandler("history", handle_history))      # ← NEW
+    app.add_handler(CommandHandler("reset", handle_reset))
+    app.add_handler(CommandHandler("history", handle_history))
+    app.add_handler(CommandHandler("reminders", handle_reminders))
     app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_message))

@@ -7,16 +7,28 @@ It is inspired by conversational assistants like Jarvis from Iron Man, but runs 
 
 ## 🌟 Features
 
-- **Multi-Platform Support**: Telegram, Discord, WhatsApp, and RESTful/WebSocket API
+- **Multi-Platform Support**: Telegram, Discord, WhatsApp, and RESTful/WebSocket API — all features work seamlessly across every connector
 - **Voice Interface**: Accent-aware speech recognition and persona-based text-to-speech
-- **Conversational AI** with context and memory
+- **Conversational AI** with context, memory, and long-conversation summarisation
 - **Local LLMs**: Runs Meta Llama 3/3.1 or other GGUF models (no cloud needed)
+- **🆕 Multi-Provider LLM**: Optionally use Anthropic Claude, OpenAI GPT, or Google Gemini alongside local models — best provider is chosen automatically
 - **Configurable Persona**: Customizable assistant personality via JSON with voice settings
-- **Memory Management**: Stores conversation history and context
+- **Memory Management**: Stores conversation history and context; auto-summarises long histories
+- **🆕 Proactive Learning**: Automatically extracts and stores user preferences from conversations to personalise future responses
 - **Database Integration**: PostgreSQL & MongoDB for data persistence
-- **Migration System**: Organized database versioning
+- **Migration System**: Organised database versioning
 - **Utility Scripts**: Helper scripts for common operations
-- **Docker Support**: Containerized deployment ready
+- **Docker Support**: Containerised deployment ready
+- **🆕 Reminders & Scheduling**:
+  - Set natural-language reminders: "remind me in 30 minutes to call mom"
+  - List reminders via `/reminders` command or "list my reminders"
+  - Delete individual or all reminders
+  - Proactive delivery via the background messaging service
+- **🆕 Trip & Vacation Planning**:
+  - AI-generated day-by-day itineraries: "plan a 5-day trip to Paris"
+  - Packing lists: "what should I pack for a beach trip?"
+  - Budget estimates (budget / moderate / luxury tier)
+  - Works with local LLMs or cloud providers for richer results
 - **🆕 Enhanced Coding Modules**: 
   - **Code Review**: Automated code review with AI-powered analysis
   - **Multi-Platform PR/MR**: Support for GitHub, GitLab, and Bitbucket
@@ -84,6 +96,63 @@ Supported categories:
 - **Temperature**: celsius, fahrenheit, kelvin
 - **Speed**: km/h, mph, m/s, knots
 - **Area**: square meters, acres, hectares, square miles
+
+## ⏰ Reminders & Scheduling
+
+Set reminders using plain natural language — works on **all platforms**:
+
+```
+User: remind me in 30 minutes to take my medication
+Curie: ⏰ Got it! I'll remind you to take my medication on Thursday, Mar 19 at 10:05 AM UTC.
+
+User: list my reminders
+Curie: 📋 Your upcoming reminders:
+       1. take my medication — Thu, Mar 19 at 10:05 AM UTC
+
+User: delete reminder 1
+Curie: 🗑️ Deleted reminder: take my medication
+```
+
+**Telegram commands**: `/reminders` — list upcoming reminders  
+**REST API endpoints**: `GET /reminders?user_id=…` · `DELETE /reminders?user_id=…`
+
+Time formats supported:
+- `in N minutes / hours / days / weeks`
+- `at 3pm`, `at 14:30`, `at 9am`
+- `tomorrow`, `tomorrow at 10am`
+- ISO dates: `2026-04-01`
+
+## ✈️ Trip & Vacation Planning
+
+Ask Curie to plan trips with natural language:
+
+```
+User: plan a 5-day budget trip to Barcelona
+Curie: ✈️ Trip Plan: Barcelona
+       Day 1: Arrive, explore Las Ramblas and the Gothic Quarter...
+       ...
+       Daily budget estimate (budget tier): ~$60–80 USD
+
+User: what should I pack for a beach vacation?
+Curie: 🧳 Packing List for your trip
+       Clothing & footwear: ...
+```
+
+Supports budget tiers: **budget**, **moderate**, **luxury**
+
+## 🧠 Multi-Provider LLM
+
+Curie can combine **local GGUF models** with cloud AI providers for the best responses:
+
+| Provider | Env Variable | Default Model |
+|----------|-------------|---------------|
+| llama.cpp (local) | `LLM_MODELS` | Meta-Llama-3.1-8B |
+| Anthropic | `ANTHROPIC_API_KEY` | claude-3-haiku |
+| OpenAI | `OPENAI_API_KEY` | gpt-3.5-turbo |
+| Google Gemini | `GOOGLE_API_KEY` | gemini-1.5-flash |
+
+Configure priority order with `LLM_PROVIDER_PRIORITY=anthropic,openai,gemini,llama.cpp`.  
+Simple/short queries are automatically routed to the local model (unless `LLM_CLOUD_SIMPLE_TASKS=true`) to reduce API costs.
 
 ## 📚 Documentation
 
