@@ -240,13 +240,6 @@ class ChatWorkflow:
     }
     """
     
-    # French phrases for code-level injection
-    FRENCH_PHRASES = [
-        "Oui!", "Non non", "Mon ami", "Magnifique!", "C'est bon", 
-        "Ah bon?", "D'accord", "Mais oui", "Très bien", "Fantastique!",
-        "Zut!", "Quelle horreur!", "Intéressant!", "Naturellement!"
-    ]
-    
     # Output sanitation patterns
     SPEAKER_TAG_PATTERN = re.compile(
         r'^\s*(?:User:|Curie:|Assistant:|Coder:|System:)',
@@ -257,18 +250,17 @@ class ChatWorkflow:
     CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|```[\s\S]*$', re.MULTILINE)
     INLINE_CODE_PATTERN = re.compile(r'`[^`]+`')
     
-    def __init__(self, persona: Optional[Dict] = None, max_history: int = 5, 
+    def __init__(self, persona: Optional[Dict] = None, max_history: int = 5,
                  enable_small_talk: bool = False, idle_threshold_minutes: int = 30,
                  minimal_sanitization: bool = True):
         self.persona = persona or self._load_default_persona()
         self.max_history = max_history
         self.enable_small_talk = enable_small_talk
-        self.idle_threshold_minutes = idle_threshold_minutes
         self.minimal_sanitization = minimal_sanitization
-        
+
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
         self.prompt_cache = PromptCache(max_size=100)
-        
+
         logger.info(f"ChatWorkflow initialized with persona: {self.persona.get('name', 'Unknown')}")
     
     def _load_default_persona(self) -> Dict:
@@ -280,7 +272,6 @@ class ChatWorkflow:
         return {
             "name": "Assistant",
             "system_prompt": "You are a helpful assistant.",
-            "french_phrases": self.FRENCH_PHRASES
         }
     
     async def process_message(self, normalized_input: Dict) -> Dict:
@@ -379,7 +370,7 @@ class ChatWorkflow:
                 from agent.skills.coding_assistant import handle_coding_query
                 coding_response = await handle_coding_query(user_text)
                 if coding_response:
-                    logger.info(f"Coding skill handled the query")
+                    logger.info("Coding skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
                     sm.add_message(platform, internal_id, "assistant", coding_response)
@@ -485,10 +476,7 @@ class ChatWorkflow:
 
             # Sanitize output
             response = self._sanitize_output(response)
-            
-            if self.enable_small_talk and self._should_add_small_talk(history):
-                response = self._append_small_talk_thoughtfully(response)
-            
+
             # Save to conversation history
             sm = get_session_manager()
             sm.add_message(platform, internal_id, "user", user_text)
@@ -758,14 +746,6 @@ class ChatWorkflow:
         response = re.sub(r'\n\n\n+', '\n\n', response)
         
         return response.strip()
-    
-    def _should_add_small_talk(self, history: list) -> bool:
-        if not history or len(history) < 2:
-            return False
-        return False
-    
-    def _append_small_talk_thoughtfully(self, main_response: str) -> str:
-        return main_response
     
     def change_persona(self, persona_name: str) -> bool:
         """Switch to a different persona."""

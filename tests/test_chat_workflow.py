@@ -12,38 +12,21 @@ from unittest.mock import MagicMock, patch
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Stub heavyweight dependencies that are unavailable in unit-test environments
-# (psycopg2 / pymongo / real LLM) before any application module is imported.
-for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions",
-             "pymongo", "pymongo.collection", "pymongo.errors"):
+# Stub heavyweight dependencies before any application module is imported.
+# These are injected directly into sys.modules at module level so that the
+# fixture scope matches (module-level stubs, module-level fixture).
+for _mod in (
+    "psycopg2", "psycopg2.extras", "psycopg2.extensions",
+    "pymongo", "pymongo.collection", "pymongo.errors",
+    "memory", "memory.database", "memory.users",
+    "memory.conversations", "memory.session_store",
+    "llm",
+):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
-@pytest.fixture(autouse=True, scope="module")
-def _stub_memory_and_llm(monkeypatch):
-    """
-    Stub memory-related and llm modules so importing ChatWorkflow doesn't try to connect.
-
-    Using monkeypatch ensures these stubs are confined to this test module and restored
-    after the tests complete, avoiding order-dependent behavior in the full test suite.
-    """
-    for _mod in (
-        "memory",
-        "memory.database",
-        "memory.users",
-        "memory.conversations",
-        "memory.session_store",
-        "llm",
-    ):
-        monkeypatch.setitem(sys.modules, _mod, MagicMock())
-
-    # Import ChatWorkflow after stubbing the heavy dependencies, and expose it
-    # via a module-level name so tests can use ChatWorkflow as before.
-    global ChatWorkflow
-    from agent.chat_workflow import ChatWorkflow as _ChatWorkflow  # noqa: E402
-    ChatWorkflow = _ChatWorkflow
-
-    yield
+# Import after stubbing so ChatWorkflow doesn't attempt real DB/LLM connections.
+from agent.chat_workflow import ChatWorkflow  # noqa: E402
 
 
 class TestOutputSanitization:

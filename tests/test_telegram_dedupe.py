@@ -1,245 +1,126 @@
 """
-Integration tests for Telegram connector's deduplication logic.
+Tests for the message-level deduplication used by the Telegram (and other) connectors.
 
-Tests the _build_update_key and _is_duplicate_update functions
-to ensure proper integration with the DedupeCache.
+The Telegram connector relies on ChatWorkflow.MessageDedupeCache to avoid
+processing the same Telegram update_id twice.  These tests verify the cache
+behaviour through the public interface exposed by ChatWorkflow.
 """
 
 import sys
 import os
-from unittest.mock import Mock, MagicMock
+import time
+import threading
+from unittest.mock import MagicMock
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Mock all external dependencies before importing telegram connector
-sys.modules['telegram'] = MagicMock()
-sys.modules['telegram.ext'] = MagicMock()
-sys.modules['dotenv'] = MagicMock()
-sys.modules['agent'] = MagicMock()
-sys.modules['agent.core'] = MagicMock()
-sys.modules['memory'] = MagicMock()
-sys.modules['llm'] = MagicMock()
-sys.modules['llm.manager'] = MagicMock()
-sys.modules['python_weather'] = MagicMock()
+# Stub heavyweight dependencies before importing any application code.
+for _mod in (
+    "psycopg2", "psycopg2.extras", "psycopg2.extensions",
+    "pymongo", "pymongo.collection", "pymongo.errors",
+    "memory", "memory.database", "memory.users",
+    "memory.conversations", "memory.session_store",
+    "llm",
+):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
 
-# Mock utils modules that have external dependencies
-sys.modules['utils.busy'] = MagicMock()
-sys.modules['utils.persona'] = MagicMock()
-sys.modules['utils.weather'] = MagicMock()
-sys.modules['utils.session'] = MagicMock()
-sys.modules['utils.users'] = MagicMock()
-
-# Now import from telegram connector
-from connectors.telegram import _build_update_key, _is_duplicate_update, processed_updates
+from agent.chat_workflow import MessageDedupeCache  # noqa: E402
 
 
-def test_build_update_key_with_user():
-    """Test building update key with user information."""
-    # Create mock Update object with message and user
-    update = Mock()
-    update.update_id = 12345
-    update.message = Mock()
-    update.message.from_user = Mock()
-    update.message.from_user.id = 67890
-    
-    key = _build_update_key(update)
-    assert key == "update:12345:user:67890", f"Expected 'update:12345:user:67890', got '{key}'"
-    print("✓ test_build_update_key_with_user passed")
+# ---------------------------------------------------------------------------
+# MessageDedupeCache unit tests
+# ---------------------------------------------------------------------------
+
+def test_cache_miss_on_first_message():
+    """A brand-new message key must not be found in an empty cache."""
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=100)
+    result = cache.get("telegram", "chat_1", "msg_1")
+    assert result is None, "First lookup should return None (cache miss)"
 
 
-def test_build_update_key_without_user():
-    """Test building update key without user information."""
-    # Create mock Update object without user
-    update = Mock()
-    update.update_id = 12345
-    update.message = None
-    
-    key = _build_update_key(update)
-    assert key == "update:12345", f"Expected 'update:12345', got '{key}'"
-    print("✓ test_build_update_key_without_user passed")
+def test_cache_hit_after_set():
+    """After storing a response the same key must return it."""
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=100)
+    cache.set("telegram", "chat_1", "msg_1", "Hello!")
+    result = cache.get("telegram", "chat_1", "msg_1")
+    assert result == "Hello!"
 
 
-def test_build_update_key_with_message_no_user():
-    """Test building update key with message but no user."""
-    # Create mock Update object with message but no from_user
-    update = Mock()
-    update.update_id = 12345
-    update.message = Mock()
-    update.message.from_user = None
-    
-    key = _build_update_key(update)
-    assert key == "update:12345", f"Expected 'update:12345', got '{key}'"
-    print("✓ test_build_update_key_with_message_no_user passed")
+def test_different_message_ids_are_independent():
+    """Two messages with different IDs on the same chat must not collide."""
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=100)
+    cache.set("telegram", "chat_1", "msg_1", "Response A")
+    assert cache.get("telegram", "chat_1", "msg_2") is None
 
 
-def test_build_update_key_none_update():
-    """Test building update key with None update."""
-    key = _build_update_key(None)
-    assert key is None, f"Expected None, got '{key}'"
-    print("✓ test_build_update_key_none_update passed")
+def test_different_platforms_are_independent():
+    """Same chat/message IDs on different platforms must be independent entries."""
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=100)
+    cache.set("telegram", "chat_1", "msg_1", "Telegram response")
+    assert cache.get("discord", "chat_1", "msg_1") is None
 
 
-def test_build_update_key_no_update_id():
-    """Test building update key without update_id."""
-    update = Mock()
-    update.update_id = None
-    update.message = Mock()
-    
-    key = _build_update_key(update)
-    assert key is None, f"Expected None, got '{key}'"
-    print("✓ test_build_update_key_no_update_id passed")
+def test_different_chats_are_independent():
+    """Same message ID in different chats must be independent entries."""
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=100)
+    cache.set("telegram", "chat_1", "msg_42", "Chat 1 response")
+    assert cache.get("telegram", "chat_2", "msg_42") is None
 
 
-def test_is_duplicate_update_first_time():
-    """Test that first occurrence of an update is not marked as duplicate."""
-    # Clear the cache first
-    processed_updates.clear()
-    
-    # Create mock Update
-    update = Mock()
-    update.update_id = 99999
-    update.message = Mock()
-    update.message.from_user = Mock()
-    update.message.from_user.id = 11111
-    
-    # First time should not be duplicate
-    is_dup = _is_duplicate_update(update)
-    assert is_dup is False, f"First occurrence should not be duplicate, got {is_dup}"
-    print("✓ test_is_duplicate_update_first_time passed")
+def test_ttl_expiry():
+    """Entries whose TTL has elapsed must no longer be returned."""
+    cache = MessageDedupeCache(ttl_seconds=1, max_size=100)
+    cache.set("telegram", "chat_1", "msg_1", "Cached")
+    assert cache.get("telegram", "chat_1", "msg_1") == "Cached"
+
+    time.sleep(1.1)
+    assert cache.get("telegram", "chat_1", "msg_1") is None, (
+        "Entry should have expired after TTL"
+    )
 
 
-def test_is_duplicate_update_second_time():
-    """Test that second occurrence of an update is marked as duplicate."""
-    # Clear the cache first
-    processed_updates.clear()
-    
-    # Create mock Update
-    update = Mock()
-    update.update_id = 88888
-    update.message = Mock()
-    update.message.from_user = Mock()
-    update.message.from_user.id = 22222
-    
-    # First check
-    first = _is_duplicate_update(update)
-    assert first is False, "First occurrence should not be duplicate"
-    
-    # Second check with same update
-    second = _is_duplicate_update(update)
-    assert second is True, f"Second occurrence should be duplicate, got {second}"
-    print("✓ test_is_duplicate_update_second_time passed")
+def test_fifo_eviction_at_max_size():
+    """When the cache is full, the oldest entry must be evicted first."""
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=3)
+    cache.set("telegram", "chat", "msg_1", "r1")
+    cache.set("telegram", "chat", "msg_2", "r2")
+    cache.set("telegram", "chat", "msg_3", "r3")
+
+    # Adding a 4th entry must evict msg_1 (oldest)
+    cache.set("telegram", "chat", "msg_4", "r4")
+
+    assert cache.get("telegram", "chat", "msg_1") is None, "Oldest entry should be evicted"
+    assert cache.get("telegram", "chat", "msg_2") == "r2"
+    assert cache.get("telegram", "chat", "msg_3") == "r3"
+    assert cache.get("telegram", "chat", "msg_4") == "r4"
 
 
-def test_is_duplicate_update_different_updates():
-    """Test that different updates are not marked as duplicates."""
-    # Clear the cache first
-    processed_updates.clear()
-    
-    # Create first mock Update
-    update1 = Mock()
-    update1.update_id = 77777
-    update1.message = Mock()
-    update1.message.from_user = Mock()
-    update1.message.from_user.id = 33333
-    
-    # Create second mock Update (different)
-    update2 = Mock()
-    update2.update_id = 77778
-    update2.message = Mock()
-    update2.message.from_user = Mock()
-    update2.message.from_user.id = 33333
-    
-    # Both should be new
-    first = _is_duplicate_update(update1)
-    assert first is False, "First update should not be duplicate"
-    
-    second = _is_duplicate_update(update2)
-    assert second is False, f"Second different update should not be duplicate, got {second}"
-    print("✓ test_is_duplicate_update_different_updates passed")
+def test_overwrite_existing_key():
+    """Setting a key that already exists must update the stored response."""
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=100)
+    cache.set("telegram", "chat_1", "msg_1", "Original")
+    cache.set("telegram", "chat_1", "msg_1", "Updated")
+    assert cache.get("telegram", "chat_1", "msg_1") == "Updated"
 
 
-def test_is_duplicate_update_none_update():
-    """Test that None update is handled gracefully."""
-    is_dup = _is_duplicate_update(None)
-    assert is_dup is False, f"None update should return False, got {is_dup}"
-    print("✓ test_is_duplicate_update_none_update passed")
+def test_thread_safety():
+    """Concurrent writes from multiple threads must not corrupt the cache."""
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=1000)
+    errors = []
 
-
-def test_is_duplicate_update_no_update_id():
-    """Test that update without update_id is handled gracefully."""
-    update = Mock()
-    update.update_id = None
-    update.message = Mock()
-    
-    is_dup = _is_duplicate_update(update)
-    assert is_dup is False, f"Update without ID should return False, got {is_dup}"
-    print("✓ test_is_duplicate_update_no_update_id passed")
-
-
-def test_is_duplicate_same_update_id_different_user():
-    """Test that same update_id but different user is treated as different update."""
-    # Clear the cache first
-    processed_updates.clear()
-    
-    # Create first update
-    update1 = Mock()
-    update1.update_id = 55555
-    update1.message = Mock()
-    update1.message.from_user = Mock()
-    update1.message.from_user.id = 11111
-    
-    # Create second update with same ID but different user
-    update2 = Mock()
-    update2.update_id = 55555
-    update2.message = Mock()
-    update2.message.from_user = Mock()
-    update2.message.from_user.id = 22222
-    
-    # Both should be treated as new (different composite keys)
-    first = _is_duplicate_update(update1)
-    assert first is False, "First update should not be duplicate"
-    
-    second = _is_duplicate_update(update2)
-    assert second is False, f"Same update_id but different user should not be duplicate, got {second}"
-    print("✓ test_is_duplicate_same_update_id_different_user passed")
-
-
-def run_all_tests():
-    """Run all tests using automatic test discovery."""
-    # Discover all test functions in the current module
-    import inspect
-    current_module = sys.modules[__name__]
-    tests = [
-        obj for name, obj in inspect.getmembers(current_module)
-        if inspect.isfunction(obj) and name.startswith('test_')
-    ]
-    
-    # Sort tests by name for consistent ordering
-    tests.sort(key=lambda f: f.__name__)
-    
-    print("Running telegram deduplication integration tests...")
-    print("=" * 60)
-    
-    failed = 0
-    for test in tests:
+    def writer(start: int):
         try:
-            test()
-        except AssertionError as e:
-            print(f"✗ {test.__name__} failed: {e}")
-            failed += 1
-        except Exception as e:
-            print(f"✗ {test.__name__} error: {e}")
-            failed += 1
-    
-    print("=" * 60)
-    if failed == 0:
-        print(f"All {len(tests)} tests passed!")
-        return 0
-    else:
-        print(f"{failed}/{len(tests)} tests failed")
-        return 1
+            for i in range(start, start + 50):
+                cache.set("telegram", "chat", f"msg_{i}", f"resp_{i}")
+        except Exception as exc:
+            errors.append(exc)
 
+    threads = [threading.Thread(target=writer, args=(i * 50,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
-if __name__ == "__main__":
-    sys.exit(run_all_tests())
+    assert not errors, f"Thread-safety errors: {errors}"

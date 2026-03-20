@@ -1,0 +1,26 @@
+[flake8]
+# Match black's line-length default.
+max-line-length = 88
+
+# Codes ignored to keep flake8 compatible with black's formatting choices
+# and to suppress pre-existing style issues that are not functional bugs:
+#   E501  line too long        (covered by max-line-length)
+#   W503  line break before binary operator  (black prefers this)
+#   W504  line break after binary operator
+#   W293  whitespace before a blank line     (pre-existing style issue)
+#   W291  trailing whitespace                (pre-existing style issue)
+#   E126  continuation line over-indented    (black-compatible)
+#   E127  continuation line over-indented for visual indent (black-compatible)
+#   E203  whitespace before ':'           (black slice notation: a[i : j])
+extend-ignore = E501,W503,W504,W293,W291,E126,E127,E128,E203
+
+exclude =
+    __pycache__,
+    .git,
+    migrations,
+    .venv,
+    venv,
+    build,
+    dist,
+    *.egg-info,
+    assets

@@ -303,13 +303,15 @@ async def websocket_chat(websocket: WebSocket):
 
             # Process message
             message_id = str(uuid.uuid4())
+            internal_id = get_internal_id(user_id)
             normalized_input = {
-                "platform": "websocket",
+                "platform": "api",
                 "external_user_id": user_id,
                 "external_chat_id": user_id,
                 "message_id": message_id,
                 "text": message,
                 "timestamp": datetime.datetime.utcnow(),
+                "internal_id": internal_id,
             }
 
             result = await _workflow.process_message(normalized_input)
@@ -397,7 +399,7 @@ async def transcribe_audio_api(
                 total_size += len(chunk)
                 if total_size > MAX_FILE_SIZE:
                     raise HTTPException(
-                        status_code=413, detail=f"File too large. Maximum size is 25MB"
+                        status_code=413, detail="File too large. Maximum size is 25MB"
                     )
                 f.write(chunk)
 
