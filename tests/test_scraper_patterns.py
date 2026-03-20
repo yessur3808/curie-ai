@@ -1,8 +1,37 @@
 """Tests for scraper_patterns module to verify UPSERT behavior."""
 
-import pytest
+import sys
+import os
 from unittest.mock import MagicMock, patch
-from memory.scraper_patterns import ScraperPatternManager
+import pytest
+
+# ---------------------------------------------------------------------------
+# Dependency stubs
+# ---------------------------------------------------------------------------
+# psycopg2 is not installed in the lightweight CI environment; stub it so
+# memory.scraper_patterns can be imported without a real DB driver.
+for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions", "psycopg2.sql"):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
+
+# Likewise for pymongo (transitively needed by memory/__init__.py).
+for _mod in ("pymongo", "pymongo.collection", "pymongo.errors"):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
+
+# ---------------------------------------------------------------------------
+# Memory mock isolation
+# ---------------------------------------------------------------------------
+# Other test modules that load before this one (e.g. test_connectors.py) may
+# have injected a MagicMock for the top-level "memory" package into
+# sys.modules.  That prevents Python from traversing to the real
+# memory.scraper_patterns submodule.  Remove any such stubs and let the real
+# package load (using the db stubs above for the transitive psycopg2 import).
+for _k in [k for k in sys.modules if k == "memory" or k.startswith("memory.")]:
+    del sys.modules[_k]
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from memory.scraper_patterns import ScraperPatternManager  # noqa: E402
 
 
 class TestScraperPatternUpsert:

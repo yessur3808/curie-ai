@@ -80,7 +80,13 @@ jobs:
             python-dotenv \
             pytz \
             fastapi \
-            pydantic
+            pydantic \
+            psycopg2-binary \
+            pymongo \
+            httpx \
+            gitpython \
+            beautifulsoup4 \
+            PyGithub
 
       - name: Run tests
         run: pytest tests/ -v --tb=short

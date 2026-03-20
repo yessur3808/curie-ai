@@ -1,4 +1,29 @@
+import os
 import uuid
+import psycopg2
+from contextlib import contextmanager
+from psycopg2.extras import DictCursor
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
+
+PG_CONN_INFO = {
+    "host": os.getenv("POSTGRES_HOST"),
+    "port": int(os.getenv("POSTGRES_PORT", 5432)),
+    "database": os.getenv("POSTGRES_DB"),
+    "user": os.getenv("POSTGRES_USER"),
+    "password": os.getenv("POSTGRES_PASSWORD"),
+}
+
+
+@contextmanager
+def get_pg_conn():
+    conn = psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
 
 # Allowlist of valid channel names — these map to column identifiers in SQL so
 # we must validate before interpolating to prevent SQL injection.
