@@ -212,12 +212,13 @@ def _filter_facts(existing: dict, new_facts: dict) -> dict:
         if total >= _MAX_FACTS and k not in existing:
             logger.debug("Skipping new fact %r — user profile at max capacity (%d)", k, _MAX_FACTS)
             continue
-        # For list facts, merge rather than overwrite
+        # For list facts, merge rather than overwrite.
+        # Use list() to avoid mutating the existing list in-place.
         if isinstance(v, list) and isinstance(existing.get(k), list):
             existing_set = set(str(x) for x in existing[k])
             new_items = [x for x in v if str(x) not in existing_set]
             if new_items:
-                merged[k] = existing[k] + new_items
+                merged[k] = list(existing[k]) + new_items
         else:
             merged[k] = v
         total += 1

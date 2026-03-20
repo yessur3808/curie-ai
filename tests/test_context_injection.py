@@ -77,6 +77,12 @@ class TestUserContextBlock:
         prompt = _build(wf, {})
         assert "Timezone:" in prompt
 
+    def test_time_source_always_present(self):
+        """The prompt must say where the time came from (system clock / internet-verified)."""
+        wf = _make_workflow()
+        prompt = _build(wf, {})
+        assert "Time source:" in prompt
+
 
 # ---------------------------------------------------------------------------
 # Timezone resolution order

@@ -168,15 +168,15 @@ class ProactiveMessagingService:
                             logger.warning("Unknown platform %r in reminder doc — skipping", platform)
                             continue
 
+                        # _PLATFORM_QUERIES is built from _PLATFORM_TO_COL so if
+                        # platform_col is not None, query is guaranteed to be present.
+                        query = _PLATFORM_QUERIES[platform]
+
                         from memory.database import get_pg_conn  # noqa: PLC0415
                         external_user_id = None
                         try:
                             with get_pg_conn() as conn:
                                 cur = conn.cursor()
-                                query = _PLATFORM_QUERIES.get(platform)
-                                if query is None:
-                                    logger.warning("Unknown platform %r — cannot look up external_user_id", platform)
-                                    continue
                                 cur.execute(query, (str(internal_id),))
                                 row = cur.fetchone()
                                 if row:

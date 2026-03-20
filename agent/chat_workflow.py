@@ -645,11 +645,18 @@ class ChatWorkflow:
         )
         try:
             tz = pytz.timezone(user_tz)
-            now = datetime.now(tz)
         except (pytz.UnknownTimeZoneError, pytz.AmbiguousTimeError):
             tz = pytz.UTC
-            now = datetime.now(pytz.UTC)
             user_tz = "UTC"
+
+        # Get current time from system clock (with background internet verification)
+        try:
+            from utils.system_time import get_verified_now, get_time_source_label
+            now = get_verified_now(tz=tz)
+            time_source = get_time_source_label()
+        except Exception:
+            now = datetime.now(tz)
+            time_source = "system clock"
 
         # Resolve location: prefer learned profile → operator default → unknown
         user_location = (
@@ -694,6 +701,7 @@ class ChatWorkflow:
             lines.append(f"- Current date: {now.strftime('%A, %B %d, %Y')}")
             lines.append(f"- Current time: {now.strftime('%I:%M %p %Z')}")
             lines.append(f"- Timezone: {user_tz}")
+            lines.append(f"- Time source: {time_source}")
             if user_location:
                 lines.append(f"- Location: {user_location}")
 
