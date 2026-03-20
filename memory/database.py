@@ -4,6 +4,7 @@ from psycopg2 import OperationalError, DatabaseError, Error
 from pymongo import MongoClient, errors as mongo_errors
 import logging
 import threading
+from contextlib import contextmanager
 from .config import PG_CONN_INFO, MONGODB_URI, MONGODB_DB
 
 logger = logging.getLogger(__name__)
@@ -18,15 +19,29 @@ _postgres_available = True
 def is_postgres_available() -> bool:
     return _postgres_available
 
+@contextmanager
 def get_pg_conn():
+    """Context manager that yields a psycopg2 connection and always closes it on exit.
+
+    Previously the callers used ``with get_pg_conn() as conn:`` relying on
+    psycopg2's built-in connection context manager, which only commits or
+    rolls back the transaction but never calls ``conn.close()``.  Every call
+    therefore leaked an open connection and would eventually exhaust the
+    database server's connection pool.  This context manager wraps the
+    connection in a ``try/finally`` block so the connection is guaranteed to be
+    closed regardless of whether the body raised an exception.
+    """
     if not _postgres_available:
         raise RuntimeError("Postgres is disabled due to startup connection failure")
     try:
         conn = psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
-        return conn
     except OperationalError as e:
         logger.error(f"Failed to connect to Postgres: {e}")
         raise RuntimeError(f"Failed to connect to Postgres: {e}") from e
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 def _init_mongo_connection():
     """Initialize MongoDB connection. Called lazily on first access. Thread-safe."""
@@ -83,6 +98,8 @@ def init_pg():
                             slack_id TEXT,
                             whatsapp_id TEXT,
                             signal_id TEXT,
+                            discord_id TEXT,
+                            api_id TEXT,
                             phone_number TEXT,
                             email TEXT,
                             secret_username TEXT NOT NULL,
@@ -92,6 +109,12 @@ def init_pg():
                             updated_at TIMESTAMPTZ DEFAULT now(),
                             updated_by TEXT NOT NULL
                         );
+                    """)
+                    # Migrate pre-existing tables that were created before discord_id/api_id
+                    # were added to the schema.  ADD COLUMN IF NOT EXISTS is idempotent.
+                    cur.execute("""
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_id TEXT;
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS api_id TEXT;
                     """)
                     cur.execute("""
                         CREATE TABLE IF NOT EXISTS conversation_memory (
