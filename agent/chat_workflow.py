@@ -256,6 +256,7 @@ class ChatWorkflow:
         self.persona = persona or self._load_default_persona()
         self.max_history = max_history
         self.enable_small_talk = enable_small_talk
+        self.idle_threshold_minutes = idle_threshold_minutes
         self.minimal_sanitization = minimal_sanitization
 
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
