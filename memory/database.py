@@ -101,7 +101,7 @@ def init_pg():
                             discord_id   TEXT[],
                             api_id       TEXT[],
                             phone_number TEXT,
-                            email TEXT,
+                            email        TEXT[],
                             secret_username TEXT NOT NULL,
                             is_master BOOLEAN NOT NULL DEFAULT FALSE,
                             roles TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -178,6 +178,17 @@ def init_pg():
                                         ALTER COLUMN api_id TYPE TEXT[]
                                             USING CASE WHEN api_id IS NULL THEN NULL ELSE ARRAY[api_id] END;
                                 END IF;
+                            END IF;
+
+                            -- email: convert TEXT→TEXT[] if still scalar so a user can
+                            -- have multiple email addresses registered.
+                            SELECT data_type INTO col_type
+                            FROM information_schema.columns
+                            WHERE table_name = 'users' AND column_name = 'email';
+                            IF col_type = 'text' THEN
+                                ALTER TABLE users
+                                    ALTER COLUMN email TYPE TEXT[]
+                                        USING CASE WHEN email IS NULL THEN NULL ELSE ARRAY[email] END;
                             END IF;
                         END $$;
                     """)

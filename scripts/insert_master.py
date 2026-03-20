@@ -77,7 +77,7 @@ def get_or_create_user_id(channel, external_id, name=None, email=None, is_master
         if email:
             fields.append("email")
             values.append(email)
-            placeholders.append("%s")
+            placeholders.append("ARRAY[%s]::TEXT[]")
 
         sql = f"""
             INSERT INTO users ({', '.join(fields)}) 

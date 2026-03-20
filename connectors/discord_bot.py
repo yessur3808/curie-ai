@@ -317,6 +317,10 @@ if commands is not None:
         async def clear_memory_command(ctx):
             """Clear conversation memory (master users only)."""
             discord_user_id = ctx.author.id
+            # Discord migrated to a new username system where users no longer
+            # have a 4-digit discriminator suffix (#1234).  Users on the new
+            # system report discriminator as "0", so we use just their name.
+            # Users still on the legacy system are identified as "name#1234".
             if ctx.author.discriminator == "0":
                 discord_username = ctx.author.name
             else:

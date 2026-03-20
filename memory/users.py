@@ -118,6 +118,35 @@ class UserManager:
             conn.commit()
 
     @staticmethod
+    def add_email(internal_id: str, email: str) -> None:
+        """Append *email* to the ``email TEXT[]`` column for this user.
+
+        Idempotent — if the address is already present the column is left
+        unchanged.  If the column is currently NULL it is initialised to a
+        single-element array.
+        """
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """UPDATE users
+                   SET email = CASE
+                       WHEN email IS NULL       THEN ARRAY[%s]::TEXT[]
+                       WHEN %s = ANY(email)     THEN email
+                       ELSE array_append(email, %s)
+                   END,
+                   updated_at = %s
+                   WHERE internal_id = %s""",
+                (
+                    str(email),
+                    str(email),
+                    str(email),
+                    datetime.utcnow(),
+                    str(internal_id),
+                )
+            )
+            conn.commit()
+
+    @staticmethod
     def get_user_profile(internal_id):
         """Returns the 'facts' dict for this user, or an empty dict if not found."""
         doc = mongo_db.user_profiles.find_one({"_id": str(internal_id)})
