@@ -4,6 +4,19 @@ import uuid
 from datetime import datetime
 from .database import get_pg_conn, mongo_db
 
+# Allowlist of valid channel/platform names.
+# Channel names are interpolated into SQL column identifiers, so we must
+# validate them against a fixed set to prevent SQL injection.
+_ALLOWED_CHANNELS = frozenset(["telegram", "slack", "whatsapp", "signal", "discord", "api"])
+
+
+def _validate_channel(channel: str) -> None:
+    if channel not in _ALLOWED_CHANNELS:
+        raise ValueError(
+            f"Unknown channel {channel!r}. Must be one of: {sorted(_ALLOWED_CHANNELS)}"
+        )
+
+
 class UserManager:
     @staticmethod
     def get_internal_id_by_secret_username(secret_username):
@@ -18,12 +31,22 @@ class UserManager:
     def get_or_create_user_internal_id(channel, external_id, secret_username=None, updated_by=None, is_master=False, roles=None):
         """
         Look up or create a user based on external channel ID.
+
+        The platform ID columns are TEXT[], so a single user can have multiple
+        IDs on the same platform.  Lookups use ``= ANY(field)`` and inserts
+        wrap the value in ``ARRAY[...]::TEXT[]``.
+
         If creating, must supply secret_username and updated_by.
         """
+        _validate_channel(channel)
         with get_pg_conn() as conn:
             cur = conn.cursor()
             field = f"{channel}_id"
-            cur.execute(f"SELECT internal_id FROM users WHERE {field} = %s", (str(external_id),))
+            # TEXT[] column — use ANY() for membership lookup
+            cur.execute(
+                f"SELECT internal_id FROM users WHERE %s = ANY({field})",
+                (str(external_id),),
+            )
             row = cur.fetchone()
             if row:
                 return str(row['internal_id'])
@@ -33,7 +56,7 @@ class UserManager:
             new_uuid = str(uuid.uuid4())
             cur.execute(
                 f"""INSERT INTO users (internal_id, {field}, secret_username, updated_by, is_master, roles)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    VALUES (%s, ARRAY[%s]::TEXT[], %s, %s, %s, %s)
                     RETURNING internal_id""",
                 (
                     new_uuid,
@@ -45,7 +68,7 @@ class UserManager:
                 )
             )
             conn.commit()
-            
+
             # Initialize user profile in MongoDB with proactive messaging enabled by default
             # Master users and all new users get proactive messaging enabled
             default_profile = {
@@ -60,8 +83,39 @@ class UserManager:
                 },
                 upsert=True
             )
-            
+
             return new_uuid
+
+    @staticmethod
+    def add_platform_id(internal_id: str, channel: str, external_id: str) -> None:
+        """Append *external_id* to the TEXT[] id column for *channel*.
+
+        Idempotent — if the ID is already present in the array the column is
+        left unchanged.  If the column is currently NULL it is initialised to a
+        single-element array.
+        """
+        _validate_channel(channel)
+        field = f"{channel}_id"
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"""UPDATE users
+                    SET {field} = CASE
+                        WHEN {field} IS NULL         THEN ARRAY[%s]::TEXT[]
+                        WHEN %s = ANY({field})        THEN {field}
+                        ELSE array_append({field}, %s)
+                    END,
+                    updated_at = %s
+                    WHERE internal_id = %s""",
+                (
+                    str(external_id),
+                    str(external_id),
+                    str(external_id),
+                    datetime.utcnow(),
+                    str(internal_id),
+                )
+            )
+            conn.commit()
 
     @staticmethod
     def get_user_profile(internal_id):
@@ -88,7 +142,7 @@ class UserManager:
             },
             upsert=True
         )
-        
+
     @staticmethod
     def set_user_roles(internal_id, roles, updated_by):
         with get_pg_conn() as conn:
@@ -108,7 +162,7 @@ class UserManager:
                 (is_master, datetime.utcnow(), updated_by, str(internal_id))
             )
             conn.commit()
-            
+
     @staticmethod
     def get_user_by_internal_id(internal_id):
         with get_pg_conn() as conn:

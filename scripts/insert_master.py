@@ -2,6 +2,7 @@ import uuid
 import psycopg2
 import os
 import argparse
+from contextlib import contextmanager
 from psycopg2.extras import DictCursor
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
@@ -14,8 +15,13 @@ PG_CONN_INFO = {
     "password": os.getenv("POSTGRES_PASSWORD"),
 }
 
+@contextmanager
 def get_pg_conn():
-    return psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
+    conn = psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 def get_or_create_user_id(channel, external_id, name=None, email=None, is_master=False, internal_id=None, secret_username=None):
     if not secret_username:
@@ -24,9 +30,9 @@ def get_or_create_user_id(channel, external_id, name=None, email=None, is_master
     with get_pg_conn() as conn:
         cur = conn.cursor()
         field = f"{channel}_id"
-        
-        # Check if user exists
-        cur.execute(f"SELECT internal_id FROM users WHERE {field} = %s", (str(external_id),))
+
+        # Platform ID columns are TEXT[]; use ANY() for the lookup
+        cur.execute(f"SELECT internal_id FROM users WHERE %s = ANY({field})", (str(external_id),))
         row = cur.fetchone()
         if row:
             # Update the updated_at timestamp and updated_by
@@ -46,24 +52,26 @@ def get_or_create_user_id(channel, external_id, name=None, email=None, is_master
 
         # Build insert statement with all required fields
         fields = [
-            "internal_id", 
-            field, 
-            "is_master", 
-            "secret_username", 
+            "internal_id",
+            field,
+            "is_master",
+            "secret_username",
             "roles",
             "updated_by",
-            "updated_at"  # Added this field
+            "updated_at"
         ]
+        # Platform ID column is TEXT[]; wrap the value in an ARRAY literal
         values = [
-            new_uuid, 
-            str(external_id), 
-            is_master, 
+            new_uuid,
+            str(external_id),
+            is_master,
             secret_username,
             ["master"] if is_master else [],
             "master",
-            'CURRENT_TIMESTAMP'  # Added this value
         ]
-        placeholders = ["%s"] * (len(fields) - 1) + ["CURRENT_TIMESTAMP"]  # Special handling for timestamp
+        # Placeholders: ARRAY[%s]::TEXT[] for the id column, %s for the rest,
+        # CURRENT_TIMESTAMP for updated_at
+        placeholders = ["%s", "ARRAY[%s]::TEXT[]"] + ["%s"] * 4 + ["CURRENT_TIMESTAMP"]
 
         # Add optional fields if provided
         if email:
@@ -76,7 +84,7 @@ def get_or_create_user_id(channel, external_id, name=None, email=None, is_master
             VALUES ({', '.join(placeholders)})
             RETURNING internal_id
         """
-        cur.execute(sql, tuple(values[:-1]))  # Exclude the CURRENT_TIMESTAMP from values
+        cur.execute(sql, tuple(values))
         conn.commit()
         new_row = cur.fetchone()
         return str(new_row['internal_id'])

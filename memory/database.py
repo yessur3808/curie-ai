@@ -94,12 +94,12 @@ def init_pg():
                         CREATE TABLE IF NOT EXISTS users (
                             id SERIAL PRIMARY KEY,
                             internal_id UUID UNIQUE DEFAULT gen_random_uuid(),
-                            telegram_id TEXT,
-                            slack_id TEXT,
-                            whatsapp_id TEXT,
-                            signal_id TEXT,
-                            discord_id TEXT,
-                            api_id TEXT,
+                            telegram_id  TEXT[],
+                            slack_id     TEXT[],
+                            whatsapp_id  TEXT[],
+                            signal_id    TEXT[],
+                            discord_id   TEXT[],
+                            api_id       TEXT[],
                             phone_number TEXT,
                             email TEXT,
                             secret_username TEXT NOT NULL,
@@ -110,11 +110,76 @@ def init_pg():
                             updated_by TEXT NOT NULL
                         );
                     """)
-                    # Migrate pre-existing tables that were created before discord_id/api_id
-                    # were added to the schema.  ADD COLUMN IF NOT EXISTS is idempotent.
+                    # Idempotent migration for deployments that pre-date the TEXT[] schema:
+                    #
+                    # 1. For columns that already existed as TEXT, convert each value to a
+                    #    single-element TEXT[] (NULL stays NULL).
+                    # 2. For columns that did not yet exist (discord_id, api_id), add them
+                    #    as TEXT[].
+                    # 3. For columns that are already TEXT[], do nothing.
+                    #
+                    # All checks are inside a single DO $$ ... $$ block so the whole
+                    # migration is one round-trip and is safe to re-run on every startup.
                     cur.execute("""
-                        ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_id TEXT;
-                        ALTER TABLE users ADD COLUMN IF NOT EXISTS api_id TEXT;
+                        DO $$
+                        DECLARE
+                            col_type TEXT;
+                        BEGIN
+                            -- telegram_id, slack_id, whatsapp_id, signal_id were TEXT
+                            -- in older deployments; convert to TEXT[] if necessary.
+                            FOR col_type IN
+                                SELECT data_type
+                                FROM information_schema.columns
+                                WHERE table_name = 'users'
+                                  AND column_name = 'telegram_id'
+                            LOOP
+                                IF col_type = 'text' THEN
+                                    ALTER TABLE users
+                                        ALTER COLUMN telegram_id  TYPE TEXT[]
+                                            USING CASE WHEN telegram_id  IS NULL THEN NULL ELSE ARRAY[telegram_id]  END,
+                                        ALTER COLUMN slack_id     TYPE TEXT[]
+                                            USING CASE WHEN slack_id     IS NULL THEN NULL ELSE ARRAY[slack_id]     END,
+                                        ALTER COLUMN whatsapp_id  TYPE TEXT[]
+                                            USING CASE WHEN whatsapp_id  IS NULL THEN NULL ELSE ARRAY[whatsapp_id]  END,
+                                        ALTER COLUMN signal_id    TYPE TEXT[]
+                                            USING CASE WHEN signal_id    IS NULL THEN NULL ELSE ARRAY[signal_id]    END;
+                                END IF;
+                            END LOOP;
+
+                            -- discord_id: add as TEXT[] if missing, convert TEXT→TEXT[] if needed.
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'discord_id'
+                            ) THEN
+                                ALTER TABLE users ADD COLUMN discord_id TEXT[];
+                            ELSE
+                                SELECT data_type INTO col_type
+                                FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'discord_id';
+                                IF col_type = 'text' THEN
+                                    ALTER TABLE users
+                                        ALTER COLUMN discord_id TYPE TEXT[]
+                                            USING CASE WHEN discord_id IS NULL THEN NULL ELSE ARRAY[discord_id] END;
+                                END IF;
+                            END IF;
+
+                            -- api_id: add as TEXT[] if missing, convert TEXT→TEXT[] if needed.
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'api_id'
+                            ) THEN
+                                ALTER TABLE users ADD COLUMN api_id TEXT[];
+                            ELSE
+                                SELECT data_type INTO col_type
+                                FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'api_id';
+                                IF col_type = 'text' THEN
+                                    ALTER TABLE users
+                                        ALTER COLUMN api_id TYPE TEXT[]
+                                            USING CASE WHEN api_id IS NULL THEN NULL ELSE ARRAY[api_id] END;
+                                END IF;
+                            END IF;
+                        END $$;
                     """)
                     cur.execute("""
                         CREATE TABLE IF NOT EXISTS conversation_memory (

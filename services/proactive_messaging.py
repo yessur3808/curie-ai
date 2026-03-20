@@ -176,25 +176,37 @@ class ProactiveMessagingService:
                         query = _PLATFORM_QUERIES[platform]
 
                         from memory.database import get_pg_conn  # noqa: PLC0415
-                        external_user_id = None
+                        external_user_ids = []
                         try:
                             with get_pg_conn() as conn:
                                 cur = conn.cursor()
                                 cur.execute(query, (str(internal_id),))
                                 row = cur.fetchone()
                                 if row:
-                                    external_user_id = row[platform_col]
+                                    # Platform ID columns are TEXT[]; coerce to list
+                                    # and filter out None/empty entries.
+                                    raw = row[platform_col]
+                                    if isinstance(raw, list):
+                                        external_user_ids = [uid for uid in raw if uid]
+                                    elif raw:
+                                        external_user_ids = [raw]
                         except Exception as db_err:
                             logger.warning("Could not look up external_user_id for reminder: %s", db_err)
 
-                        if external_user_id:
-                            delivered = await self._send_via_connector(connector, external_user_id, reminder_msg)
-                            if not delivered:
-                                logger.warning(
-                                    "Delivery failed for reminder %s (internal_id=%s, platform=%s) — will retry",
-                                    doc["_id"], internal_id, platform,
-                                )
+                        if external_user_ids:
+                            # Deliver to every registered ID for this platform so the
+                            # user receives the reminder on all their linked accounts.
+                            delivered = False
+                            for ext_uid in external_user_ids:
+                                if await self._send_via_connector(connector, ext_uid, reminder_msg):
+                                    delivered = True
+                                else:
+                                    logger.warning(
+                                        "Delivery failed for reminder %s to uid=%s (internal_id=%s, platform=%s)",
+                                        doc["_id"], ext_uid, internal_id, platform,
+                                    )
                         else:
+                            delivered = False
                             logger.warning(
                                 "No external_user_id for internal_id=%s on platform=%s — reminder not delivered",
                                 internal_id,
@@ -294,24 +306,28 @@ class ProactiveMessagingService:
                         if not user_row:
                             logger.warning(f"User {internal_id} found in MongoDB but not in PostgreSQL")
                             continue
-                        
-                        # Determine which platform this user uses
+
+                        # Determine which platform this user uses.
+                        # Platform ID columns are TEXT[]; pick the first registered ID.
                         platform = None
                         external_user_id = None
-                        
-                        if user_row.get('telegram_id'):
-                            platform = 'telegram'
-                            external_user_id = user_row['telegram_id']
-                        elif user_row.get('discord_id'):
-                            platform = 'discord'
-                            external_user_id = user_row['discord_id']
-                        elif user_row.get('whatsapp_id'):
-                            platform = 'whatsapp'
-                            external_user_id = user_row['whatsapp_id']
-                        elif user_row.get('api_id'):
-                            platform = 'api'
-                            external_user_id = user_row['api_id']
-                        
+
+                        for _platform, _col in [
+                            ("telegram",  "telegram_id"),
+                            ("discord",   "discord_id"),
+                            ("whatsapp",  "whatsapp_id"),
+                            ("api",       "api_id"),
+                        ]:
+                            ids = user_row.get(_col) or []
+                            # ids is TEXT[] from Postgres, coerce scalar fallback
+                            if not isinstance(ids, list):
+                                ids = [ids] if ids else []
+                            first_id = next((uid for uid in ids if uid), None)
+                            if first_id:
+                                platform = _platform
+                                external_user_id = first_id
+                                break
+
                         if not platform or not external_user_id:
                             logger.warning(f"User {internal_id} has no platform ID")
                             continue
