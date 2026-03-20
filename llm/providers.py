@@ -107,7 +107,12 @@ def get_active_providers() -> list[str]:
 # Cloud provider helpers
 # ---------------------------------------------------------------------------
 
-def _call_openai(prompt: str, temperature: float, max_tokens: int) -> Optional[str]:
+# Default max_tokens for cloud APIs when caller does not specify a limit.
+# Anthropic requires the field; OpenAI/Gemini omit it when None to use model defaults.
+_CLOUD_DEFAULT_MAX_TOKENS = 4096
+
+
+def _call_openai(prompt: str, temperature: float, max_tokens: Optional[int]) -> Optional[str]:
     """Call OpenAI Chat Completions API."""
     try:
         import openai  # type: ignore
@@ -119,12 +124,14 @@ def _call_openai(prompt: str, temperature: float, max_tokens: int) -> Optional[s
     model = _env("OPENAI_MODEL", "gpt-3.5-turbo")
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        kwargs: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        response = client.chat.completions.create(**kwargs)
         text = response.choices[0].message.content or ""
         logger.debug("OpenAI response received (model=%s, tokens=%s)", model,
                      getattr(response.usage, "total_tokens", "?"))
@@ -134,8 +141,12 @@ def _call_openai(prompt: str, temperature: float, max_tokens: int) -> Optional[s
         return None
 
 
-def _call_anthropic(prompt: str, temperature: float, max_tokens: int) -> Optional[str]:
-    """Call Anthropic Messages API."""
+def _call_anthropic(prompt: str, temperature: float, max_tokens: Optional[int]) -> Optional[str]:
+    """Call Anthropic Messages API.
+
+    Anthropic requires ``max_tokens`` to be set; defaults to
+    ``_CLOUD_DEFAULT_MAX_TOKENS`` when the caller passes ``None``.
+    """
     try:
         import anthropic  # type: ignore
     except ImportError:
@@ -148,7 +159,7 @@ def _call_anthropic(prompt: str, temperature: float, max_tokens: int) -> Optiona
     try:
         message = client.messages.create(
             model=model,
-            max_tokens=max_tokens,
+            max_tokens=max_tokens if max_tokens is not None else _CLOUD_DEFAULT_MAX_TOKENS,
             temperature=temperature,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -160,7 +171,7 @@ def _call_anthropic(prompt: str, temperature: float, max_tokens: int) -> Optiona
         return None
 
 
-def _call_gemini(prompt: str, temperature: float, max_tokens: int) -> Optional[str]:
+def _call_gemini(prompt: str, temperature: float, max_tokens: Optional[int]) -> Optional[str]:
     """Call Google Gemini GenerateContent API."""
     try:
         import google.generativeai as genai  # type: ignore
@@ -173,10 +184,10 @@ def _call_gemini(prompt: str, temperature: float, max_tokens: int) -> Optional[s
 
     try:
         model = genai.GenerativeModel(model_name)
-        gen_config = genai.types.GenerationConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        )
+        gen_config_kwargs: dict = {"temperature": temperature}
+        if max_tokens is not None:
+            gen_config_kwargs["max_output_tokens"] = max_tokens
+        gen_config = genai.types.GenerationConfig(**gen_config_kwargs)
         response = model.generate_content(prompt, generation_config=gen_config)
         text = response.text if hasattr(response, "text") else ""
         logger.debug("Gemini response received (model=%s)", model_name)
@@ -193,32 +204,87 @@ CLOUD_CALLERS = {
 }
 
 # ---------------------------------------------------------------------------
-# Query complexity heuristic
+# Semantic query complexity classification (no word-count thresholds)
 # ---------------------------------------------------------------------------
+#
+# How routing works
+# -----------------
+# When both cloud and local providers are active, the cost-saving heuristic
+# routes *trivially simple* queries (greetings, one-word pleasantries) to the
+# local model first so they never consume cloud API quota.  Everything else —
+# especially any task that mentions planning, scheduling, coding, analysis, etc.
+# — follows the configured LLM_PROVIDER_PRIORITY order unchanged.
+#
+# This classification is PURELY SEMANTIC:  no word-count thresholds are used.
+# A 3-word greeting like "hi how are you" is simple; a 3-word task like
+# "plan a trip" is complex and always follows priority order.
 
-_SIMPLE_QUERY_MAX_WORDS = 30
-_SIMPLE_KEYWORDS = re.compile(
-    r"\b(hi|hello|hey|thanks|thank you|bye|good morning|good night|what time|what day|"
-    r"how are you|who are you|your name|weather|date)\b",
+# Exact full-string patterns for definitively trivial queries.
+# Uses re.FULLMATCH so "hi, plan my trip" is NOT matched as simple.
+# The `+` quantifier on greeting words allows elongated spellings uniformly
+# (hiii, hellooo, heyyyy) — applied to the last letter of each word.
+_SIMPLE_PATTERNS = re.compile(
+    r"hi+[!. ]*"
+    r"|hell[o]+[!. ]*"
+    r"|he[y]+[!. ]*"
+    r"|howdy[!. ]*"
+    r"|good\s+(?:morning|afternoon|evening|night)[!. ]*"
+    r"|how\s+are\s+you[\?!. ]*"
+    r"|how(?:'s|\s+is)\s+it\s+going[\?!. ]*"
+    r"|who\s+are\s+you[\?!. ]*"
+    r"|what(?:'s|\s+is)\s+your\s+name[\?!. ]*"
+    r"|thank(?:s|\s+you)(?:\s+(?:a\s+lot|so\s+much|very\s+much))?[!. ]*"
+    r"|by[e]+(?:[\s\-]bye)?[!. ]*"
+    r"|goodbye[!. ]*"
+    r"|ok(?:ay)?[!. ]*"
+    r"|what(?:'s|\s+is)\s+(?:the\s+)?(?:time|date|day)(?:\s+(?:today|now))?[\?!. ]*"
+    r"|what(?:'s|\s+is)\s+(?:the\s+)?weather(?:\s+(?:today|now|like))?[\?!. ]*",
+    re.IGNORECASE,
+)
+
+# Keywords that flag a COMPLEX task — queries matching any of these always
+# follow the configured priority order (never moved to local-first).
+_COMPLEX_PATTERNS = re.compile(
+    r"\b(?:"
+    # Planning & scheduling
+    r"plan|planning|schedule|calendar|agenda|appointment|meeting|event|"
+    r"remind|reminder|alarm|alert|"
+    # Travel
+    r"trip|vacation|holiday|travel|visit|journey|tour|itinerary|getaway|"
+    r"flight|hotel|booking|pack|packing|destination|"
+    # Technical / coding
+    r"code|program|debug|script|function|implement|algorithm|class|"
+    r"fix|error|bug|develop|build|deploy|"
+    # Analysis / writing
+    r"analy[sz]e|research|compare|evaluate|review|assess|"
+    r"write|generate|create|draft|compose|design|"
+    # Information / conversion
+    r"translate|summariz[ei]|convert|calculate|compute|"
+    # Navigation
+    r"navigate|directions?|route|distance|"
+    # Recommendations
+    r"recommend|suggest|advic[ei]|advise|"
+    # Finance / forecasting
+    r"budget|invest|forecast|predict|estimate"
+    r")\b",
     re.IGNORECASE,
 )
 
 
 def _is_simple_query(prompt: str) -> bool:
-    """Return True if the query is short *and* matches simple greeting/short-answer patterns.
+    """Return True if the prompt is a trivially simple greeting or pleasantry.
 
-    Keyword matching is intentionally restricted to prompts that are themselves
-    short (≤ _SIMPLE_QUERY_MAX_WORDS words).  A long skill prompt that happens to
-    mention "weather" or "date" (e.g. a detailed trip-planning prompt) must NOT be
-    misclassified as simple — doing so would route it to the local model even when
-    a cloud provider is configured with higher priority.
+    Classification is **purely semantic** — no word-count threshold is applied.
+    A 3-word task request like "plan a trip" returns False immediately because
+    it matches ``_COMPLEX_PATTERNS``.  Only exact, short-answer phrases (greetings,
+    "what's the time?", etc.) that fully match ``_SIMPLE_PATTERNS`` return True.
     """
-    words = prompt.split()
-    if len(words) > _SIMPLE_QUERY_MAX_WORDS:
-        # Long prompts are always considered complex regardless of keywords.
+    stripped = prompt.strip()
+    # Complex task keywords always take priority — never considered simple.
+    if _COMPLEX_PATTERNS.search(stripped):
         return False
-    # For short prompts, accept either the keyword match or the word-count heuristic.
-    return bool(_SIMPLE_KEYWORDS.search(prompt))
+    # Check for full-string trivial greeting/simple-question patterns.
+    return bool(_SIMPLE_PATTERNS.fullmatch(stripped))
 
 
 # ---------------------------------------------------------------------------
@@ -228,17 +294,42 @@ def _is_simple_query(prompt: str) -> bool:
 def ask_best_provider(
     prompt: str,
     temperature: float = 0.7,
-    max_tokens: int = 512,
+    max_tokens: Optional[int] = None,
     force_provider: Optional[str] = None,
 ) -> Optional[str]:
     """
     Query the highest-priority available LLM provider.
 
-    When ``LLM_CLOUD_SIMPLE_TASKS`` is ``false`` (the default) and only cloud
-    providers are active, simple queries are routed to the local llama.cpp
-    model (if available) to reduce API costs.
+    How it works
+    ------------
+    **With multiple providers configured** (e.g. ``LLM_PROVIDER_PRIORITY=anthropic,llama.cpp``):
 
-    Returns the response string, or ``None`` if all providers fail.
+    * Cloud providers (OpenAI, Anthropic, Gemini) are tried in priority order.
+    * If ``LLM_CLOUD_SIMPLE_TASKS=false`` (default), trivially simple queries
+      (greetings, "what time is it?") are sent to the local model first to save
+      cloud API costs.  Complex tasks (planning, coding, scheduling, …) always
+      follow the configured priority and are never silently downgraded to local.
+    * If the highest-priority provider fails or its API key is missing, the next
+      one in the list is tried automatically.
+
+    **Local-only** (``LLM_PROVIDER_PRIORITY=llama.cpp``, default):
+
+    * Only llama.cpp is active.  The routing and cost-saving logic is skipped.
+    * All tasks — including trip planning, reminders, and general chat — are
+      handled by the local model.  Skills automatically select compact, efficient
+      prompts and use all available context-window space for the response.
+
+    Token budget
+    ------------
+    When ``max_tokens`` is ``None`` (the default), cloud APIs use their own
+    model defaults (generous), and the local llama.cpp manager computes the
+    maximum safe token count from the actual prompt length and context window —
+    so responses are never artificially truncated.
+
+    Returns
+    -------
+    str | None
+        The response text, or ``None`` if all providers fail.
     """
     use_cloud_for_simple = _env("LLM_CLOUD_SIMPLE_TASKS", "false").lower() == "true"
 
@@ -250,7 +341,8 @@ def ask_best_provider(
             logger.error("No LLM providers available; check API keys and installed packages")
             return None
 
-        # Route simple queries to local model first to save API costs
+        # Route trivially simple queries to local model first to save API costs.
+        # Complex tasks (planning, scheduling, coding, etc.) are never downgraded.
         if not use_cloud_for_simple and _is_simple_query(prompt):
             if "llama.cpp" in providers_to_try:
                 providers_to_try = ["llama.cpp"] + [p for p in providers_to_try if p != "llama.cpp"]
@@ -263,7 +355,8 @@ def ask_best_provider(
             if result is not None:
                 return result
         elif provider == "llama.cpp":
-            # Delegate to the existing local manager (avoids duplicating logic)
+            # Delegate to the local manager.  Passing max_tokens=None lets the
+            # manager compute all available context-window space dynamically.
             try:
                 from llm import manager as _local_manager
                 result = _local_manager.ask_llm(
@@ -291,11 +384,11 @@ def provider_status() -> dict:
 def is_local_only() -> bool:
     """Return True when the only active provider is llama.cpp (no cloud keys set).
 
-    Skills can use this to choose between verbose cloud-optimised prompts and
+    Skills use this to choose between verbose cloud-optimised prompts and
     compact prompts that fit inside a typical local model's context window.
     """
     active = get_active_providers()
-    return active == ["llama.cpp"] or (len(active) == 1 and "llama.cpp" in active)
+    return len(active) == 1 and active[0] == "llama.cpp"
 
 
 # Rough token-per-word approximation; used when the model is not yet loaded.
@@ -304,23 +397,25 @@ _AVG_TOKENS_PER_WORD = 1.3
 _PROMPT_TOKEN_BUFFER = 32
 
 
-def compute_response_budget(prompt: str, max_cap: int = 512) -> int:
-    """Estimate a safe ``max_tokens`` value for a response to *prompt*.
+def compute_response_budget(prompt: str, max_cap: Optional[int] = None) -> int:
+    """Estimate the available token budget for a response to *prompt*.
 
     Uses a lightweight word-count heuristic so the model does not need to be
-    loaded at call time.  The result is capped at *max_cap* and floored at 64
-    so the model always has room to produce a meaningful reply.
+    loaded at call time.  The result is floored at 64 so the model always has
+    room to produce a meaningful reply.
 
-    This avoids the common problem of hardcoding ``max_tokens=512`` when the
-    prompt already occupies most of the context window.
+    When *max_cap* is ``None`` the full available context window is returned
+    (minus the estimated prompt size and a safety buffer), giving the model
+    maximum space to produce a complete response.
 
     Parameters
     ----------
     prompt:
         The full prompt that will be sent to the LLM.
     max_cap:
-        Upper bound on the returned value.  Caller should set this to the
-        maximum response length they want even when the context window is large.
+        Optional upper bound.  Pass an integer to constrain the response length
+        (e.g. for summarisation tasks).  Pass ``None`` (default) for no cap —
+        the model uses all available space.
 
     Returns
     -------
@@ -334,5 +429,7 @@ def compute_response_budget(prompt: str, max_cap: int = 512) -> int:
         context_size = 2048  # conservative fallback
 
     estimated_prompt_tokens = int(len(prompt.split()) * _AVG_TOKENS_PER_WORD)
-    available = context_size - estimated_prompt_tokens - _PROMPT_TOKEN_BUFFER
-    return max(64, min(max_cap, available))
+    available = max(64, context_size - estimated_prompt_tokens - _PROMPT_TOKEN_BUFFER)
+    if max_cap is not None:
+        available = min(available, max_cap)
+    return available

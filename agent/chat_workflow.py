@@ -38,6 +38,58 @@ logger = logging.getLogger(__name__)
 # the main event-loop thread pool used for DB I/O.
 _LEARNING_EXECUTOR = _ThreadPoolExecutor(max_workers=2, thread_name_prefix="curie-learning")
 
+# Maximum number of lines a single history message is truncated to when building prompts.
+_SUMMARY_CONTENT_MAX_LENGTH = 200
+
+
+def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> dict:
+    """Return the most query-relevant facts from *user_profile*.
+
+    This is a lightweight keyword-overlap information retrieval step — a form
+    of Retrieval-Augmented Generation (RAG) that works without embeddings or
+    vector databases.  Instead of injecting the entire user profile into every
+    prompt (which wastes context-window space), only the facts most likely to
+    be useful for the current message are included.
+
+    Algorithm
+    ---------
+    1. Tokenise the query into a set of lowercase words.
+    2. Score each fact by the number of words it shares with the query.
+    3. Always include a small set of critical identity facts (name, timezone,
+       language, location) regardless of their overlap score.
+    4. Return the union of critical facts + top-N scored facts.
+
+    Parameters
+    ----------
+    user_profile:  Full dict of learned user facts.
+    query:         The user's current message.
+    top_n:         Maximum number of scored (non-critical) facts to include.
+    """
+    if not user_profile:
+        return {}
+
+    # Facts that are always injected — they provide essential context for every reply.
+    _CRITICAL_KEYS = frozenset({"name", "timezone", "language", "location", "preferred_name"})
+    critical = {k: v for k, v in user_profile.items() if k in _CRITICAL_KEYS}
+
+    # Score remaining facts by keyword overlap with the query
+    query_words = set(query.lower().split())
+    scored = []
+    for k, v in user_profile.items():
+        if k in _CRITICAL_KEYS:
+            continue
+        fact_text = f"{k} {v}".lower()
+        score = sum(1 for w in query_words if w in fact_text)
+        scored.append((score, k, v))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_facts = {k: v for score, k, v in scored[:top_n] if score > 0}
+    # If no facts overlap with the query, fall back to the top_n most recently scored
+    if not top_facts:
+        top_facts = {k: v for _, k, v in scored[:top_n]}
+
+    return {**critical, **top_facts}
+
 
 class MessageDedupeCache:
     """
@@ -396,19 +448,20 @@ class ChatWorkflow:
             )
 
             # Call the best available LLM provider (cloud or local).
-            # Use a dynamic token budget so the model always has room to reply
-            # even when the structured prompt is long (e.g. full conversation history).
+            # Pass max_tokens=None so:
+            #  - Cloud APIs use their model defaults (generous, no artificial cap).
+            #  - The local llama.cpp manager computes the exact available context
+            #    window after tokenising the prompt — responses are never truncated.
             response: Optional[str] = None
             try:
-                from llm.providers import ask_best_provider, compute_response_budget
-                _max_tokens = compute_response_budget(prompt, max_cap=512)
-                response = ask_best_provider(prompt, temperature=0.7, max_tokens=_max_tokens)
+                from llm.providers import ask_best_provider
+                response = ask_best_provider(prompt, temperature=0.7, max_tokens=None)
             except Exception:
-                _max_tokens = 512
+                pass
 
-            # Hard fallback: local llama.cpp
+            # Hard fallback: local llama.cpp (max_tokens=None → fully dynamic)
             if response is None or response.startswith("[Error"):
-                response = llm_manager.ask_llm(prompt, max_tokens=_max_tokens, temperature=0.7)
+                response = llm_manager.ask_llm(prompt, max_tokens=None, temperature=0.7)
 
             # Sanitize output
             response = self._sanitize_output(response)
@@ -507,11 +560,16 @@ class ChatWorkflow:
         older = history[:-keep_recent]
         recent = history[-keep_recent:]
 
-        # Build a plain-text rendering of the older portion for summarisation
+        # Build a plain-text rendering of the older portion for summarisation.
+        # Truncate at the nearest word boundary and add ellipsis when cut.
         lines = []
         for role, content in older:
             label = "User" if role == "user" else "Assistant"
-            lines.append(f"{label}: {content[:200]}")
+            if len(content) > _SUMMARY_CONTENT_MAX_LENGTH:
+                truncated = content[:_SUMMARY_CONTENT_MAX_LENGTH].rsplit(" ", 1)[0] + "…"
+            else:
+                truncated = content
+            lines.append(f"{label}: {truncated}")
 
         summary_prompt = (
             "Summarise the following conversation in 3–5 concise sentences, "
@@ -591,7 +649,10 @@ class ChatWorkflow:
             
             if user_profile:
                 lines.append("\n[VERIFIED FACTS ABOUT USER]")
-                for key, value in user_profile.items():
+                # Use lightweight RAG: inject only facts relevant to the current
+                # message rather than the entire profile, to conserve context space.
+                relevant = _select_relevant_facts(user_profile, user_text)
+                for key, value in relevant.items():
                     lines.append(f"- {key}: {value}")
             
             if history:

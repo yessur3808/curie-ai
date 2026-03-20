@@ -22,6 +22,25 @@ from llm import manager
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Platform column mappings — single source of truth used by both the reminder
+# delivery path and the proactive messaging eligibility check.
+# ---------------------------------------------------------------------------
+
+# Maps platform name → PostgreSQL column that holds the user's external ID.
+_PLATFORM_TO_COL: dict = {
+    "telegram": "telegram_id",
+    "discord":  "discord_id",
+    "whatsapp": "whatsapp_id",
+    "api":      "api_id",
+}
+
+# Pre-built fully-static SQL queries per platform (no dynamic SQL construction).
+_PLATFORM_QUERIES: dict = {
+    platform: f"SELECT {col} FROM users WHERE internal_id = %s"
+    for platform, col in _PLATFORM_TO_COL.items()
+}
+
 
 class ProactiveMessagingService:
     """
@@ -133,38 +152,27 @@ class ProactiveMessagingService:
                     internal_id = doc.get("internal_id")
                     platform = doc.get("platform", "unknown")
                     message_text = doc.get("message", "your reminder")
-                    reminder_msg = f"⏰ Reminder: **{message_text}**"
+                    # Apply platform-appropriate formatting (WhatsApp needs plain text)
+                    from utils.formatting import format_for_platform  # noqa: PLC0415
+                    reminder_msg = format_for_platform(
+                        f"⏰ Reminder: **{message_text}**", platform
+                    )
 
                     # Find the connector for this platform
                     connector = self.connectors.get(platform)
                     if connector:
-                        # Look up external user ID — fetch only the specific platform column.
-                        # platform value comes from our own MongoDB document (not user input),
-                        # but we whitelist it here for safety.
-                        _PLATFORM_COLS = {
-                            "telegram": "telegram_id",
-                            "discord": "discord_id",
-                            "whatsapp": "whatsapp_id",
-                            "api": "api_id",
-                        }
-                        platform_col = _PLATFORM_COLS.get(platform)
+                        # Validate platform and look up the user's external ID using
+                        # the module-level mapping (single source of truth, no inline dicts).
+                        platform_col = _PLATFORM_TO_COL.get(platform)
                         if platform_col is None:
                             logger.warning("Unknown platform %r in reminder doc — skipping", platform)
                             continue
 
-                        from memory.database import get_pg_conn
+                        from memory.database import get_pg_conn  # noqa: PLC0415
                         external_user_id = None
                         try:
                             with get_pg_conn() as conn:
                                 cur = conn.cursor()
-                                # Use fully static per-platform queries to avoid any
-                                # dynamic SQL construction in the hot path.
-                                _PLATFORM_QUERIES = {
-                                    "telegram": "SELECT telegram_id FROM users WHERE internal_id = %s",
-                                    "discord":  "SELECT discord_id  FROM users WHERE internal_id = %s",
-                                    "whatsapp": "SELECT whatsapp_id FROM users WHERE internal_id = %s",
-                                    "api":      "SELECT api_id      FROM users WHERE internal_id = %s",
-                                }
                                 query = _PLATFORM_QUERIES.get(platform)
                                 if query is None:
                                     logger.warning("Unknown platform %r — cannot look up external_user_id", platform)

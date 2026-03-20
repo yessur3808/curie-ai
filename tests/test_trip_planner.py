@@ -175,17 +175,21 @@ class TestHandleTripQueryAsync:
 
         def fake_ask(prompt, **kwargs):
             captured["prompt"] = prompt
+            captured["max_tokens"] = kwargs.get("max_tokens")
             return "Day 1: Explore the city centre..."
 
         with patch("llm.providers.is_local_only", return_value=True):
-            with patch("llm.providers.compute_response_budget", return_value=512):
-                with patch("llm.providers.ask_best_provider", side_effect=fake_ask):
-                    result = await handle_trip_query("plan a trip to Rome for 3 days")
+            with patch("llm.providers.ask_best_provider", side_effect=fake_ask):
+                result = await handle_trip_query("plan a trip to Rome for 3 days")
 
         assert result is not None
         # Compact prompt is shorter than verbose prompt
-        assert len(captured["prompt"]) < 400, (
+        assert len(captured["prompt"]) < 700, (
             f"Compact prompt should be short; got {len(captured['prompt'])} chars"
+        )
+        # No hardcoded token cap — max_tokens should be None (fully dynamic)
+        assert captured["max_tokens"] is None, (
+            f"max_tokens should be None for dynamic allocation, got {captured['max_tokens']}"
         )
 
     @pytest.mark.asyncio
@@ -195,6 +199,7 @@ class TestHandleTripQueryAsync:
 
         def fake_ask(prompt, **kwargs):
             captured["prompt"] = prompt
+            captured["max_tokens"] = kwargs.get("max_tokens")
             return "Day 1: ..."
 
         with patch("llm.providers.is_local_only", return_value=False):
@@ -206,6 +211,23 @@ class TestHandleTripQueryAsync:
         assert len(captured["prompt"]) > 400, (
             f"Verbose prompt should be long; got {len(captured['prompt'])} chars"
         )
+        # max_tokens is None — no cap applied
+        assert captured["max_tokens"] is None
+
+    @pytest.mark.asyncio
+    async def test_no_hardcoded_token_limits(self):
+        """ask_best_provider must be called with max_tokens=None for fully dynamic allocation."""
+        captured = {}
+
+        def fake_ask(prompt, **kwargs):
+            captured["max_tokens"] = kwargs.get("max_tokens")
+            return "Here is your itinerary..."
+
+        with patch("llm.providers.is_local_only", return_value=False):
+            with patch("llm.providers.ask_best_provider", side_effect=fake_ask):
+                await handle_trip_query("plan a trip to Tokyo for 7 days")
+
+        assert captured.get("max_tokens") is None
 
 
 def test_import_guard():

@@ -137,11 +137,21 @@ Do not include disclaimers or meta-commentary. Just give the plan.
 """
 
 # Compact version for local models — shorter prompt leaves more context window for the response.
+# Includes a one-shot example so small local models understand the expected output format
+# without needing to infer it from a long instruction list.
 _ITINERARY_PROMPT_COMPACT = """\
-You are a travel planner. Write a concise day-by-day trip itinerary.
+Write a concise day-by-day travel itinerary. Be practical and specific.
+
+EXAMPLE (London, 2 days, moderate):
+London is a world city famed for its history and culture.
+Day 1: AM: Tower of London → Tower Bridge walk. PM: Thames Southbank. Eve: West End theatre.
+Day 2: AM: British Museum (free). PM: Camden Market. Eve: Traditional pub dinner.
+Food: Fish & chips (~£12), afternoon tea (~£30), pie & mash (~£10).
+Tips: Use Oyster card. Book free museums in advance. Walk between nearby sights.
+Budget: ~£120/day (accommodation £70, food £30, activities £20).
+
+Now write for:
 Destination: {destination} | Duration: {duration} | Budget: {budget_tier}
-Include: brief intro, daily schedule (morning/afternoon/evening), 2 food tips, 3 travel tips, rough daily USD budget.
-Be brief and practical.
 """
 
 _PACKING_PROMPT = """\
@@ -160,11 +170,19 @@ Organise the list into categories:
 Keep it concise and practical. No fluff or disclaimers.
 """
 
-# Compact version for local models.
+# Compact packing list for local models with a one-shot example.
 _PACKING_PROMPT_COMPACT = """\
-Create a practical packing list for: {destination}, {duration}, {budget_tier} budget.
-Categories: Clothing, Electronics, Toiletries, Documents, Other.
-Be concise.
+Write a practical packing list. Be brief and specific.
+
+EXAMPLE (beach, 5 days, budget):
+Clothing: T-shirts×5, shorts×3, swimwear×2, light jacket, sandals, flip-flops.
+Electronics: phone+charger, power bank, waterproof phone bag.
+Toiletries: sunscreen SPF50, insect repellent, basic first-aid, toiletry bag.
+Documents: passport, travel insurance, bank card, local cash.
+Other: reusable water bottle, snorkel (optional), day pack.
+
+Now write for:
+Destination/type: {destination} | Duration: {duration} | Budget: {budget_tier}
 """
 
 _GENERAL_TRAVEL_PROMPT = """\
@@ -252,15 +270,11 @@ async def handle_trip_query(
         # General travel question — pass through as-is
         prompt = _GENERAL_TRAVEL_PROMPT.format(question=text)
 
-    # Token budget: local models get a tighter cap determined by the context window;
-    # cloud models can produce longer, more detailed responses.
-    if local_only:
-        try:
-            max_tokens = compute_response_budget(prompt, max_cap=768)
-        except Exception:
-            max_tokens = 768
-    else:
-        max_tokens = 1024
+    # Token budget: pass None for fully dynamic allocation so the model uses all
+    # available context-window space.  For cloud providers, None means "use the
+    # API model default" (typically very generous).  The local manager computes
+    # exactly how many tokens remain after the prompt.
+    max_tokens: Optional[int] = None
 
     # Use multi-provider LLM (prefers cloud if available, falls back to local)
     response: Optional[str] = None
