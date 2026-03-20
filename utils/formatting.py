@@ -72,6 +72,24 @@ def strip_markdown(text: str) -> str:
     return text
 
 
+def escape_markdown(text: str) -> str:
+    """Escape Telegram Markdown v1 special characters in user-supplied text.
+
+    When skill responses embed user-controlled strings inside Markdown markers
+    (e.g. ``**{user_text}**``), special characters in that text can break
+    Telegram's Markdown parser and cause ``BadRequest: can't parse entities``
+    errors.  This helper escapes the characters that Telegram v1 treats as
+    formatting: ``_``, ``*``, `` ` ``, and ``[``.
+
+    Use this on *user-derived* content before embedding it in formatted strings
+    that will be sent via ``parse_mode="Markdown"``.
+    """
+    # Telegram Markdown v1 special characters (in order of most common)
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 def format_for_platform(text: str, platform: str) -> str:
     """
     Apply any platform-specific formatting adjustments to a response string.

@@ -141,6 +141,9 @@ def _extract_facts_via_llm(user_message: str) -> dict:
     raw: Optional[str] = None
     try:
         from llm.providers import ask_best_provider  # noqa: PLC0415
+        # max_tokens=256 is intentional here: the extraction prompt requests a
+        # compact JSON object, and a generous token budget risks verbose output
+        # that is harder to parse and wastes context space.
         raw = ask_best_provider(prompt, temperature=0.1, max_tokens=256)
     except Exception:
         pass

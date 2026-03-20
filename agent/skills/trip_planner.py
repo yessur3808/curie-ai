@@ -25,6 +25,8 @@ import logging
 import re
 from typing import Optional
 
+from utils.formatting import escape_markdown
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -305,10 +307,10 @@ async def handle_trip_query(
     # Prepend a friendly header if destination was detected
     destination = params.get("destination")
     if destination and not params["packing_focus"]:
-        header = f"✈️ **Trip Plan: {destination}**\n\n"
+        header = f"✈️ **Trip Plan: {escape_markdown(destination)}**\n\n"
         response = header + response
     elif params["packing_focus"]:
         dest_label = destination or "your trip"
-        response = f"🧳 **Packing List for {dest_label}**\n\n" + response
+        response = f"🧳 **Packing List for {escape_markdown(dest_label)}**\n\n" + response
 
     return response

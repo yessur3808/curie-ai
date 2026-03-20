@@ -37,6 +37,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from utils.formatting import escape_markdown
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -203,7 +205,7 @@ def add_reminder(
     logger.info("Reminder created id=%s for user=%s due=%s", result.inserted_id, internal_id, due_at)
 
     due_str = due_at.strftime("%A, %b %d at %I:%M %p UTC")
-    return f"⏰ Got it! I'll remind you to **{message}** on {due_str}."
+    return f"⏰ Got it! I'll remind you to **{escape_markdown(message)}** on {due_str}."
 
 
 def list_reminders(internal_id: str) -> str:
@@ -223,7 +225,7 @@ def list_reminders(internal_id: str) -> str:
     lines = ["📋 **Your upcoming reminders:**\n"]
     for idx, doc in enumerate(docs, start=1):
         due_str = doc["due_at"].strftime("%a, %b %d at %I:%M %p UTC")
-        lines.append(f"{idx}. {doc['message']} — _{due_str}_")
+        lines.append(f"{idx}. {escape_markdown(doc['message'])} — _{due_str}_")
     return "\n".join(lines)
 
 

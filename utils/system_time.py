@@ -82,8 +82,15 @@ def _check_internet_time() -> None:
     """
     Fire a single HTTP request to the time API, compare with system clock,
     and update the module-level cache.  Never raises — all errors are caught.
+
+    This function runs in a background daemon thread.  All writes to the
+    shared globals ``_internet_ok`` and ``_last_drift_seconds`` are protected
+    by ``_lock`` so readers always see a consistent snapshot.
+    Note: ``_last_check_mono`` is intentionally set *before* this thread
+    starts (inside ``_maybe_refresh``) to prevent stampedes; we do not
+    update it again here.
     """
-    global _internet_ok, _last_drift_seconds, _last_check_mono
+    global _internet_ok, _last_drift_seconds
 
     system_utc_before = datetime.now(_stdtz.utc)
 
@@ -101,7 +108,8 @@ def _check_internet_time() -> None:
         raw_utc: Optional[str] = data.get("utc_datetime") or data.get("datetime")
         if not raw_utc:
             logger.warning("system_time: time API returned no utc_datetime field")
-            _internet_ok = False
+            with _lock:
+                _internet_ok = False
             return
 
         # Strip sub-second precision and trailing 'Z'/'offset' for fromisoformat
@@ -113,7 +121,6 @@ def _check_internet_time() -> None:
         # Estimate round-trip midpoint
         midpoint = system_utc_before + (system_utc_after - system_utc_before) / 2
         drift = (midpoint - internet_utc).total_seconds()
-        _last_drift_seconds = drift
 
         if abs(drift) > DRIFT_WARN_SECONDS:
             logger.warning(
@@ -127,17 +134,24 @@ def _check_internet_time() -> None:
                 "system_time: clock verified OK (drift=%.3f s)", drift
             )
 
-        _internet_ok = True
+        with _lock:
+            _internet_ok = True
+            _last_drift_seconds = drift
 
     except Exception as exc:
         logger.debug("system_time: internet time check failed (%s) — using system clock", exc)
-        _internet_ok = False
-    finally:
-        _last_check_mono = time.monotonic()
+        with _lock:
+            _internet_ok = False
 
 
 def _maybe_refresh() -> None:
-    """Trigger an internet check if the cache has expired (non-blocking)."""
+    """Trigger an internet check if the cache has expired (non-blocking).
+
+    Sets ``_last_check_mono`` under ``_lock`` *before* launching the
+    background thread so that concurrent callers in other threads see the
+    updated timestamp immediately and do not start additional threads for
+    the same TTL window (prevents a stampede on TTL expiry).
+    """
     if not _ENABLED:
         return
     now = time.monotonic()
@@ -146,8 +160,8 @@ def _maybe_refresh() -> None:
         # Re-check under the lock to avoid starting multiple refresh threads.
         if now - _last_check_mono < _CACHE_TTL:
             return
-        # Mark the check as recently attempted before starting the background thread
-        # so other threads won't trigger additional concurrent checks.
+        # Mark as recently attempted before starting the thread so other
+        # callers won't spawn additional concurrent checks for this window.
         _last_check_mono = now
     # Run in a daemon thread so it never blocks the caller.
     t = threading.Thread(target=_check_internet_time, daemon=True, name="time-verify")
@@ -179,7 +193,8 @@ def get_verified_now(tz: Optional[pytz.BaseTzInfo] = None) -> datetime:
 
 def is_internet_time_available() -> bool:
     """Return True if the most recent internet verification succeeded."""
-    return _internet_ok
+    with _lock:
+        return _internet_ok
 
 
 def get_time_source_label() -> str:
@@ -190,9 +205,12 @@ def get_time_source_label() -> str:
     """
     if not _ENABLED:
         return "system clock"
-    if _internet_ok:
+    with _lock:
+        ok = _internet_ok
+        checked = _last_check_mono
+    if ok:
         return "system clock (internet-verified)"
-    if _last_check_mono == 0.0:
+    if checked == 0.0:
         # No check has been attempted yet — first call is always system-only
         return "system clock"
     return "system clock (internet unavailable)"

@@ -11,6 +11,7 @@ This service:
 
 import asyncio
 import logging
+import os
 import random
 import threading
 import time
@@ -160,6 +161,7 @@ class ProactiveMessagingService:
 
                     # Find the connector for this platform
                     connector = self.connectors.get(platform)
+                    delivered = False
                     if connector:
                         # Validate platform and look up the user's external ID using
                         # the module-level mapping (single source of truth, no inline dicts).
@@ -185,7 +187,12 @@ class ProactiveMessagingService:
                             logger.warning("Could not look up external_user_id for reminder: %s", db_err)
 
                         if external_user_id:
-                            await self._send_via_connector(connector, external_user_id, reminder_msg)
+                            delivered = await self._send_via_connector(connector, external_user_id, reminder_msg)
+                            if not delivered:
+                                logger.warning(
+                                    "Delivery failed for reminder %s (internal_id=%s, platform=%s) — will retry",
+                                    doc["_id"], internal_id, platform,
+                                )
                         else:
                             logger.warning(
                                 "No external_user_id for internal_id=%s on platform=%s — reminder not delivered",
@@ -199,9 +206,31 @@ class ProactiveMessagingService:
                             internal_id,
                         )
 
-                    # Mark as fired regardless of delivery so we don't loop forever
-                    col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True}})
-                    logger.info("Reminder %s marked as fired (internal_id=%s)", doc["_id"], internal_id)
+                    # Only mark as fired after a confirmed successful delivery so
+                    # the reminder is retried on the next loop cycle if delivery
+                    # failed.  To prevent an infinite retry loop for permanently
+                    # undeliverable reminders (e.g. user removed), we also track
+                    # attempt_count and give up after a configurable maximum.
+                    _MAX_REMINDER_ATTEMPTS = int(os.getenv("REMINDER_MAX_ATTEMPTS", "5"))
+                    attempt_count = doc.get("attempt_count", 0)
+                    if delivered:
+                        col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True}})
+                        logger.info("Reminder %s marked as fired (internal_id=%s)", doc["_id"], internal_id)
+                    elif attempt_count + 1 >= _MAX_REMINDER_ATTEMPTS:
+                        col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True, "delivery_failed": True}})
+                        logger.warning(
+                            "Reminder %s abandoned after %d failed attempt(s) — marked fired/failed",
+                            doc["_id"], attempt_count + 1,
+                        )
+                    else:
+                        col.update_one(
+                            {"_id": doc["_id"]},
+                            {"$inc": {"attempt_count": 1}, "$set": {"last_attempt_at": datetime.now(tz_module.utc)}},
+                        )
+                        logger.debug(
+                            "Reminder %s delivery attempt %d recorded — will retry next cycle",
+                            doc["_id"], attempt_count + 1,
+                        )
 
                 except Exception as rem_err:
                     logger.error("Error delivering reminder %s: %s", doc.get("_id"), rem_err)
