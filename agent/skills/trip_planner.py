@@ -37,8 +37,11 @@ _TRIP_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+# Maximum character length of a destination name to match (prevents overly greedy captures)
+_MAX_DESTINATION_CHARS = 40
+
 _DESTINATION_PATTERN = re.compile(
-    r"\b(?:to|in|for|visit|visiting)\s+([A-Za-z][a-zA-Z\s,]{2,40}?)(?=\s+for|\s+in|\s*[,.]|$)",
+    r"\b(?:to|in|for|visit|visiting)\s+([A-Za-z][a-zA-Z\s,]{2," + str(_MAX_DESTINATION_CHARS) + r"}?)(?=\s+for|\s+in|\s*[,.]|$)",
     re.IGNORECASE,
 )
 

@@ -162,7 +162,7 @@ async def handle_message(message):
             internal_id_found = UserManager.get_internal_id_by_secret_username(secret_username)
             if internal_id_found:
                 user_session_map[wa_user_id] = internal_id_found
-                await message.reply(f"✅ Identity linked to secret_username {secret_username}.")
+                await message.reply("✅ Identity linked successfully.")
             else:
                 await message.reply("❌ No user found with that secret_username.")
             return

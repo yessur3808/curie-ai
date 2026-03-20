@@ -109,7 +109,7 @@ class TestStripMarkdown:
         text = "⏰ Reminder: **call mom** on _Wednesday_"
         result = strip_markdown(text)
         assert "**" not in result
-        assert "_" not in result or result == result  # underscores stripped
+        assert "_Wednesday_" not in result
         assert "call mom" in result
         assert "Wednesday" in result
 

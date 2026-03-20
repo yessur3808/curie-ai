@@ -29,8 +29,14 @@ from threading import Lock
 from memory import UserManager
 from memory.session_store import get_session_manager
 from llm import manager as llm_manager
+from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
+
+# Dedicated small thread pool for background learning tasks.
+# max_workers=2 caps concurrent LLM-based fact extractions without starving
+# the main event-loop thread pool used for DB I/O.
+_LEARNING_EXECUTOR = _ThreadPoolExecutor(max_workers=2, thread_name_prefix="curie-learning")
 
 
 class MessageDedupeCache:
@@ -412,13 +418,12 @@ class ChatWorkflow:
             sm.add_message(platform, internal_id, "user", user_text)
             sm.add_message(platform, internal_id, "assistant", response)
 
-            # Proactive learning: extract user preferences from this exchange
+            # Proactive learning: extract user preferences from this exchange.
+            # Submitted to a bounded thread pool (max 2 workers) so concurrent
+            # extractions are capped and the main event-loop thread pool is not starved.
             try:
                 from memory.learning import learn_from_exchange
-                loop = asyncio.get_running_loop()
-                loop.run_in_executor(
-                    None, learn_from_exchange, internal_id, user_text, response
-                )
+                _LEARNING_EXECUTOR.submit(learn_from_exchange, internal_id, user_text, response)
             except Exception:
                 pass
             

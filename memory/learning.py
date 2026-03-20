@@ -57,14 +57,31 @@ _MAX_FACTS = int(os.getenv("LEARNING_MAX_FACTS", "50"))
 # Fast-path heuristics — only run LLM when these match
 # ---------------------------------------------------------------------------
 
-_SIGNAL_PATTERNS = re.compile(
-    r"\b(my name is|i am|i'm|call me|i live in|i'm from|i work (as|in|at)|"
+# Identity / location facts (who the user is and where they are)
+_SIGNAL_IDENTITY = (
+    r"my name is|i am|i'm|call me|i live in|i'm from|i'm a"
+)
+
+# Preference facts (what the user likes/dislikes)
+_SIGNAL_PREFERENCES = (
     r"i love|i like|i enjoy|i prefer|i hate|i dislike|i don't like|"
-    r"i usually|i always|i never|i'm a|my timezone|my location|"
-    r"i speak|my language|i'm vegetarian|i'm vegan|i'm allergic|"
-    r"i travel|i visit|my job|my occupation|my hobby|my hobbies|"
-    r"remind me (every|each|daily|weekly|morning|evening)|"
-    r"i wake up at|i go to bed at|i work from|i finish at)\b",
+    r"i'm vegetarian|i'm vegan|i'm allergic"
+)
+
+# Habit / routine facts (patterns in the user's daily life)
+_SIGNAL_HABITS = (
+    r"i usually|i always|i never|i wake up at|i go to bed at|"
+    r"i work from|i finish at|remind me (every|each|daily|weekly|morning|evening)"
+)
+
+# Professional / contextual facts
+_SIGNAL_CONTEXT = (
+    r"i work (as|in|at)|my timezone|my location|i speak|my language|"
+    r"i travel|i visit|my job|my occupation|my hobby|my hobbies"
+)
+
+_SIGNAL_PATTERNS = re.compile(
+    r"\b(" + "|".join([_SIGNAL_IDENTITY, _SIGNAL_PREFERENCES, _SIGNAL_HABITS, _SIGNAL_CONTEXT]) + r")\b",
     re.IGNORECASE,
 )
 
@@ -148,13 +165,19 @@ def _extract_facts_via_llm(user_message: str) -> dict:
         if not isinstance(facts, dict):
             return {}
         # Sanitise: ensure all keys/values are reasonable types
+        _PRIMITIVE_TYPES = (str, int, float, bool)
         clean: dict = {}
         for k, v in facts.items():
             if not isinstance(k, str) or not k.strip():
                 continue
             key = re.sub(r"[^a-z0-9_]", "_", k.strip().lower())[:50]
-            if isinstance(v, (str, int, float, bool, list)):
+            if isinstance(v, _PRIMITIVE_TYPES):
                 clean[key] = v
+            elif isinstance(v, list):
+                # Only keep lists whose every element is a primitive type
+                if all(isinstance(item, _PRIMITIVE_TYPES) for item in v):
+                    clean[key] = v
+                # Silently drop lists that contain complex/nested objects
         return clean
     except (json.JSONDecodeError, ValueError):
         return {}

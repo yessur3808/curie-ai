@@ -138,19 +138,32 @@ class ProactiveMessagingService:
                     # Find the connector for this platform
                     connector = self.connectors.get(platform)
                     if connector:
-                        # Look up external user ID
+                        # Look up external user ID — fetch only the specific platform column.
+                        # platform value comes from our own MongoDB document (not user input),
+                        # but we whitelist it here for safety.
+                        _PLATFORM_COLS = {
+                            "telegram": "telegram_id",
+                            "discord": "discord_id",
+                            "whatsapp": "whatsapp_id",
+                            "api": "api_id",
+                        }
+                        platform_col = _PLATFORM_COLS.get(platform)
+                        if platform_col is None:
+                            logger.warning("Unknown platform %r in reminder doc — skipping", platform)
+                            continue
+
                         from memory.database import get_pg_conn
                         external_user_id = None
                         try:
                             with get_pg_conn() as conn:
                                 cur = conn.cursor()
                                 cur.execute(
-                                    "SELECT * FROM users WHERE internal_id = %s",
+                                    f"SELECT {platform_col} FROM users WHERE internal_id = %s",
                                     (str(internal_id),),
                                 )
                                 row = cur.fetchone()
                                 if row:
-                                    external_user_id = row.get(f"{platform}_id")
+                                    external_user_id = row.get(platform_col)
                         except Exception as db_err:
                             logger.warning("Could not look up external_user_id for reminder: %s", db_err)
 
@@ -221,7 +234,11 @@ class ProactiveMessagingService:
                 try:
                     with get_pg_conn() as conn:
                         cur = conn.cursor()
-                        cur.execute("SELECT * FROM users WHERE internal_id = %s", (str(internal_id),))
+                        cur.execute(
+                            "SELECT telegram_id, discord_id, whatsapp_id, api_id "
+                            "FROM users WHERE internal_id = %s",
+                            (str(internal_id),),
+                        )
                         user_row = cur.fetchone()
                         
                         if not user_row:
