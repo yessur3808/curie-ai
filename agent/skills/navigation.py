@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 # UI constants
 # ---------------------------------------------------------------------------
 
-_SEP_FULL = 36          # Width of full-route separator line
-_SEP_TRAFFIC = 30       # Width of traffic-only separator line
+_SEP_FULL = 36  # Width of full-route separator line
+_SEP_TRAFFIC = 30  # Width of traffic-only separator line
 # Speeds below this fraction of free-flow speed indicate notable delays
 _TRAFFIC_SLOWDOWN_THRESHOLD = 0.75
 
@@ -39,15 +39,42 @@ _TRAFFIC_SLOWDOWN_THRESHOLD = 0.75
 # ---------------------------------------------------------------------------
 
 _NAV_KEYWORDS = [
-    "route", "direction", "navigate", "navigation", "how do i get",
-    "how to get", "way to", "path to", "get to", "go to",
-    "drive to", "walk to", "bike to", "cycle to",
-    "travel to", "trip to", "journey to",
-    "from .+ to ", "eta", "travel time", "how far", "how long",
-    "traffic", "commute", "reroute", "detour", "bypass",
-    "shortest route", "fastest route", "alternative route",
-    "public transit", "bus route", "train route", "transit",
-    "directions to", "directions from",
+    "route",
+    "direction",
+    "navigate",
+    "navigation",
+    "how do i get",
+    "how to get",
+    "way to",
+    "path to",
+    "get to",
+    "go to",
+    "drive to",
+    "walk to",
+    "bike to",
+    "cycle to",
+    "travel to",
+    "trip to",
+    "journey to",
+    "from .+ to ",
+    "eta",
+    "travel time",
+    "how far",
+    "how long",
+    "traffic",
+    "commute",
+    "reroute",
+    "detour",
+    "bypass",
+    "shortest route",
+    "fastest route",
+    "alternative route",
+    "public transit",
+    "bus route",
+    "train route",
+    "transit",
+    "directions to",
+    "directions from",
 ]
 
 _MODE_KEYWORDS: Dict[str, str] = {
@@ -76,6 +103,7 @@ _MODE_KEYWORDS: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Intent detection
 # ---------------------------------------------------------------------------
+
 
 def is_navigation_query(message: str) -> bool:
     """Return True if the message looks like a navigation / traffic request."""
@@ -149,7 +177,12 @@ def extract_navigation_params(message: str) -> Optional[Dict[str, Any]]:
     m = re.search(r"traffic\s+(?:on|near|in|around|at)\s+(.+?)$", msg, re.IGNORECASE)
     if m:
         location = _clean_location(m.group(1).strip())
-        return {"origin": location, "destination": location, "mode": "drive", "traffic_only": True}
+        return {
+            "origin": location,
+            "destination": location,
+            "mode": "drive",
+            "traffic_only": True,
+        }
 
     return None
 
@@ -177,13 +210,16 @@ def _extract_mode(message: str) -> str:
 # Response formatting
 # ---------------------------------------------------------------------------
 
+
 def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
     """Format a routing result into a user-friendly message."""
     if "error" in result:
         return f"❌ Navigation Error: {result['error']}"
 
     origin = result.get("origin_name", params.get("origin", "Origin"))
-    destination = result.get("destination_name", params.get("destination", "Destination"))
+    destination = result.get(
+        "destination_name", params.get("destination", "Destination")
+    )
     mode_label = result.get("mode_label", "")
     routes = result.get("routes", [])
     traffic = result.get("traffic")
@@ -203,11 +239,7 @@ def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
     if traffic:
         cur_speed = traffic.get("current_speed_kmh")
         free_speed = traffic.get("free_flow_speed_kmh")
-        if (
-            cur_speed is not None
-            and free_speed is not None
-            and free_speed != 0
-        ):
+        if cur_speed is not None and free_speed is not None and free_speed != 0:
             if cur_speed < free_speed * _TRAFFIC_SLOWDOWN_THRESHOLD:
                 lines.append(
                     f"\n🚦 *Traffic Alert*: Current speed {cur_speed} km/h "
@@ -314,6 +346,7 @@ def _build_traffic_only_response(params: Dict[str, Any], result: Dict[str, Any])
 # ---------------------------------------------------------------------------
 # Main handler
 # ---------------------------------------------------------------------------
+
 
 async def handle_navigation_query(message: str) -> Optional[str]:
     """

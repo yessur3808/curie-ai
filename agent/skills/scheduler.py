@@ -45,9 +45,11 @@ logger = logging.getLogger(__name__)
 # Lazy DB access (avoids import-time connection attempts in tests)
 # ---------------------------------------------------------------------------
 
+
 def _get_reminders_collection():
     """Return the MongoDB reminders collection."""
     from memory.database import mongo_db  # noqa: PLC0415
+
     return mongo_db.reminders
 
 
@@ -147,9 +149,17 @@ def _parse_due_time(text: str) -> Optional[datetime]:
     if m:
         try:
             if m.group("year"):
-                year, month, day = int(m.group("year")), int(m.group("month")), int(m.group("day"))
+                year, month, day = (
+                    int(m.group("year")),
+                    int(m.group("month")),
+                    int(m.group("day")),
+                )
             else:
-                month, day, year = int(m.group("month2")), int(m.group("day2")), int(m.group("year2"))
+                month, day, year = (
+                    int(m.group("month2")),
+                    int(m.group("day2")),
+                    int(m.group("year2")),
+                )
             return datetime(year, month, day, 9, 0, tzinfo=timezone.utc)
         except (ValueError, TypeError):
             pass
@@ -182,6 +192,7 @@ def _extract_reminder_message(text: str) -> str:
 # CRUD operations
 # ---------------------------------------------------------------------------
 
+
 def add_reminder(
     internal_id: str,
     platform: str,
@@ -202,7 +213,12 @@ def add_reminder(
         "snooze_count": 0,
     }
     result = col.insert_one(doc)
-    logger.info("Reminder created id=%s for user=%s due=%s", result.inserted_id, internal_id, due_at)
+    logger.info(
+        "Reminder created id=%s for user=%s due=%s",
+        result.inserted_id,
+        internal_id,
+        due_at,
+    )
 
     due_str = due_at.strftime("%A, %b %d at %I:%M %p UTC")
     return f"⏰ Got it! I'll remind you to **{escape_markdown(message)}** on {due_str}."
@@ -241,7 +257,11 @@ def delete_reminder(internal_id: str, index: Optional[int] = None) -> str:
     if index is None:
         result = col.delete_many({"internal_id": internal_id, "fired": False})
         count = result.deleted_count
-        return f"🗑️ Deleted all {count} reminder(s)." if count else "No reminders to delete."
+        return (
+            f"🗑️ Deleted all {count} reminder(s)."
+            if count
+            else "No reminders to delete."
+        )
 
     docs = list(
         col.find(
@@ -270,6 +290,7 @@ def get_due_reminders(internal_id: str) -> list[dict]:
 def mark_reminder_fired(reminder_id) -> None:
     """Mark a reminder as delivered."""
     from bson import ObjectId  # noqa: PLC0415
+
     col = _get_reminders_collection()
     col.update_one({"_id": ObjectId(str(reminder_id))}, {"$set": {"fired": True}})
 
@@ -277,6 +298,7 @@ def mark_reminder_fired(reminder_id) -> None:
 # ---------------------------------------------------------------------------
 # Main skill handler
 # ---------------------------------------------------------------------------
+
 
 async def handle_reminder_query(
     text: str,
@@ -287,7 +309,11 @@ async def handle_reminder_query(
     Parse a reminder-related message and return a response string.
     Returns None if the text is not a reminder intent.
     """
-    if not is_reminder_query(text) and not _LIST_KEYWORDS.search(text) and not _DELETE_KEYWORDS.search(text):
+    if (
+        not is_reminder_query(text)
+        and not _LIST_KEYWORDS.search(text)
+        and not _DELETE_KEYWORDS.search(text)
+    ):
         return None
 
     # Deletion takes priority over listing (e.g. "cancel all reminders" contains "all"
@@ -295,7 +321,7 @@ async def handle_reminder_query(
     delete_match = _DELETE_KEYWORDS.search(text)
     if delete_match:
         # "delete reminder 2" → extract index
-        num_match = re.search(r"\b(\d+)\b", text[delete_match.end():])
+        num_match = re.search(r"\b(\d+)\b", text[delete_match.end() :])
         idx = int(num_match.group(1)) if num_match else None
         try:
             return delete_reminder(internal_id, idx)

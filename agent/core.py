@@ -2,7 +2,11 @@
 
 from memory import init_memory, ConversationManager, UserManager, ResearchManager
 from utils.busy import detect_busy_intent, detect_resume_intent
-from utils.project_indexer import index_project_dir, project_index_markdown, classify_project_intent
+from utils.project_indexer import (
+    index_project_dir,
+    project_index_markdown,
+    classify_project_intent,
+)
 from utils.weather import get_weather, extract_city_from_message, get_hko_typhoon_signal
 from utils.search import web_search, image_search, crawl_google_images
 from utils.datetime_info import get_current_datetime, extract_timezone_from_message
@@ -14,13 +18,13 @@ import json
 import re
 import os
 
+
 class Agent:
     def __init__(self, persona=None, max_history=5):
         self.persona = persona
         self.max_history = max_history
         init_memory()
         self.user_projects = dict()
-        
 
     async def handle_find_info(self, user_message):
         "Handles info-finding using the new skill."
@@ -28,9 +32,16 @@ class Agent:
         return await find_info_skill(user_message)
 
     # Keywords indicating uncertain or unconfirmed facts
-    UNCERTAIN_KEYWORDS = ['maybe', 'might', 'perhaps', 'unsure', 'not sure', 'possibly', 'probably']
+    UNCERTAIN_KEYWORDS = [
+        "maybe",
+        "might",
+        "perhaps",
+        "unsure",
+        "not sure",
+        "possibly",
+        "probably",
+    ]
 
-        
     def recall_conversation_history(self, internal_id, limit=20):
         """
         Return a readable summary of the last N exchanges with the user.
@@ -43,8 +54,7 @@ class Agent:
             who = "You" if role == "user" else self.persona.get("name", "Assistant")
             lines.append(f"{who}: {msg}")
         return "\n".join(lines)
-                    
-            
+
     def list_directories(self, root_path=None):
         """
         Safely list top-level directories from a root path (default: current working directory).
@@ -53,7 +63,11 @@ class Agent:
             root_path = os.getcwd()
         try:
             entries = os.listdir(root_path)
-            dirs = [entry for entry in entries if os.path.isdir(os.path.join(root_path, entry))]
+            dirs = [
+                entry
+                for entry in entries
+                if os.path.isdir(os.path.join(root_path, entry))
+            ]
             if not dirs:
                 return "No directories found in the current location."
             md = "📂 **Current directories:**\n\n"
@@ -62,7 +76,6 @@ class Agent:
             return md
         except Exception as e:
             return f"Failed to list directories: {e}"
-
 
     def extract_user_facts(self, user_message):
         """
@@ -73,7 +86,7 @@ class Agent:
         prompt = (
             "Extract any preferences, likes, interests, or personality traits about the user from the following message. "
             "IMPORTANT: Only extract facts that are explicitly stated or clearly implied. Do NOT make assumptions. "
-            "If the user says 'I like pizza', extract {\"likes_food\": \"pizza\"}. "
+            'If the user says \'I like pizza\', extract {"likes_food": "pizza"}. '
             "If the user says 'maybe I'll try pizza', do NOT extract anything - there's no commitment. "
             "Return them as a JSON dictionary of key:value pairs. If nothing can be confidently extracted, return {}.\n"
             f"User message: {user_message}\n"
@@ -86,31 +99,36 @@ class Agent:
             # Robust JSON extraction: find JSON object even if surrounded by extra text
             # Use brace matching to handle arbitrary nesting depth
             json_str = None
-            start_idx = result.find('{')
+            start_idx = result.find("{")
             if start_idx != -1:
                 brace_count = 0
                 for i in range(start_idx, len(result)):
-                    if result[i] == '{':
+                    if result[i] == "{":
                         brace_count += 1
-                    elif result[i] == '}':
+                    elif result[i] == "}":
                         brace_count -= 1
                         if brace_count == 0:
-                            json_str = result[start_idx:i+1]
+                            json_str = result[start_idx : i + 1]
                             break
-            
+
             if json_str:
                 facts = json.loads(json_str)
             else:
                 # Fallback to simple strip if no JSON found
                 facts = json.loads(result.strip())
-            
+
             if isinstance(facts, dict):
                 # Validate facts - only keep those with clear evidence
                 validated_facts = {}
                 for key, value in facts.items():
                     # Skip facts that are too vague or uncertain
-                    if value is not None and value != "" and not any(
-                        uncertain in str(value).lower() for uncertain in self.UNCERTAIN_KEYWORDS
+                    if (
+                        value is not None
+                        and value != ""
+                        and not any(
+                            uncertain in str(value).lower()
+                            for uncertain in self.UNCERTAIN_KEYWORDS
+                        )
                     ):
                         validated_facts[key] = value
                 return validated_facts
@@ -132,7 +150,9 @@ class Agent:
         user_profile = UserManager.get_user_profile(internal_id)
 
         # Load recent conversation history from Postgres
-        history = ConversationManager.load_recent_conversation(internal_id, limit=self.max_history * 2)
+        history = ConversationManager.load_recent_conversation(
+            internal_id, limit=self.max_history * 2
+        )
         conversation = ""
         if self.persona and self.persona.get("system_prompt"):
             conversation += self.persona["system_prompt"] + "\n"
@@ -158,7 +178,7 @@ class Agent:
         conversation += f"User: {message}\nCurie:"
 
         response = manager.ask_llm(conversation, max_tokens=512)
-        
+
         ConversationManager.save_conversation(internal_id, "assistant", response)
         return response
 
@@ -174,7 +194,9 @@ class Agent:
         in Curie's style, using the LLM and the user's stored profile.
         """
         persona = self.persona
-        recent_history = ConversationManager.load_recent_conversation(internal_id, limit=6)
+        recent_history = ConversationManager.load_recent_conversation(
+            internal_id, limit=6
+        )
         user_profile = UserManager.get_user_profile(internal_id)
 
         prompt = (
@@ -197,14 +219,18 @@ class Agent:
 
         small_talk = manager.ask_llm(prompt, temperature=0.9, max_tokens=256)
         return small_talk.strip()
-    
+
     async def get_weather_info(self, city: str, unit: str = "metric"):
         """Return weather info for a city (async)."""
         try:
             return await get_weather(city, unit=unit)
         except Exception as e:
-            return {"city": city, "error": str(e), "tips": ["Weather data unavailable."]}
-    
+            return {
+                "city": city,
+                "error": str(e),
+                "tips": ["Weather data unavailable."],
+            }
+
     def handle_busy(self, internal_id):
         set_busy_temporarily(internal_id)
         return "D'accord! I'll let you focus for a while. I'll check in again later, mon ami."
@@ -217,7 +243,11 @@ class Agent:
         internal_id = UserManager.get_internal_id_by_secret_username(secret_username)
         if internal_id:
             # Optionally update mapping here if you wish
-            return True, f"✅ Identity linked to secret_username `{secret_username}`.", internal_id
+            return (
+                True,
+                f"✅ Identity linked to secret_username `{secret_username}`.",
+                internal_id,
+            )
         else:
             return False, "❌ No user found with that secret_username.", None
 
@@ -227,15 +257,11 @@ class Agent:
             channel=channel,
             external_id=external_id,
             secret_username=secret_username or f"{channel}_{external_id}",
-            updated_by=f'{channel}_bot'
+            updated_by=f"{channel}_bot",
         )
-        
-        
-        
-        
+
     # --- PROJECT SUPPORT ---
-        
-        
+
     def set_project_dir(self, internal_id, path=None):
         """
         Specify and index a project directory for a user.
@@ -246,10 +272,7 @@ class Agent:
         if not path or not os.path.isdir(path):
             raise ValueError(f"Invalid or missing directory: {path}")
         index = index_project_dir(path)
-        self.user_projects[internal_id] = {
-            "path": path,
-            "index": index
-        }
+        self.user_projects[internal_id] = {"path": path, "index": index}
         return index
 
     def get_project_index(self, internal_id):
@@ -291,6 +314,7 @@ class Agent:
         Create a new project directory with a README.md.
         """
         import datetime
+
         base_dir = os.getenv("PROJECTS_ROOT", ".")
         new_path = os.path.join(base_dir, project_name)
         os.makedirs(new_path, exist_ok=True)
@@ -300,8 +324,7 @@ class Agent:
         # Optionally index it immediately
         self.set_project_dir(internal_id, new_path)
         return new_path, md_path
-    
-    
+
     async def get_weather_report(self, user_message, internal_id=None):
         """
         Detect city in user message or user profile, call get_weather_info,
@@ -344,7 +367,7 @@ class Agent:
             if hko_signal:
                 heads_up += f"\n⚠️ {hko_signal}"
         return heads_up
-    
+
     def get_datetime_info(self, user_message=None, internal_id=None):
         """
         Get current date and time information.
@@ -379,7 +402,9 @@ class Agent:
         """
         intent_info = self.classify_intent_llm(user_message)
         intents = intent_info.get("intents", [])
-        overall_clarification_needed = intent_info.get("overall_clarification_needed", False)
+        overall_clarification_needed = intent_info.get(
+            "overall_clarification_needed", False
+        )
         overall_suggested_questions = intent_info.get("overall_suggested_questions", [])
 
         # Helper: which actions are supported skills/commands?
@@ -401,12 +426,13 @@ class Agent:
             "list_directories",
             "conversion",
             "convert_currency",
-            "convert_unit"
+            "convert_unit",
         }
 
         # Find all actionable intents (high confidence, no clarification needed, supported)
         actionable_intents = [
-            intent for intent in intents
+            intent
+            for intent in intents
             if intent.get("action") in SUPPORTED_ACTIONS
             and not intent.get("clarification_needed", False)
             and float(intent.get("confidence", 0.0)) >= 0.65
@@ -464,7 +490,9 @@ class Agent:
 
             elif action == "weather":
                 city = params.get("city")
-                reply = await self.get_weather_report(user_message, internal_id=internal_id)
+                reply = await self.get_weather_report(
+                    user_message, internal_id=internal_id
+                )
                 responses.append(reply)
 
             elif action == "date_time":
@@ -482,22 +510,33 @@ class Agent:
                 try:
                     self.set_project_dir(internal_id, path)
                     md = self.get_project_markdown(internal_id)
-                    responses.append(md[:4000] if md else "Project indexed, but nothing to show.")
+                    responses.append(
+                        md[:4000] if md else "Project indexed, but nothing to show."
+                    )
                 except Exception as e:
                     responses.append(f"❌ Error indexing project: {e}")
 
             elif action == "create_project":
                 project_name = params.get("project_name")
                 import re
+
                 if not project_name:
-                    match = re.search(r"create (?:a )?new project(?: called| named)? ([\w\-]+)", user_message, re.I)
+                    match = re.search(
+                        r"create (?:a )?new project(?: called| named)? ([\w\-]+)",
+                        user_message,
+                        re.I,
+                    )
                     project_name = match.group(1) if match else None
                 if not project_name:
                     responses.append("What would you like to name your new project?")
                 else:
                     try:
-                        new_path, md_path = self.create_new_project(internal_id, project_name)
-                        responses.append(f"✅ Created new project at `{new_path}` with starter README.md.")
+                        new_path, md_path = self.create_new_project(
+                            internal_id, project_name
+                        )
+                        responses.append(
+                            f"✅ Created new project at `{new_path}` with starter README.md."
+                        )
                     except Exception as e:
                         responses.append(f"❌ Error creating project: {e}")
 
@@ -528,7 +567,9 @@ class Agent:
 
             else:
                 # Should not occur with SUPPORTED_ACTIONS, but log if it does
-                print(f"[Intent] Unhandled actionable intent: {action} with params {params}")
+                print(
+                    f"[Intent] Unhandled actionable intent: {action} with params {params}"
+                )
 
         # Optionally: After running a skill, you can add a persona-style chat response
         # For a more conversational touch, uncomment the next lines:
@@ -536,25 +577,64 @@ class Agent:
         # responses.append(chat_reply)
 
         return True, "\n\n".join(responses)
-    
+
     def is_weather_query(msg):
         msg = msg.lower()
         keywords = [
-            "weather", "rain", "umbrella", "forecast", "temperature", "hot", "cold",
-            "humid", "sunny", "typhoon", "windy", "storm", "jacket", "heat", "freezing", "thunderstorm", "storm",
-            "is it", "will it", "do i need", "should i bring", "is it going to be",
-            "will it be", "what's the weather like", "how's the weather", "is it going to rain",
-            "is it going to be hot", "is it going to be cold", "is it sunny", "is it windy",
-            "is it humid", "is it freezing", "is it stormy", "is there a typhoon", "do i need an umbrella",
-            "do i need a jacket", "do i need sunglasses", "do i need sunscreen", "is it going to be humid",
-            "is it going to be windy", "is it going to be stormy", "is there a typhoon warning",
-            "is there a weather warning", "do i need to prepare for the weather", "do i need to check the weather",
-            "do i need", "should i bring", "is it going to", "will it be", "what's the weather", "how's the weather"
+            "weather",
+            "rain",
+            "umbrella",
+            "forecast",
+            "temperature",
+            "hot",
+            "cold",
+            "humid",
+            "sunny",
+            "typhoon",
+            "windy",
+            "storm",
+            "jacket",
+            "heat",
+            "freezing",
+            "thunderstorm",
+            "storm",
+            "is it",
+            "will it",
+            "do i need",
+            "should i bring",
+            "is it going to be",
+            "will it be",
+            "what's the weather like",
+            "how's the weather",
+            "is it going to rain",
+            "is it going to be hot",
+            "is it going to be cold",
+            "is it sunny",
+            "is it windy",
+            "is it humid",
+            "is it freezing",
+            "is it stormy",
+            "is there a typhoon",
+            "do i need an umbrella",
+            "do i need a jacket",
+            "do i need sunglasses",
+            "do i need sunscreen",
+            "is it going to be humid",
+            "is it going to be windy",
+            "is it going to be stormy",
+            "is there a typhoon warning",
+            "is there a weather warning",
+            "do i need to prepare for the weather",
+            "do i need to check the weather",
+            "do i need",
+            "should i bring",
+            "is it going to",
+            "will it be",
+            "what's the weather",
+            "how's the weather",
         ]
         return any(kw in msg for kw in keywords)
-    
-    
-    
+
     def search_web(self, query, max_results=3):
         return web_search(query, max_results=max_results)
 
@@ -563,27 +643,40 @@ class Agent:
 
     def crawl_images(self, query, max_num=3):
         return crawl_google_images(query, max_num=max_num)
-    
-    
+
     def is_web_search_query(self, msg):
-        return any(kw in msg.lower() for kw in ["search the web for", "google", "find on the web", "look up"])
+        return any(
+            kw in msg.lower()
+            for kw in ["search the web for", "google", "find on the web", "look up"]
+        )
 
     def extract_search_query(self, msg):
         # Simple: take everything after "search the web for"/"google"
-        m = re.search(r"(?:search the web for|google|find on the web|look up) (.+)", msg, re.I)
+        m = re.search(
+            r"(?:search the web for|google|find on the web|look up) (.+)", msg, re.I
+        )
         return m.group(1).strip() if m else msg
 
     def is_image_search_query(self, msg):
-        return any(kw in msg.lower() for kw in ["find images of", "image search", "show pictures of"])
+        return any(
+            kw in msg.lower()
+            for kw in ["find images of", "image search", "show pictures of"]
+        )
 
     def is_google_crawler_query(self, msg):
-        return "download images of" in msg.lower() or "crawl google images for" in msg.lower()
+        return (
+            "download images of" in msg.lower()
+            or "crawl google images for" in msg.lower()
+        )
 
     def extract_image_query(self, msg):
-        m = re.search(r"(?:images? of|picture[s]? of|download images of|crawl google images for) (.+)", msg, re.I)
+        m = re.search(
+            r"(?:images? of|picture[s]? of|download images of|crawl google images for) (.+)",
+            msg,
+            re.I,
+        )
         return m.group(1).strip() if m else msg
-    
-        
+
     def classify_intent_llm(self, user_message: str) -> dict:
         """
         Next-generation LLM-based intent and entity extractor.
@@ -626,61 +719,61 @@ class Agent:
             "3. If the user's message is ambiguous or missing info, set clarification_needed true and suggest follow-up questions.\n"
             "4. Output your result as strict JSON in this schema:\n"
             "{\n"
-            "  \"intents\": [\n"
+            '  "intents": [\n'
             "    {...intent fields as above...}, {...}\n"
             "  ],\n"
-            "  \"overall_clarification_needed\": true/false,\n"
-            "  \"overall_suggested_questions\": [ ... ]\n"
+            '  "overall_clarification_needed": true/false,\n'
+            '  "overall_suggested_questions": [ ... ]\n'
             "}\n"
             "Examples:\n"
             "User: Translate 'hello world' to French and send it by email to bob@example.com\n"
             "{\n"
-            "  \"intents\": [\n"
-            "    {\"action\": \"translate_text\", \"description\": \"Translate text to French.\", \"confidence\": 0.98, \"parameters\": {\"text\": \"hello world\", \"language\": \"French\"}, \"reasoning\": \"User requested translation.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"command\", \"taxonomy\": \"productivity\", \"language\": \"en\"},\n"
-            "    {\"action\": \"send_email\", \"description\": \"Send email to bob@example.com.\", \"confidence\": 0.95, \"parameters\": {\"recipient\": \"bob@example.com\", \"body\": \"hello world (in French)\"}, \"reasoning\": \"User asked to send the translated text by email.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"command\", \"taxonomy\": \"productivity\", \"language\": \"en\"}\n"
+            '  "intents": [\n'
+            '    {"action": "translate_text", "description": "Translate text to French.", "confidence": 0.98, "parameters": {"text": "hello world", "language": "French"}, "reasoning": "User requested translation.", "clarification_needed": false, "suggested_questions": [], "action_type": "command", "taxonomy": "productivity", "language": "en"},\n'
+            '    {"action": "send_email", "description": "Send email to bob@example.com.", "confidence": 0.95, "parameters": {"recipient": "bob@example.com", "body": "hello world (in French)"}, "reasoning": "User asked to send the translated text by email.", "clarification_needed": false, "suggested_questions": [], "action_type": "command", "taxonomy": "productivity", "language": "en"}\n'
             "  ],\n"
-            "  \"overall_clarification_needed\": false,\n"
-            "  \"overall_suggested_questions\": []\n"
+            '  "overall_clarification_needed": false,\n'
+            '  "overall_suggested_questions": []\n'
             "}\n"
             "User: Remind me to call mom tomorrow\n"
             "{\n"
-            "  \"intents\": [\n"
-            "    {\"action\": \"set_reminder\", \"description\": \"Set a reminder to call mom.\", \"confidence\": 0.97, \"parameters\": {\"task\": \"call mom\", \"date\": \"tomorrow\"}, \"reasoning\": \"User wants a reminder.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"command\", \"taxonomy\": \"productivity\", \"language\": \"en\"}\n"
+            '  "intents": [\n'
+            '    {"action": "set_reminder", "description": "Set a reminder to call mom.", "confidence": 0.97, "parameters": {"task": "call mom", "date": "tomorrow"}, "reasoning": "User wants a reminder.", "clarification_needed": false, "suggested_questions": [], "action_type": "command", "taxonomy": "productivity", "language": "en"}\n'
             "  ],\n"
-            "  \"overall_clarification_needed\": false,\n"
-            "  \"overall_suggested_questions\": []\n"
+            '  "overall_clarification_needed": false,\n'
+            '  "overall_suggested_questions": []\n'
             "}\n"
             "User: Can you analyze this file and tell me if it's safe? (file not provided)\n"
             "{\n"
-            "  \"intents\": [\n"
-            "    {\"action\": \"analyze_file_safety\", \"description\": \"Analyze a file for safety.\", \"confidence\": 0.7, \"parameters\": {}, \"reasoning\": \"No file provided, can't analyze.\", \"clarification_needed\": true, \"suggested_questions\": [\"Please upload the file you'd like me to analyze.\"], \"action_type\": \"information\", \"taxonomy\": \"system\", \"language\": \"en\"}\n"
+            '  "intents": [\n'
+            '    {"action": "analyze_file_safety", "description": "Analyze a file for safety.", "confidence": 0.7, "parameters": {}, "reasoning": "No file provided, can\'t analyze.", "clarification_needed": true, "suggested_questions": ["Please upload the file you\'d like me to analyze."], "action_type": "information", "taxonomy": "system", "language": "en"}\n'
             "  ],\n"
-            "  \"overall_clarification_needed\": true,\n"
-            "  \"overall_suggested_questions\": [\"Please upload the file you'd like me to analyze.\"]\n"
+            '  "overall_clarification_needed": true,\n'
+            '  "overall_suggested_questions": ["Please upload the file you\'d like me to analyze."]\n'
             "}\n"
             "User: What's happening in the NBA right now?\n"
             "{\n"
-            "  \"intents\": [\n"
-            "    {\"action\": \"find_info\", \"description\": \"Find real-time NBA news and scores from multiple sources.\", \"confidence\": 0.97, \"parameters\": {\"topic\": \"NBA\", \"time\": \"now\"}, \"reasoning\": \"The user wants current NBA info from the web.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"news\", \"language\": \"en\"}\n"
+            '  "intents": [\n'
+            '    {"action": "find_info", "description": "Find real-time NBA news and scores from multiple sources.", "confidence": 0.97, "parameters": {"topic": "NBA", "time": "now"}, "reasoning": "The user wants current NBA info from the web.", "clarification_needed": false, "suggested_questions": [], "action_type": "information", "taxonomy": "news", "language": "en"}\n'
             "  ],\n"
-            "  \"overall_clarification_needed\": false,\n"
-            "  \"overall_suggested_questions\": []\n"
+            '  "overall_clarification_needed": false,\n'
+            '  "overall_suggested_questions": []\n'
             "}\n"
             "User: What's today's date?\n"
             "{\n"
-            "  \"intents\": [\n"
-            "    {\"action\": \"date_time\", \"description\": \"Get current date and time.\", \"confidence\": 0.99, \"parameters\": {}, \"reasoning\": \"User wants to know the current date.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"knowledge\", \"language\": \"en\"}\n"
+            '  "intents": [\n'
+            '    {"action": "date_time", "description": "Get current date and time.", "confidence": 0.99, "parameters": {}, "reasoning": "User wants to know the current date.", "clarification_needed": false, "suggested_questions": [], "action_type": "information", "taxonomy": "knowledge", "language": "en"}\n'
             "  ],\n"
-            "  \"overall_clarification_needed\": false,\n"
-            "  \"overall_suggested_questions\": []\n"
+            '  "overall_clarification_needed": false,\n'
+            '  "overall_suggested_questions": []\n'
             "}\n"
             "User: What's the weather like in Tokyo this weekend?\n"
             "{\n"
-            "  \"intents\": [\n"
-            "    {\"action\": \"weather\", \"description\": \"Get weather forecast for Tokyo.\", \"confidence\": 0.98, \"parameters\": {\"city\": \"Tokyo\", \"time\": \"weekend\"}, \"reasoning\": \"User wants weather information for a specific city.\", \"clarification_needed\": false, \"suggested_questions\": [], \"action_type\": \"information\", \"taxonomy\": \"knowledge\", \"language\": \"en\"}\n"
+            '  "intents": [\n'
+            '    {"action": "weather", "description": "Get weather forecast for Tokyo.", "confidence": 0.98, "parameters": {"city": "Tokyo", "time": "weekend"}, "reasoning": "User wants weather information for a specific city.", "clarification_needed": false, "suggested_questions": [], "action_type": "information", "taxonomy": "knowledge", "language": "en"}\n'
             "  ],\n"
-            "  \"overall_clarification_needed\": false,\n"
-            "  \"overall_suggested_questions\": []\n"
+            '  "overall_clarification_needed": false,\n'
+            '  "overall_suggested_questions": []\n'
             "}\n"
             f"User: {user_message}\n"
             "JSON:\n"
@@ -688,12 +781,13 @@ class Agent:
         result = manager.ask_llm(prompt, temperature=0, max_tokens=512)
 
         import json
+
         try:
             # Robust extraction of JSON object
-            first_brace = result.find('{')
-            last_brace = result.rfind('}')
+            first_brace = result.find("{")
+            last_brace = result.rfind("}")
             if first_brace != -1 and last_brace != -1:
-                json_str = result[first_brace:last_brace+1]
+                json_str = result[first_brace : last_brace + 1]
                 output = json.loads(json_str)
             else:
                 output = {}

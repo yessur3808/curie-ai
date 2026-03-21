@@ -23,10 +23,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # which avoids polluting the shared sys.modules cache and breaking other tests.
 # ---------------------------------------------------------------------------
 for _mod in (
-    "psycopg2", "psycopg2.extras", "psycopg2.extensions",
-    "pymongo", "pymongo.collection", "pymongo.errors",
-    "llm", "llm.manager",
-    "telegram", "telegram.ext",
+    "psycopg2",
+    "psycopg2.extras",
+    "psycopg2.extensions",
+    "pymongo",
+    "pymongo.collection",
+    "pymongo.errors",
+    "llm",
+    "llm.manager",
+    "telegram",
+    "telegram.ext",
     "dotenv",
 ):
     if _mod not in sys.modules:
@@ -36,8 +42,11 @@ for _mod in (
 # Using `if _mod not in sys.modules` avoids clobbering the real module when
 # this file is collected after another test has already imported it.
 for _mod in (
-    "memory", "memory.session_store", "memory.database",
-    "memory.users", "memory.conversations",
+    "memory",
+    "memory.session_store",
+    "memory.database",
+    "memory.users",
+    "memory.conversations",
 ):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
@@ -51,6 +60,7 @@ if "utils.persona" not in sys.modules:
 # Telegram connector helpers
 # ---------------------------------------------------------------------------
 
+
 class TestTelegramGetInternalId:
     """Tests for connectors/telegram.py get_internal_id()."""
 
@@ -60,6 +70,7 @@ class TestTelegramGetInternalId:
             del sys.modules["connectors.telegram"]
 
         from connectors.telegram import get_internal_id, user_session_map
+
         self.get_internal_id = get_internal_id
         self.user_session_map = user_session_map
 
@@ -97,6 +108,7 @@ class TestTelegramGetInternalId:
 # Discord connector helpers
 # ---------------------------------------------------------------------------
 
+
 class TestDiscordGetInternalId:
     """Tests for connectors/discord_bot.py get_internal_id()."""
 
@@ -105,6 +117,7 @@ class TestDiscordGetInternalId:
             del sys.modules["connectors.discord_bot"]
 
         from connectors.discord_bot import get_internal_id, user_session_map
+
         self.get_internal_id = get_internal_id
         self.user_session_map = user_session_map
 
@@ -131,6 +144,7 @@ class TestDiscordGetInternalId:
 # API connector — idempotency key validation
 # ---------------------------------------------------------------------------
 
+
 class TestApiIdempotencyKeyValidation:
     """Tests for the UUID-format validation in POST /chat."""
 
@@ -147,6 +161,7 @@ class TestApiIdempotencyKeyValidation:
         # Import the production regex so this test always validates the same
         # pattern the endpoint enforces — no duplicated pattern to drift.
         from connectors.api import _IDEMPOTENCY_KEY_RE
+
         self._uuid_re = _IDEMPOTENCY_KEY_RE
 
     def _is_valid_uuid(self, value: str) -> bool:
@@ -181,6 +196,7 @@ class TestApiIdempotencyKeyValidation:
 # WebSocket platform consistency
 # ---------------------------------------------------------------------------
 
+
 class TestWebSocketPlatformConsistency:
     """Verify the WebSocket handler uses platform='api' (same as REST /chat)."""
 
@@ -188,14 +204,17 @@ class TestWebSocketPlatformConsistency:
     def _load_ws_func():
         connector_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "connectors", "api.py",
+            "connectors",
+            "api.py",
         )
         with open(connector_path) as fh:
             tree = ast.parse(fh.read())
         return next(
             (
-                node for node in ast.walk(tree)
-                if isinstance(node, ast.AsyncFunctionDef) and node.name == "websocket_chat"
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.AsyncFunctionDef)
+                and node.name == "websocket_chat"
             ),
             None,
         )
@@ -203,27 +222,33 @@ class TestWebSocketPlatformConsistency:
     def test_websocket_uses_api_platform(self):
         """The websocket handler must set platform='api' in normalized_input."""
         ws_func = self._load_ws_func()
-        assert ws_func is not None, "websocket_chat function not found in connectors/api.py"
+        assert (
+            ws_func is not None
+        ), "websocket_chat function not found in connectors/api.py"
 
         # Walk the AST looking for a Dict literal that has a "platform" key
         # whose value is the string constant "api".
         found = any(
             isinstance(node, ast.Dict)
             and any(
-                isinstance(k, ast.Constant) and k.value == "platform"
-                and isinstance(v, ast.Constant) and v.value == "api"
+                isinstance(k, ast.Constant)
+                and k.value == "platform"
+                and isinstance(v, ast.Constant)
+                and v.value == "api"
                 for k, v in zip(node.keys, node.values)
             )
             for node in ast.walk(ws_func)
         )
-        assert found, (
-            "websocket_chat must set platform='api' in normalized_input, not 'websocket'."
-        )
+        assert (
+            found
+        ), "websocket_chat must set platform='api' in normalized_input, not 'websocket'."
 
     def test_websocket_handler_sets_internal_id(self):
         """The websocket handler must include internal_id in normalized_input."""
         ws_func = self._load_ws_func()
-        assert ws_func is not None, "websocket_chat function not found in connectors/api.py"
+        assert (
+            ws_func is not None
+        ), "websocket_chat function not found in connectors/api.py"
 
         # Walk the AST looking for a Dict literal that has an "internal_id" key.
         found = any(
@@ -234,14 +259,13 @@ class TestWebSocketPlatformConsistency:
             )
             for node in ast.walk(ws_func)
         )
-        assert found, (
-            "websocket_chat must include internal_id in normalized_input."
-        )
+        assert found, "websocket_chat must include internal_id in normalized_input."
 
 
 # ---------------------------------------------------------------------------
 # Discord new-username format in clear_memory_command
 # ---------------------------------------------------------------------------
+
 
 class TestDiscordUsernameFormat:
     """Verify clear_memory_command handles both old and new Discord username styles."""
@@ -250,7 +274,8 @@ class TestDiscordUsernameFormat:
         """The clear_memory_command must check discriminator before building username."""
         connector_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "connectors", "discord_bot.py",
+            "connectors",
+            "discord_bot.py",
         )
         with open(connector_path) as fh:
             source = fh.read()

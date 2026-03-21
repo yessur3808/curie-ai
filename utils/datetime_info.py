@@ -45,6 +45,7 @@ def get_current_datetime(timezone_str: str = "UTC") -> str:
 
     try:
         from utils.system_time import get_verified_now, get_time_source_label
+
         now: datetime = get_verified_now(tz=tz)
         source = get_time_source_label()
     except Exception:
@@ -124,7 +125,7 @@ def extract_timezone_from_message(message: str) -> Optional[str]:
         r"\bmexico\s+city\b": "America/Mexico_City",
         r"\btoront[oa]\b": "America/Toronto",
         r"\bvancouver\b": "America/Vancouver",
-        r"\bdubal\b": "Asia/Dubai",   # common misspelling kept for robustness
+        r"\bdubal\b": "Asia/Dubai",  # common misspelling kept for robustness
         r"\bdubai\b": "Asia/Dubai",
         r"\bmuscat\b": "Asia/Muscat",
         r"\briyadh\b": "Asia/Riyadh",
@@ -210,4 +211,3 @@ def extract_city_from_message(message: str) -> Optional[str]:
             return city
 
     return None
-

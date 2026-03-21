@@ -4,6 +4,7 @@ import os
 
 from llm import manager
 
+
 def classify_project_intent(message):
     # You can start with simple rules for quick testing
     msg = message.lower()
@@ -24,7 +25,10 @@ def classify_project_intent(message):
     intent = manager.ask_llm(prompt, temperature=0.0, max_tokens=5)
     return intent.strip()
 
-def index_project_dir(root_path, max_preview_lines=10, include_content_types=('.md', '.py', '.txt')):
+
+def index_project_dir(
+    root_path, max_preview_lines=10, include_content_types=(".md", ".py", ".txt")
+):
     project_index = {}
     for dirpath, dirnames, filenames in os.walk(root_path):
         rel_dir = os.path.relpath(dirpath, root_path)
@@ -44,6 +48,7 @@ def index_project_dir(root_path, max_preview_lines=10, include_content_types=('.
                     file_info["preview"] = "[Could not read file]"
             project_index[rel_dir].append(file_info)
     return project_index
+
 
 def project_index_markdown(index):
     md = "# 📁 Project Index\n"

@@ -54,7 +54,9 @@ async def send_message(external_user_id: str, message: str) -> bool:
         await user.send(message)
         return True
     except Exception as exc:
-        logger.error("Failed to send Discord proactive message to %s: %s", external_user_id, exc)
+        logger.error(
+            "Failed to send Discord proactive message to %s: %s", external_user_id, exc
+        )
         return False
 
 

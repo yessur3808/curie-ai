@@ -8,6 +8,7 @@ import re
 # You can cache the client if you want (best for large bots)
 _client = None
 
+
 async def get_weather(city: str, unit: str = "metric"):
     """
     Fetch weather info for a given city name.
@@ -33,20 +34,21 @@ async def get_weather(city: str, unit: str = "metric"):
         if "sun" in desc.lower() or "clear" in desc.lower():
             tips.append("It's sunny, wear sunglasses if going out.")
         # You can expand this logic!
-        return {
-            "city": city,
-            "temperature": temp,
-            "description": desc,
-            "tips": tips
-        }
-        
+        return {"city": city, "temperature": temp, "description": desc, "tips": tips}
+
+
 def extract_city_from_message(message):
     # Try: "weather in Tokyo", "Is it raining in Paris?", etc.
-    match = re.search(r"(?:weather|rain|forecast|temperature|hot|cold|humid|sunny)\s*(?:in|at|for)?\s*([A-Za-z\s\-]+)", message, re.I)
+    match = re.search(
+        r"(?:weather|rain|forecast|temperature|hot|cold|humid|sunny)\s*(?:in|at|for)?\s*([A-Za-z\s\-]+)",
+        message,
+        re.I,
+    )
     if match:
         # Clean up city name (strip whitespace, etc.)
         return match.group(1).strip().title()
     return None
+
 
 async def get_hko_typhoon_signal():
     url = "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=warnsum&lang=en"

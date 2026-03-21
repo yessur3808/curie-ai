@@ -7,7 +7,9 @@ from .database import get_pg_conn, mongo_db
 # Allowlist of valid channel/platform names.
 # Channel names are interpolated into SQL column identifiers, so we must
 # validate them against a fixed set to prevent SQL injection.
-_ALLOWED_CHANNELS = frozenset(["telegram", "slack", "whatsapp", "signal", "discord", "api"])
+_ALLOWED_CHANNELS = frozenset(
+    ["telegram", "slack", "whatsapp", "signal", "discord", "api"]
+)
 
 
 def _validate_channel(channel: str) -> None:
@@ -23,12 +25,23 @@ class UserManager:
         """Get the internal_id (UUID) for a user by their secret_username."""
         with get_pg_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT internal_id FROM users WHERE secret_username ILIKE %s", (secret_username,))
+            cur.execute(
+                "SELECT internal_id FROM users WHERE secret_username ILIKE %s",
+                (secret_username,),
+            )
             row = cur.fetchone()
-            return str(row['internal_id']) if row else None
+            return str(row["internal_id"]) if row else None
 
     @staticmethod
-    def get_or_create_user_internal_id(channel, external_id, secret_username=None, updated_by=None, is_master=False, roles=None, display_name=None):
+    def get_or_create_user_internal_id(
+        channel,
+        external_id,
+        secret_username=None,
+        updated_by=None,
+        is_master=False,
+        roles=None,
+        display_name=None,
+    ):
         """
         Look up or create a user based on external channel ID.
 
@@ -51,10 +64,12 @@ class UserManager:
             )
             row = cur.fetchone()
             if row:
-                return str(row['internal_id'])
+                return str(row["internal_id"])
             # Create new user
             if not secret_username or not updated_by:
-                raise ValueError("secret_username and updated_by are required to create a new user.")
+                raise ValueError(
+                    "secret_username and updated_by are required to create a new user."
+                )
             new_uuid = str(uuid.uuid4())
             if display_name:
                 cur.execute(
@@ -69,7 +84,7 @@ class UserManager:
                         is_master,
                         roles if roles else [],
                         str(display_name),
-                    )
+                    ),
                 )
             else:
                 cur.execute(
@@ -82,8 +97,8 @@ class UserManager:
                         secret_username,
                         updated_by,
                         is_master,
-                        roles if roles else []
-                    )
+                        roles if roles else [],
+                    ),
                 )
             conn.commit()
 
@@ -91,15 +106,15 @@ class UserManager:
             # Master users and all new users get proactive messaging enabled
             default_profile = {
                 "proactive_messaging_enabled": True,
-                "proactive_interval_hours": 24
+                "proactive_interval_hours": 24,
             }
             mongo_db.user_profiles.update_one(
                 {"_id": new_uuid},
                 {
                     "$set": {"facts": default_profile},
-                    "$currentDate": {"last_updated": True}
+                    "$currentDate": {"last_updated": True},
                 },
-                upsert=True
+                upsert=True,
             )
 
             return new_uuid
@@ -131,7 +146,7 @@ class UserManager:
                     str(external_id),
                     datetime.utcnow(),
                     str(internal_id),
-                )
+                ),
             )
             conn.commit()
 
@@ -175,7 +190,7 @@ class UserManager:
                     str(email),
                     datetime.utcnow(),
                     str(internal_id),
-                )
+                ),
             )
             conn.commit()
 
@@ -198,11 +213,8 @@ class UserManager:
             update[f"facts.{k}"] = v
         mongo_db.user_profiles.update_one(
             {"_id": str(internal_id)},
-            {
-                "$set": update,
-                "$currentDate": {"last_updated": True}
-            },
-            upsert=True
+            {"$set": update, "$currentDate": {"last_updated": True}},
+            upsert=True,
         )
 
     @staticmethod
@@ -230,7 +242,9 @@ class UserManager:
         profile = UserManager.get_user_profile(internal_id)
         cc = profile.get("contact_channels", {})
         return {
-            "platform_priority": cc.get("platform_priority", ["telegram", "discord", "whatsapp", "api"]),
+            "platform_priority": cc.get(
+                "platform_priority", ["telegram", "discord", "whatsapp", "api"]
+            ),
             "blocked_platforms": list(cc.get("blocked_platforms", [])),
             "account_priority": dict(cc.get("account_priority", {})),
         }
@@ -262,9 +276,13 @@ class UserManager:
         """
         updates: dict = {}
         if platform_priority is not None:
-            updates["facts.contact_channels.platform_priority"] = list(platform_priority)
+            updates["facts.contact_channels.platform_priority"] = list(
+                platform_priority
+            )
         if blocked_platforms is not None:
-            updates["facts.contact_channels.blocked_platforms"] = list(blocked_platforms)
+            updates["facts.contact_channels.blocked_platforms"] = list(
+                blocked_platforms
+            )
         if account_priority is not None:
             updates["facts.contact_channels.account_priority"] = dict(account_priority)
         if not updates:
@@ -281,7 +299,7 @@ class UserManager:
             cur = conn.cursor()
             cur.execute(
                 "UPDATE users SET roles = %s, updated_at = %s, updated_by = %s WHERE internal_id = %s",
-                (roles, datetime.utcnow(), updated_by, str(internal_id))
+                (roles, datetime.utcnow(), updated_by, str(internal_id)),
             )
             conn.commit()
 
@@ -291,7 +309,7 @@ class UserManager:
             cur = conn.cursor()
             cur.execute(
                 "UPDATE users SET is_master = %s, updated_at = %s, updated_by = %s WHERE internal_id = %s",
-                (is_master, datetime.utcnow(), updated_by, str(internal_id))
+                (is_master, datetime.utcnow(), updated_by, str(internal_id)),
             )
             conn.commit()
 
@@ -299,5 +317,7 @@ class UserManager:
     def get_user_by_internal_id(internal_id):
         with get_pg_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT * FROM users WHERE internal_id = %s", (str(internal_id),))
+            cur.execute(
+                "SELECT * FROM users WHERE internal_id = %s", (str(internal_id),)
+            )
             return cur.fetchone()

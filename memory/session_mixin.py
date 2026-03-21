@@ -69,7 +69,9 @@ class SessionMixin:
     def save_user_message(self, channel: str, user_id: str | int, content: str) -> None:
         get_session_manager().add_message(channel, user_id, "user", content)
 
-    def save_assistant_message(self, channel: str, user_id: str | int, content: str) -> None:
+    def save_assistant_message(
+        self, channel: str, user_id: str | int, content: str
+    ) -> None:
         get_session_manager().add_message(channel, user_id, "assistant", content)
 
     # ------------------------------------------------------------------

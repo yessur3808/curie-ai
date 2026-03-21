@@ -10,7 +10,10 @@ import time
 
 # Check for critical dependencies early to provide helpful error messages
 try:
-    from connectors.telegram import start_telegram_bot, set_workflow as set_telegram_workflow
+    from connectors.telegram import (
+        start_telegram_bot,
+        set_workflow as set_telegram_workflow,
+    )
     from connectors.api import app as fastapi_app, set_workflow as set_api_workflow
     from memory import init_memory
     from llm import manager
@@ -41,7 +44,11 @@ logger = logging.getLogger(__name__)
 
 # Import Discord connector (optional - may not be installed)
 try:
-    from connectors.discord_bot import start_discord_bot, set_workflow as set_discord_workflow
+    from connectors.discord_bot import (
+        start_discord_bot,
+        set_workflow as set_discord_workflow,
+    )
+
     DISCORD_AVAILABLE = True
 except ImportError:
     DISCORD_AVAILABLE = False
@@ -49,36 +56,38 @@ except ImportError:
 
 # Import WhatsApp connector (optional - may not be installed)
 try:
-    from connectors.whatsapp import start_whatsapp_bot, set_workflow as set_whatsapp_workflow
+    from connectors.whatsapp import (
+        start_whatsapp_bot,
+        set_workflow as set_whatsapp_workflow,
+    )
+
     WHATSAPP_AVAILABLE = True
 except ImportError:
     WHATSAPP_AVAILABLE = False
     logger.warning("WhatsApp connector not available (whatsapp-web.py not installed)")
 
+
 def configure_logging():
     """
     Configure logging for the application at startup.
-    
+
     Sets up logging to capture all log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     with a consistent format across all modules. This ensures that important logs,
     including security-related messages from URL validation, are properly captured.
     """
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     log_format = os.getenv(
-        "LOG_FORMAT",
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        "LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
-    
+
     # Configure root logger
     logging.basicConfig(
         level=log_level,
         format=log_format,
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=[logging.StreamHandler(sys.stdout)],
     )
-    
+
     # Log the configuration for verification
     logger = logging.getLogger(__name__)
     logger.info(f"Logging configured with level: {log_level}")
@@ -87,8 +96,8 @@ def configure_logging():
 def load_all_agents():
     agents = {}
     for persona_info in list_available_personas():
-        persona = load_persona(persona_info['filename'])
-        name = persona['name']
+        persona = load_persona(persona_info["filename"])
+        name = persona["name"]
         agents[name] = Agent(persona=persona)
     return agents
 
@@ -96,6 +105,7 @@ def load_all_agents():
 def load_default_agent(persona_filename=None):
     persona = load_persona(filename=persona_filename)
     return Agent(persona=persona)
+
 
 # --- Helper: Find all files recursively ---
 def find_all_files(repo_path, exts=None):
@@ -106,6 +116,7 @@ def find_all_files(repo_path, exts=None):
             if exts is None or any(rel_path.endswith(ext) for ext in exts):
                 all_files.append(rel_path)
     return all_files
+
 
 # --- Connector Runners ---
 
@@ -118,7 +129,7 @@ def run_telegram(workflow: ChatWorkflow):
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
     start_telegram_bot(workflow)
 
 
@@ -127,47 +138,49 @@ def run_discord(workflow: ChatWorkflow):
     if not DISCORD_AVAILABLE:
         logger.error("Discord connector is not available. Install discord.py first.")
         return
-    
+
     print("Starting Discord connector...")
-    
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    
+
     start_discord_bot(workflow)
 
 
 def run_whatsapp(workflow: ChatWorkflow):
     """Run WhatsApp connector."""
     if not WHATSAPP_AVAILABLE:
-        logger.error("WhatsApp connector is not available. Install whatsapp-web.py first.")
+        logger.error(
+            "WhatsApp connector is not available. Install whatsapp-web.py first."
+        )
         return
-    
+
     print("Starting WhatsApp connector...")
-    
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    
-    start_whatsapp_bot(workflow)
 
+    start_whatsapp_bot(workflow)
 
 
 def run_api():
     print("Starting API (FastAPI) connector on http://0.0.0.0:8000 ...")
     uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="info")
 
+
 def run_coding_service(workflow: ChatWorkflow):
     """Run the standalone coding service in parallel with other modules"""
     logger.info("Starting Coding Service...")
-    
+
     try:
         from services.coding_service import CodingService
-        
+
         # Create notification callback to send messages to master user
         def notify_master_user(message: str, data: dict):
             master_user_id = os.getenv("MASTER_USER_ID")
@@ -175,11 +188,11 @@ def run_coding_service(workflow: ChatWorkflow):
                 # Store notification in memory for master user to retrieve
                 logger.info(f"Coding Service notification for master: {message}")
                 # You could extend this to send actual messages via connectors
-        
+
         service = CodingService(notification_callback=notify_master_user)
         service.start()
         logger.info("✅ Coding service initialized and started successfully")
-        
+
         # Keep service running
         try:
             while True:
@@ -187,14 +200,16 @@ def run_coding_service(workflow: ChatWorkflow):
         except KeyboardInterrupt:
             logger.info("Stopping coding service...")
             service.stop()
-            
+
     except Exception as e:
         logger.error(f"❌ Failed to start coding service: {e}", exc_info=True)
         raise
 
+
 def run_coder_interactive():
     print("Starting Coder skill (interactive mode)...")
     from agent.skills.coder import apply_code_change
+
     goal = input("Describe the code enhancement goal: ").strip()
     repo_path = input("Enter local repo path (absolute or relative): ").strip()
     branch_name = input("Enter the branch name to use: ").strip()
@@ -207,9 +222,11 @@ def run_coder_interactive():
     print("Files changed:", list(result[1].keys()))
     print("PR URL:", result[2])
 
+
 def run_coder_batch(goal, files_to_edit, repo_path, branch_name):
     print("Starting Coder skill (batch mode)...")
     from agent.skills.coder import apply_code_change
+
     print(f"Goal: {goal}")
     print(f"Repo path: {repo_path}")
     print(f"Branch: {branch_name}")
@@ -220,25 +237,51 @@ def run_coder_batch(goal, files_to_edit, repo_path, branch_name):
     print("Files changed:", list(result[1].keys()))
     print("PR URL:", result[2])
 
+
 # --- Argument Parsing ---
 def parse_args():
     parser = argparse.ArgumentParser(description="Start Curie AI Connectors")
-    parser.add_argument('--telegram', action='store_true', help="Run Telegram connector")
-    parser.add_argument('--discord', action='store_true', help="Run Discord connector")
-    parser.add_argument('--whatsapp', action='store_true', help="Run WhatsApp connector")
-    parser.add_argument('--api', action='store_true', help="Run API connector (FastAPI)")
-    parser.add_argument('--coding-service', action='store_true', help="Run standalone coding service")
-    parser.add_argument('--coder', action='store_true', help="Run coder/PR skill (interactive)")
-    parser.add_argument('--coder-batch', action='store_true', help="Run coder in batch mode (non-interactive)")
-    parser.add_argument('--coder-config', type=str, help="JSON file with coder batch parameters")
-    parser.add_argument('--coder-goal', type=str, help="Goal for coder batch mode")
-    parser.add_argument('--coder-files', type=str, help="Comma-separated file list for coder batch mode")
-    parser.add_argument('--coder-repo', type=str, help="Repo path for coder batch mode")
-    parser.add_argument('--coder-branch', type=str, help="Branch name for coder batch mode")
-    parser.add_argument('--all', action='store_true', help="Run all connectors")
-    parser.add_argument('--no-init', action='store_true', help="Skip model preload and memory init")
-    parser.add_argument('--persona', type=str, help="Filename of persona to use (in assets/personality)")
+    parser.add_argument(
+        "--telegram", action="store_true", help="Run Telegram connector"
+    )
+    parser.add_argument("--discord", action="store_true", help="Run Discord connector")
+    parser.add_argument(
+        "--whatsapp", action="store_true", help="Run WhatsApp connector"
+    )
+    parser.add_argument(
+        "--api", action="store_true", help="Run API connector (FastAPI)"
+    )
+    parser.add_argument(
+        "--coding-service", action="store_true", help="Run standalone coding service"
+    )
+    parser.add_argument(
+        "--coder", action="store_true", help="Run coder/PR skill (interactive)"
+    )
+    parser.add_argument(
+        "--coder-batch",
+        action="store_true",
+        help="Run coder in batch mode (non-interactive)",
+    )
+    parser.add_argument(
+        "--coder-config", type=str, help="JSON file with coder batch parameters"
+    )
+    parser.add_argument("--coder-goal", type=str, help="Goal for coder batch mode")
+    parser.add_argument(
+        "--coder-files", type=str, help="Comma-separated file list for coder batch mode"
+    )
+    parser.add_argument("--coder-repo", type=str, help="Repo path for coder batch mode")
+    parser.add_argument(
+        "--coder-branch", type=str, help="Branch name for coder batch mode"
+    )
+    parser.add_argument("--all", action="store_true", help="Run all connectors")
+    parser.add_argument(
+        "--no-init", action="store_true", help="Skip model preload and memory init"
+    )
+    parser.add_argument(
+        "--persona", type=str, help="Filename of persona to use (in assets/personality)"
+    )
     return parser.parse_args()
+
 
 # --- Config Determination ---
 def determine_what_to_run(args):
@@ -257,10 +300,29 @@ def determine_what_to_run(args):
     run_coder_batch_flag = args.coder_batch
     run_coding_service_flag = args.coding_service or run_coding_service_env
 
-    if not (run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag or run_coder_flag or run_coder_batch_flag or run_coding_service_flag):
-        print("Nothing to run! Use --telegram, --discord, --whatsapp, --api, --coder, --coder-batch, --coding-service, --all or set RUN_* in .env.")
+    if not (
+        run_telegram_flag
+        or run_discord_flag
+        or run_whatsapp_flag
+        or run_api_flag
+        or run_coder_flag
+        or run_coder_batch_flag
+        or run_coding_service_flag
+    ):
+        print(
+            "Nothing to run! Use --telegram, --discord, --whatsapp, --api, --coder, --coder-batch, --coding-service, --all or set RUN_* in .env."
+        )
         sys.exit(1)
-    return run_telegram_flag, run_discord_flag, run_whatsapp_flag, run_api_flag, run_coder_flag, run_coder_batch_flag, run_coding_service_flag
+    return (
+        run_telegram_flag,
+        run_discord_flag,
+        run_whatsapp_flag,
+        run_api_flag,
+        run_coder_flag,
+        run_coder_batch_flag,
+        run_coding_service_flag,
+    )
+
 
 def init_llm_and_memory(no_init):
     if not no_init:
@@ -269,11 +331,14 @@ def init_llm_and_memory(no_init):
             manager.preload_llama_model()
         except (FileNotFoundError, ValueError) as e:
             logger.warning(f"⚠️  LLM model unavailable: {e}")
-            logger.warning("Continuing without LLM - text responses will be placeholders")
+            logger.warning(
+                "Continuing without LLM - text responses will be placeholders"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Unexpected LLM error: {e}")
             logger.warning("Continuing without LLM")
         init_memory()
+
 
 # --- Coder Batch Mode Helpers ---
 def get_batch_coder_params_from_config(config_path):
@@ -288,26 +353,39 @@ def get_batch_coder_params_from_config(config_path):
     branch_name = config.get("branch_name")
     if isinstance(files_arg, str) and files_arg.strip().lower().startswith("all"):
         exts = None
-        if ':' in files_arg:
+        if ":" in files_arg:
             ext_part = files_arg.split(":", 1)[1]
-            exts = [f".{e.strip()}" if not e.startswith('.') else e.strip() for e in ext_part.split(",") if e.strip()]
+            exts = [
+                f".{e.strip()}" if not e.startswith(".") else e.strip()
+                for e in ext_part.split(",")
+                if e.strip()
+            ]
         if not repo_path:
             print("Error: Must supply repo_path with files_to_edit=all or all:ext")
             sys.exit(1)
         files_to_edit = find_all_files(repo_path, exts)
         print(f"Discovered {len(files_to_edit)} files to edit in {repo_path}.")
     else:
-        files_to_edit = [f.strip() for f in (files_arg or [])] if isinstance(files_arg, list) else [f.strip() for f in (files_arg or "").split(",") if f.strip()]
+        files_to_edit = (
+            [f.strip() for f in (files_arg or [])]
+            if isinstance(files_arg, list)
+            else [f.strip() for f in (files_arg or "").split(",") if f.strip()]
+        )
     return goal, files_to_edit, repo_path, branch_name
+
 
 def get_batch_coder_params_from_cli(args):
     files_arg = args.coder_files
     repo_path = args.coder_repo
     if files_arg and files_arg.strip().lower().startswith("all"):
         exts = None
-        if ':' in files_arg:
+        if ":" in files_arg:
             ext_part = files_arg.split(":", 1)[1]
-            exts = [f".{e.strip()}" if not e.startswith('.') else e.strip() for e in ext_part.split(",") if e.strip()]
+            exts = [
+                f".{e.strip()}" if not e.startswith(".") else e.strip()
+                for e in ext_part.split(",")
+                if e.strip()
+            ]
         if not repo_path:
             print("Error: Must supply --coder-repo with --coder-files=all or all:ext")
             sys.exit(1)
@@ -318,6 +396,7 @@ def get_batch_coder_params_from_cli(args):
     goal = args.coder_goal
     branch_name = args.coder_branch
     return goal, files_to_edit, repo_path, branch_name
+
 
 def validate_coder_batch_params(goal, files_to_edit, repo_path, branch_name):
     missing = []
@@ -333,30 +412,47 @@ def validate_coder_batch_params(goal, files_to_edit, repo_path, branch_name):
         print(f"Error: Missing batch coder parameters: {', '.join(missing)}")
         sys.exit(1)
 
+
 # --- Main Orchestration ---
 def main():
     # Configure logging first thing to capture all logs
     configure_logging()
-    
+
     args = parse_args()
-    run_telegram_flag, run_discord_flag, run_whatsapp_flag, run_api_flag, run_coder_flag, run_coder_batch_flag, run_coding_service_flag = determine_what_to_run(args)
+    (
+        run_telegram_flag,
+        run_discord_flag,
+        run_whatsapp_flag,
+        run_api_flag,
+        run_coder_flag,
+        run_coder_batch_flag,
+        run_coding_service_flag,
+    ) = determine_what_to_run(args)
     init_llm_and_memory(args.no_init)
-    
+
     # Load persona and initialize ChatWorkflow
     persona_arg = getattr(args, "persona", None)
     persona = load_persona(filename=persona_arg)
     # Use minimal_sanitization from env or default to True for natural chat
     minimal_sanitization = os.getenv("MINIMAL_SANITIZATION", "true").lower() == "true"
     workflow = ChatWorkflow(
-        persona=persona, 
-        max_history=5, 
+        persona=persona,
+        max_history=5,
         enable_small_talk=False,
-        minimal_sanitization=minimal_sanitization
+        minimal_sanitization=minimal_sanitization,
     )
-    logger.info(f"✅ ChatWorkflow initialized with persona: {workflow.persona.get('name')}")
-    
+    logger.info(
+        f"✅ ChatWorkflow initialized with persona: {workflow.persona.get('name')}"
+    )
+
     # Share workflow with connectors
-    if run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag or run_coding_service_flag:
+    if (
+        run_telegram_flag
+        or run_discord_flag
+        or run_whatsapp_flag
+        or run_api_flag
+        or run_coding_service_flag
+    ):
         set_telegram_workflow(workflow)
         set_api_workflow(workflow)
         if DISCORD_AVAILABLE:
@@ -365,12 +461,14 @@ def main():
             set_whatsapp_workflow(workflow)
 
     threads = []
-    
+
     # Initialize proactive messaging service (only if any connectors are running)
     proactive_service = None
     enable_proactive = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
-    
-    if enable_proactive and (run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag):
+
+    if enable_proactive and (
+        run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag
+    ):
         try:
             logger.info("Initializing proactive messaging service...")
             # Proactive connectors are not yet registered in this process, so do not start the service.
@@ -379,10 +477,14 @@ def main():
                 "Proactive messaging service not started because no connectors are registered yet."
             )
         except Exception as e:
-            logger.error(f"❌ Failed to start proactive messaging service: {e}", exc_info=True)
+            logger.error(
+                f"❌ Failed to start proactive messaging service: {e}", exc_info=True
+            )
     elif not enable_proactive:
-        logger.info("ℹ️  Proactive messaging is disabled via ENABLE_PROACTIVE_MESSAGING env variable")
-    
+        logger.info(
+            "ℹ️  Proactive messaging is disabled via ENABLE_PROACTIVE_MESSAGING env variable"
+        )
+
     # Start Discord bot in thread
     if run_discord_flag:
         if DISCORD_AVAILABLE:
@@ -391,7 +493,7 @@ def main():
             t.start()
         else:
             logger.error("Discord connector requested but not available")
-    
+
     # Start WhatsApp bot in thread
     if run_whatsapp_flag:
         if WHATSAPP_AVAILABLE:
@@ -406,12 +508,14 @@ def main():
         t = threading.Thread(target=run_api, daemon=True)
         threads.append(t)
         t.start()
-    
+
     # Start Coding Service in thread
     if run_coding_service_flag:
         try:
             logger.info("Initializing coding service thread...")
-            t = threading.Thread(target=run_coding_service, args=(workflow,), daemon=True)
+            t = threading.Thread(
+                target=run_coding_service, args=(workflow,), daemon=True
+            )
             threads.append(t)
             t.start()
             logger.info("Coding service thread started")
@@ -423,9 +527,13 @@ def main():
 
     if run_coder_batch_flag:
         if args.coder_config:
-            goal, files_to_edit, repo_path, branch_name = get_batch_coder_params_from_config(args.coder_config)
+            goal, files_to_edit, repo_path, branch_name = (
+                get_batch_coder_params_from_config(args.coder_config)
+            )
         else:
-            goal, files_to_edit, repo_path, branch_name = get_batch_coder_params_from_cli(args)
+            goal, files_to_edit, repo_path, branch_name = (
+                get_batch_coder_params_from_cli(args)
+            )
         validate_coder_batch_params(goal, files_to_edit, repo_path, branch_name)
         run_coder_batch(goal, files_to_edit, repo_path, branch_name)
 
@@ -441,7 +549,7 @@ def main():
             logger.info("Shutting down...")
             if proactive_service:
                 proactive_service.stop()
-        
-        
+
+
 if __name__ == "__main__":
     main()

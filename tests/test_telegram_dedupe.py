@@ -16,10 +16,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Stub heavyweight dependencies before importing any application code.
 for _mod in (
-    "psycopg2", "psycopg2.extras", "psycopg2.extensions",
-    "pymongo", "pymongo.collection", "pymongo.errors",
-    "memory", "memory.database", "memory.users",
-    "memory.conversations", "memory.session_store",
+    "psycopg2",
+    "psycopg2.extras",
+    "psycopg2.extensions",
+    "pymongo",
+    "pymongo.collection",
+    "pymongo.errors",
+    "memory",
+    "memory.database",
+    "memory.users",
+    "memory.conversations",
+    "memory.session_store",
     "llm",
 ):
     if _mod not in sys.modules:
@@ -27,10 +34,10 @@ for _mod in (
 
 from agent.chat_workflow import MessageDedupeCache  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # MessageDedupeCache unit tests
 # ---------------------------------------------------------------------------
+
 
 def test_cache_miss_on_first_message():
     """A brand-new message key must not be found in an empty cache."""
@@ -86,9 +93,9 @@ def test_ttl_expiry():
 
     # Retrieve after TTL elapses — should miss.
     with patch("agent.chat_workflow.time.time", return_value=fake_start + 101):
-        assert cache.get("telegram", "chat_1", "msg_1") is None, (
-            "Entry should have expired after TTL"
-        )
+        assert (
+            cache.get("telegram", "chat_1", "msg_1") is None
+        ), "Entry should have expired after TTL"
 
 
 def test_fifo_eviction_at_max_size():
@@ -101,7 +108,9 @@ def test_fifo_eviction_at_max_size():
     # Adding a 4th entry must evict msg_1 (oldest)
     cache.set("telegram", "chat", "msg_4", "r4")
 
-    assert cache.get("telegram", "chat", "msg_1") is None, "Oldest entry should be evicted"
+    assert (
+        cache.get("telegram", "chat", "msg_1") is None
+    ), "Oldest entry should be evicted"
     assert cache.get("telegram", "chat", "msg_2") == "r2"
     assert cache.get("telegram", "chat", "msg_3") == "r3"
     assert cache.get("telegram", "chat", "msg_4") == "r4"

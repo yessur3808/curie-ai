@@ -58,9 +58,7 @@ _MAX_FACTS = int(os.getenv("LEARNING_MAX_FACTS", "50"))
 # ---------------------------------------------------------------------------
 
 # Identity / location facts (who the user is and where they are)
-_SIGNAL_IDENTITY = (
-    r"my name is|i am|i'm|call me|i live in|i'm from|i'm a"
-)
+_SIGNAL_IDENTITY = r"my name is|i am|i'm|call me|i live in|i'm from|i'm a"
 
 # Preference facts (what the user likes/dislikes)
 _SIGNAL_PREFERENCES = (
@@ -81,7 +79,9 @@ _SIGNAL_CONTEXT = (
 )
 
 _SIGNAL_PATTERNS = re.compile(
-    r"\b(" + "|".join([_SIGNAL_IDENTITY, _SIGNAL_PREFERENCES, _SIGNAL_HABITS, _SIGNAL_CONTEXT]) + r")\b",
+    r"\b("
+    + "|".join([_SIGNAL_IDENTITY, _SIGNAL_PREFERENCES, _SIGNAL_HABITS, _SIGNAL_CONTEXT])
+    + r")\b",
     re.IGNORECASE,
 )
 
@@ -141,6 +141,7 @@ def _extract_facts_via_llm(user_message: str) -> dict:
     raw: Optional[str] = None
     try:
         from llm.providers import ask_best_provider  # noqa: PLC0415
+
         # max_tokens=256 is intentional here: the extraction prompt requests a
         # compact JSON object, and a generous token budget risks verbose output
         # that is harder to parse and wastes context space.
@@ -151,6 +152,7 @@ def _extract_facts_via_llm(user_message: str) -> dict:
     if raw is None:
         try:
             from llm import manager as llm_manager  # noqa: PLC0415
+
             raw = llm_manager.ask_llm(prompt, temperature=0.1, max_tokens=256)
         except Exception:
             pass
@@ -213,7 +215,11 @@ def _filter_facts(existing: dict, new_facts: dict) -> dict:
         if k in _PROTECTED_KEYS:
             continue
         if total >= _MAX_FACTS and k not in existing:
-            logger.debug("Skipping new fact %r — user profile at max capacity (%d)", k, _MAX_FACTS)
+            logger.debug(
+                "Skipping new fact %r — user profile at max capacity (%d)",
+                k,
+                _MAX_FACTS,
+            )
             continue
         # For list facts, merge rather than overwrite.
         # Use list() to avoid mutating the existing list in-place.
@@ -231,6 +237,7 @@ def _filter_facts(existing: dict, new_facts: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def learn_from_exchange(
     internal_id: str,

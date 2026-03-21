@@ -19,6 +19,7 @@ _postgres_available = True
 def is_postgres_available() -> bool:
     return _postgres_available
 
+
 @contextmanager
 def get_pg_conn():
     """Context manager that yields a psycopg2 connection and always closes it on exit.
@@ -43,46 +44,53 @@ def get_pg_conn():
     finally:
         conn.close()
 
+
 def _init_mongo_connection():
     """Initialize MongoDB connection. Called lazily on first access. Thread-safe."""
     global _mongo_client, _mongo_db
-    
+
     with _mongo_lock:
         # Double-check pattern to avoid multiple initializations
         if _mongo_client is not None:
             return
-        
+
         if not MONGODB_URI or not MONGODB_DB:
             raise RuntimeError(
                 "MongoDB configuration is missing. Please set MONGODB_URI and MONGODB_DB environment variables."
             )
-        
+
         try:
             _mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=3000)
             _mongo_db = _mongo_client[MONGODB_DB]
-            _mongo_client.admin.command('ping')
+            _mongo_client.admin.command("ping")
             logger.info("MongoDB connection established successfully.")
         except mongo_errors.PyMongoError as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
             raise RuntimeError(f"Failed to connect to MongoDB: {e}") from e
 
+
 class _MongoDBProxy:
     """Proxy class that lazily initializes MongoDB connection on first access."""
+
     def __getattr__(self, name):
         if _mongo_db is None:
             _init_mongo_connection()
         return getattr(_mongo_db, name)
 
+
 class _MongoClientProxy:
     """Proxy class that lazily initializes MongoDB client on first access."""
+
     def __getattr__(self, name):
         if _mongo_client is None:
             _init_mongo_connection()
         return getattr(_mongo_client, name)
 
+
 # Module-level instances that will initialize lazily
 mongo_db = _MongoDBProxy()
 mongo_client = _MongoClientProxy()
+
 
 def init_pg():
     try:
@@ -216,25 +224,29 @@ def init_pg():
                 except DatabaseError as e:
                     conn.rollback()
                     logger.error(f"Error initializing Postgres tables: {e}")
-                    raise RuntimeError(f"Error initializing Postgres tables: {e}") from e
+                    raise RuntimeError(
+                        f"Error initializing Postgres tables: {e}"
+                    ) from e
     except Error as e:
         logger.error(f"Error in init_pg: {e}")
         raise RuntimeError(f"Error in init_pg: {e}") from e
 
+
 def init_mongo():
     try:
-        mongo_db.research_memory.create_index([('topic', 1)])
-        mongo_db.research_memory.create_index([('user_id', 1)])
+        mongo_db.research_memory.create_index([("topic", 1)])
+        mongo_db.research_memory.create_index([("user_id", 1)])
         logger.info("MongoDB indexes created successfully.")
     except mongo_errors.PyMongoError as e:
         logger.error(f"Error creating MongoDB indexes: {e}")
         raise RuntimeError(f"Error creating MongoDB indexes: {e}") from e
 
+
 def init_databases():
     """Initialize databases with graceful degradation on connection failure."""
     global _postgres_available
     postgres_available = False
-    
+
     # Try PostgreSQL
     try:
         init_pg()
@@ -245,7 +257,7 @@ def init_databases():
         _postgres_available = False
         logger.warning(f"⚠️  PostgreSQL unavailable: {e}")
         logger.warning("Continuing without PostgreSQL - in-memory operations only")
-    
+
     # Try MongoDB
     try:
         # Eagerly initialize MongoDB connection at startup to catch configuration

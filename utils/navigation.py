@@ -58,7 +58,9 @@ _MODE_ALIASES = {
 ORS_BASE_URL = "https://api.openrouteservice.org/v2/directions"
 
 # TomTom Traffic API (key required)
-TOMTOM_TRAFFIC_URL = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
+TOMTOM_TRAFFIC_URL = (
+    "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
+)
 
 # Mode aliases → OSRM profile
 _OSRM_PROFILES: Dict[str, str] = {
@@ -98,12 +100,15 @@ _MODE_LABELS: Dict[str, str] = {
 }
 
 _REQUEST_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
-_HEADERS = {"User-Agent": "CurieAI-NavigationBot/1.0 (https://github.com/yessur3808/curie-ai)"}
+_HEADERS = {
+    "User-Agent": "CurieAI-NavigationBot/1.0 (https://github.com/yessur3808/curie-ai)"
+}
 
 
 # ------------------------------------------------------------------
 # Geocoding
 # ------------------------------------------------------------------
+
 
 async def geocode(location: str) -> Optional[Dict[str, Any]]:
     """
@@ -119,7 +124,9 @@ async def geocode(location: str) -> Optional[Dict[str, Any]]:
         "addressdetails": 1,
     }
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, headers=_HEADERS) as client:
+        async with httpx.AsyncClient(
+            timeout=_REQUEST_TIMEOUT, headers=_HEADERS
+        ) as client:
             resp = await client.get(NOMINATIM_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -140,6 +147,7 @@ async def geocode(location: str) -> Optional[Dict[str, Any]]:
 # ------------------------------------------------------------------
 # Routing via OSRM
 # ------------------------------------------------------------------
+
 
 async def get_osrm_route(
     origin_coords: Dict[str, float],
@@ -166,7 +174,9 @@ async def get_osrm_route(
         params["alternatives"] = "true"
 
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, headers=_HEADERS) as client:
+        async with httpx.AsyncClient(
+            timeout=_REQUEST_TIMEOUT, headers=_HEADERS
+        ) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -182,6 +192,7 @@ async def get_osrm_route(
 # ------------------------------------------------------------------
 # Routing via OpenRouteService (transit / additional modes)
 # ------------------------------------------------------------------
+
 
 async def get_ors_route(
     origin_coords: Dict[str, float],
@@ -205,7 +216,11 @@ async def get_ors_route(
         "instructions": True,
         "alternative_routes": {"target_count": 2, "weight_factor": 1.4},
     }
-    headers = {**_HEADERS, "Authorization": ORS_API_KEY, "Content-Type": "application/json"}
+    headers = {
+        **_HEADERS,
+        "Authorization": ORS_API_KEY,
+        "Content-Type": "application/json",
+    }
     try:
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
             resp = await client.post(url, json=payload, headers=headers)
@@ -219,6 +234,7 @@ async def get_ors_route(
 # ------------------------------------------------------------------
 # Traffic data via TomTom
 # ------------------------------------------------------------------
+
 
 async def get_traffic_info(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     """
@@ -235,7 +251,9 @@ async def get_traffic_info(lat: float, lon: float) -> Optional[Dict[str, Any]]:
         "key": TOMTOM_API_KEY,
     }
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, headers=_HEADERS) as client:
+        async with httpx.AsyncClient(
+            timeout=_REQUEST_TIMEOUT, headers=_HEADERS
+        ) as client:
             resp = await client.get(TOMTOM_TRAFFIC_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -255,6 +273,7 @@ async def get_traffic_info(lat: float, lon: float) -> Optional[Dict[str, Any]]:
 # ------------------------------------------------------------------
 # Formatting helpers
 # ------------------------------------------------------------------
+
 
 def format_duration(seconds: float) -> str:
     """Format a duration in seconds into a human-readable string."""
@@ -405,9 +424,7 @@ def generate_map_links(
 
     # Kakao Maps (popular in South Korea) — destination pin link
     dname_kk = quote_plus(destination_name[:32])
-    links["Kakao Maps"] = (
-        f"https://map.kakao.com/link/to/{dname_kk},{dlat},{dlon}"
-    )
+    links["Kakao Maps"] = f"https://map.kakao.com/link/to/{dname_kk},{dlat},{dlon}"
 
     return links
 
@@ -457,6 +474,7 @@ def extract_steps(route: Dict[str, Any], max_steps: int = 8) -> List[str]:
 # High-level routing helper
 # ------------------------------------------------------------------
 
+
 async def route(
     origin: str,
     destination: str,
@@ -500,7 +518,9 @@ async def route(
     # Fetch route data
     raw_data: Optional[Dict[str, Any]] = None
     if use_transit:
-        raw_data = await get_ors_route(origin_geo, dest_geo, profile=ors_profile or "driving-car")
+        raw_data = await get_ors_route(
+            origin_geo, dest_geo, profile=ors_profile or "driving-car"
+        )
         if raw_data is None:
             # Fall back to OSRM driving if ORS not available
             mode_label = _MODE_LABELS["driving"] + " (transit N/A – no ORS key)"
@@ -525,11 +545,13 @@ async def route(
         parsed: List[Dict[str, Any]] = []
         for route in raw.get("routes", []):
             steps = extract_steps(route)
-            parsed.append({
-                "distance_m": route.get("distance", 0),
-                "duration_s": route.get("duration", 0),
-                "steps": steps,
-            })
+            parsed.append(
+                {
+                    "distance_m": route.get("distance", 0),
+                    "duration_s": route.get("duration", 0),
+                    "steps": steps,
+                }
+            )
         return parsed
 
     # If this is an ORS (transit) response, parse its GeoJSON-like structure.
@@ -546,19 +568,23 @@ async def route(
             step_list: List[Dict[str, Any]] = []
             for segment in properties.get("segments", []) or []:
                 for step in segment.get("steps", []) or []:
-                    step_list.append({
-                        "instruction": step.get("instruction"),
-                        "distance": step.get("distance"),
-                        "duration": step.get("duration"),
-                        "name": step.get("name"),
-                        "type": step.get("type"),
-                    })
+                    step_list.append(
+                        {
+                            "instruction": step.get("instruction"),
+                            "distance": step.get("distance"),
+                            "duration": step.get("duration"),
+                            "name": step.get("name"),
+                            "type": step.get("type"),
+                        }
+                    )
 
-            routes.append({
-                "distance_m": distance,
-                "duration_s": duration,
-                "steps": step_list,
-            })
+            routes.append(
+                {
+                    "distance_m": distance,
+                    "duration_s": duration,
+                    "steps": step_list,
+                }
+            )
     else:
         # Default: assume an OSRM-shaped response
         routes = _parse_osrm_routes(raw_data)

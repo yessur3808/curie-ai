@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 # Maps platform name → PostgreSQL column that holds the user's external ID.
 _PLATFORM_TO_COL: dict = {
     "telegram": "telegram_id",
-    "discord":  "discord_id",
+    "discord": "discord_id",
     "whatsapp": "whatsapp_id",
-    "api":      "api_id",
+    "api": "api_id",
 }
 
 # Default order in which platforms are tried when no user preference is set.
@@ -80,20 +80,20 @@ class ProactiveMessagingService:
     """
     Service that sends proactive, caring check-in messages to users.
     """
-    
+
     # Maximum entries to keep in memory (prevents unbounded growth)
     # Memory estimate: ~100 bytes per entry = ~100KB for 1000 entries
     # This limit should be sufficient for most deployments while preventing memory issues
     MAX_CONTACT_HISTORY = 1000
-    
+
     # Probability of sending a proactive message when interval is met (30%)
     # This adds randomness to avoid predictable patterns
     PROACTIVE_MESSAGE_PROBABILITY = 0.3
-    
+
     def __init__(self, agent, connectors: Dict = None):
         """
         Initialize the proactive messaging service.
-        
+
         Args:
             agent: The Agent instance with persona
             connectors: Dict mapping platform names to connector instances
@@ -103,47 +103,47 @@ class ProactiveMessagingService:
         self.running = False
         self.thread = None
         self.check_interval = 3600  # Check every hour
-        
+
         # Tracking when we last messaged each user
         # Note: In production, this should be persisted to database
         # For now, using in-memory cache with size limit
         self.last_contact = {}
         self.last_contact_lock = threading.Lock()  # Thread-safe access
-        
+
         logger.info("ProactiveMessagingService initialized")
-    
+
     def start(self):
         """Start the proactive messaging service in a background thread."""
         if self.running:
             logger.warning("ProactiveMessagingService already running")
             return
-        
+
         self.running = True
         self.thread = threading.Thread(target=self._run_service, daemon=True)
         self.thread.start()
         logger.info("✅ ProactiveMessagingService started")
-    
+
     def stop(self):
         """Stop the proactive messaging service."""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
         logger.info("ProactiveMessagingService stopped")
-    
+
     def _run_service(self):
         """Main service loop that runs in background thread."""
         logger.info("ProactiveMessagingService loop started")
-        
+
         while self.running:
             try:
                 # Run async check in sync thread
                 asyncio.run(self._check_and_send_messages())
             except Exception as e:
                 logger.error(f"Error in proactive messaging loop: {e}", exc_info=True)
-            
+
             # Wait before next check
             time.sleep(self.check_interval)
-    
+
     async def _check_and_send_messages(self):
         """Check all users and send proactive messages / due reminders if appropriate."""
         try:
@@ -156,15 +156,20 @@ class ProactiveMessagingService:
             # Get all users who have the proactive_messaging preference enabled
             # For now, we'll check users from recent conversations
             users = self._get_eligible_users()
-            
+
             for user_info in users:
                 try:
                     await self._maybe_send_proactive_message(user_info)
                 except Exception as e:
-                    logger.error(f"Error sending proactive message to user {user_info.get('internal_id')}: {e}", exc_info=True)
-        
+                    logger.error(
+                        f"Error sending proactive message to user {user_info.get('internal_id')}: {e}",
+                        exc_info=True,
+                    )
+
         except Exception as e:
-            logger.error(f"Error checking users for proactive messaging: {e}", exc_info=True)
+            logger.error(
+                f"Error checking users for proactive messaging: {e}", exc_info=True
+            )
 
     async def _deliver_due_reminders(self):
         """Check MongoDB for due reminders and deliver them to users."""
@@ -187,7 +192,11 @@ class ProactiveMessagingService:
                     platform = doc.get("platform", "unknown")
                     message_text = doc.get("message", "your reminder")
                     # Apply platform-appropriate formatting (WhatsApp needs plain text)
-                    from utils.formatting import format_for_platform, escape_markdown  # noqa: PLC0415
+                    from utils.formatting import (
+                        format_for_platform,
+                        escape_markdown,
+                    )  # noqa: PLC0415
+
                     escaped_message_text = escape_markdown(str(message_text))
                     reminder_msg = format_for_platform(
                         f"⏰ Reminder: **{escaped_message_text}**", platform
@@ -206,21 +215,26 @@ class ProactiveMessagingService:
                         # next preferred platform instead.
                         logger.info(
                             "Reminder %s: platform=%r is blocked for user %s; trying fallback platforms",
-                            doc["_id"], platform, internal_id,
+                            doc["_id"],
+                            platform,
+                            internal_id,
                         )
                         fallback_platforms = [
-                            p for p in cc["platform_priority"]
+                            p
+                            for p in cc["platform_priority"]
                             if p != platform and p not in cc["blocked_platforms"]
                         ]
                     else:
                         # Honour the reminder's platform; ensure it comes first.
                         fallback_platforms = [platform] + [
-                            p for p in cc["platform_priority"]
+                            p
+                            for p in cc["platform_priority"]
                             if p != platform and p not in cc["blocked_platforms"]
                         ]
 
                     delivered = False
                     from memory.database import get_pg_conn  # noqa: PLC0415
+
                     for attempt_platform in fallback_platforms:
                         connector = self.connectors.get(attempt_platform)
                         if not connector:
@@ -244,7 +258,10 @@ class ProactiveMessagingService:
                                     elif raw:
                                         external_user_ids = [raw]
                         except Exception as db_err:
-                            logger.warning("Could not look up external_user_id for reminder: %s", db_err)
+                            logger.warning(
+                                "Could not look up external_user_id for reminder: %s",
+                                db_err,
+                            )
 
                         # Order account IDs by the user's per-platform preference.
                         preferred_ids = cc["account_priority"].get(attempt_platform, [])
@@ -256,13 +273,18 @@ class ProactiveMessagingService:
                             ordered_ids = external_user_ids
 
                         for ext_uid in ordered_ids:
-                            if await self._send_via_connector(connector, ext_uid, reminder_msg):
+                            if await self._send_via_connector(
+                                connector, ext_uid, reminder_msg
+                            ):
                                 delivered = True
                                 break  # stop after first successful account
                             else:
                                 logger.warning(
                                     "Delivery failed for reminder %s to uid=%s (internal_id=%s, platform=%s)",
-                                    doc["_id"], ext_uid, internal_id, attempt_platform,
+                                    doc["_id"],
+                                    ext_uid,
+                                    internal_id,
+                                    attempt_platform,
                                 )
 
                         if delivered:
@@ -280,41 +302,59 @@ class ProactiveMessagingService:
                     # failed.  To prevent an infinite retry loop for permanently
                     # undeliverable reminders (e.g. user removed), we also track
                     # attempt_count and give up after a configurable maximum.
-                    _MAX_REMINDER_ATTEMPTS = int(os.getenv("REMINDER_MAX_ATTEMPTS", "5"))
+                    _MAX_REMINDER_ATTEMPTS = int(
+                        os.getenv("REMINDER_MAX_ATTEMPTS", "5")
+                    )
                     attempt_count = doc.get("attempt_count", 0)
                     if delivered:
                         col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True}})
-                        logger.info("Reminder %s marked as fired (internal_id=%s)", doc["_id"], internal_id)
+                        logger.info(
+                            "Reminder %s marked as fired (internal_id=%s)",
+                            doc["_id"],
+                            internal_id,
+                        )
                     elif attempt_count + 1 >= _MAX_REMINDER_ATTEMPTS:
-                        col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True, "delivery_failed": True}})
+                        col.update_one(
+                            {"_id": doc["_id"]},
+                            {"$set": {"fired": True, "delivery_failed": True}},
+                        )
                         logger.warning(
                             "Reminder %s abandoned after %d failed attempt(s) — marked fired/failed",
-                            doc["_id"], attempt_count + 1,
+                            doc["_id"],
+                            attempt_count + 1,
                         )
                     else:
                         col.update_one(
                             {"_id": doc["_id"]},
-                            {"$inc": {"attempt_count": 1}, "$set": {"last_attempt_at": datetime.now(tz_module.utc)}},
+                            {
+                                "$inc": {"attempt_count": 1},
+                                "$set": {
+                                    "last_attempt_at": datetime.now(tz_module.utc)
+                                },
+                            },
                         )
                         logger.debug(
                             "Reminder %s delivery attempt %d recorded — will retry next cycle",
-                            doc["_id"], attempt_count + 1,
+                            doc["_id"],
+                            attempt_count + 1,
                         )
 
                 except Exception as rem_err:
-                    logger.error("Error delivering reminder %s: %s", doc.get("_id"), rem_err)
+                    logger.error(
+                        "Error delivering reminder %s: %s", doc.get("_id"), rem_err
+                    )
 
         except Exception as exc:
             logger.debug("_deliver_due_reminders skipped (non-critical): %s", exc)
-    
+
     def _get_eligible_users(self):
         """
         Get list of users eligible for proactive messaging.
         Returns list of dicts with user info.
-        
+
         Queries MongoDB for users with proactive_messaging_enabled=true
         and joins with PostgreSQL to get platform-specific IDs.
-        
+
         Returns:
             List[Dict]: Each dict contains:
                 - internal_id: UUID string
@@ -326,28 +366,28 @@ class ProactiveMessagingService:
         """
         try:
             from memory.database import mongo_db, get_pg_conn
-            
+
             # Query MongoDB for users with proactive messaging enabled
-            cursor = mongo_db.user_profiles.find({
-                "facts.proactive_messaging_enabled": True
-            })
-            
+            cursor = mongo_db.user_profiles.find(
+                {"facts.proactive_messaging_enabled": True}
+            )
+
             eligible_users = []
-            
+
             for profile in cursor:
                 internal_id = profile.get("_id")
                 if not internal_id:
                     continue
-                
+
                 facts = profile.get("facts", {})
-                
+
                 # Skip if user is busy
                 if facts.get("busy", False):
                     continue
 
                 # Resolve contact-channel preferences for this user.
                 cc = _resolve_contact_channels(facts)
-                
+
                 # Get user from PostgreSQL to find their platform ID
                 try:
                     with get_pg_conn() as conn:
@@ -361,9 +401,11 @@ class ProactiveMessagingService:
                         # Normalize to a plain dict so that .get() is always available,
                         # regardless of the exact row type returned by the cursor.
                         user_row = dict(user_row) if user_row is not None else {}
-                        
+
                         if not user_row:
-                            logger.warning(f"User {internal_id} found in MongoDB but not in PostgreSQL")
+                            logger.warning(
+                                f"User {internal_id} found in MongoDB but not in PostgreSQL"
+                            )
                             continue
 
                         # Determine which platform to use, honouring the user's
@@ -382,7 +424,9 @@ class ProactiveMessagingService:
                             # Prefer accounts listed in account_priority; fall back to DB order.
                             preferred = cc["account_priority"].get(_platform, [])
                             if preferred:
-                                ordered = preferred + [i for i in ids if i not in preferred]
+                                ordered = preferred + [
+                                    i for i in ids if i not in preferred
+                                ]
                             else:
                                 ordered = ids
                             first_id = next((uid for uid in ordered if uid), None)
@@ -392,32 +436,40 @@ class ProactiveMessagingService:
                                 break
 
                         if not platform or not external_user_id:
-                            logger.warning(f"User {internal_id} has no reachable platform ID")
+                            logger.warning(
+                                f"User {internal_id} has no reachable platform ID"
+                            )
                             continue
-                        
+
                         # Build user info dict
                         user_info = {
-                            'internal_id': internal_id,
-                            'platform': platform,
-                            'external_user_id': external_user_id,
-                            'proactive_interval_hours': facts.get('proactive_interval_hours', 24),
-                            'timezone': facts.get('timezone', 'UTC'),
-                            'busy': facts.get('busy', False)
+                            "internal_id": internal_id,
+                            "platform": platform,
+                            "external_user_id": external_user_id,
+                            "proactive_interval_hours": facts.get(
+                                "proactive_interval_hours", 24
+                            ),
+                            "timezone": facts.get("timezone", "UTC"),
+                            "busy": facts.get("busy", False),
                         }
-                        
+
                         eligible_users.append(user_info)
-                        
+
                 except Exception as e:
-                    logger.error(f"Error querying user {internal_id} from PostgreSQL: {e}")
+                    logger.error(
+                        f"Error querying user {internal_id} from PostgreSQL: {e}"
+                    )
                     continue
-            
-            logger.info(f"Found {len(eligible_users)} users eligible for proactive messaging")
+
+            logger.info(
+                f"Found {len(eligible_users)} users eligible for proactive messaging"
+            )
             return eligible_users
-            
+
         except Exception as e:
             logger.error(f"Error querying eligible users: {e}", exc_info=True)
             return []
-    
+
     def _cleanup_old_contacts(self):
         """
         Clean up old entries from last_contact cache to prevent memory growth.
@@ -427,91 +479,101 @@ class ProactiveMessagingService:
             if len(self.last_contact) > self.MAX_CONTACT_HISTORY:
                 # Sort by timestamp and keep only recent entries
                 sorted_contacts = sorted(
-                    self.last_contact.items(),
-                    key=lambda x: x[1],
-                    reverse=True
+                    self.last_contact.items(), key=lambda x: x[1], reverse=True
                 )
-                self.last_contact = dict(sorted_contacts[:self.MAX_CONTACT_HISTORY])
-                logger.info(f"Cleaned up contact history, kept {self.MAX_CONTACT_HISTORY} most recent entries")
-    
+                self.last_contact = dict(sorted_contacts[: self.MAX_CONTACT_HISTORY])
+                logger.info(
+                    f"Cleaned up contact history, kept {self.MAX_CONTACT_HISTORY} most recent entries"
+                )
+
     async def _maybe_send_proactive_message(self, user_info: Dict):
         """
         Decide if we should send a proactive message to this user.
-        
+
         Args:
             user_info: Dict with 'internal_id', 'platform', 'external_user_id', etc.
         """
-        internal_id = user_info.get('internal_id')
+        internal_id = user_info.get("internal_id")
         if not internal_id:
             return
-        
+
         # Check user preferences
         user_profile = UserManager.get_user_profile(internal_id) or {}
-        
+
         # Skip if user has disabled proactive messaging
-        if not user_profile.get('proactive_messaging_enabled', False):
+        if not user_profile.get("proactive_messaging_enabled", False):
             return
-        
+
         # Skip if user is marked as busy
-        if user_profile.get('busy', False):
+        if user_profile.get("busy", False):
             logger.debug(f"User {internal_id} is busy, skipping proactive message")
             return
-        
+
         # Get last conversation time (thread-safe)
         with self.last_contact_lock:
             last_contact_time = self.last_contact.get(internal_id)
         now = datetime.now(timezone.utc)  # Use timezone-aware datetime
-        
+
         # Get user's preferred check-in interval (in hours)
-        min_interval_hours = user_profile.get('proactive_interval_hours', 24)
-        
+        min_interval_hours = user_profile.get("proactive_interval_hours", 24)
+
         # Check if enough time has passed
         if last_contact_time:
             hours_since_contact = (now - last_contact_time).total_seconds() / 3600
             if hours_since_contact < min_interval_hours:
-                logger.debug(f"Too soon to contact user {internal_id} ({hours_since_contact:.1f}h < {min_interval_hours}h)")
+                logger.debug(
+                    f"Too soon to contact user {internal_id} ({hours_since_contact:.1f}h < {min_interval_hours}h)"
+                )
                 return
-        
+
         # Randomly decide whether to send (using class constant)
         if random.random() > self.PROACTIVE_MESSAGE_PROBABILITY:
-            logger.debug(f"Random check skipped proactive message for user {internal_id}")
+            logger.debug(
+                f"Random check skipped proactive message for user {internal_id}"
+            )
             return
-        
+
         # Generate and send message
         message = await self._generate_proactive_message(internal_id)
-        
+
         # Send via appropriate connector
-        platform = user_info.get('platform')
-        external_user_id = user_info.get('external_user_id')
-        
+        platform = user_info.get("platform")
+        external_user_id = user_info.get("external_user_id")
+
         if platform and external_user_id and platform in self.connectors:
             connector = self.connectors[platform]
-            success = await self._send_via_connector(connector, external_user_id, message)
-            
+            success = await self._send_via_connector(
+                connector, external_user_id, message
+            )
+
             if success:
                 # Update last contact time (thread-safe)
                 with self.last_contact_lock:
                     self.last_contact[internal_id] = now
                 # Save to conversation history
                 ConversationManager.save_conversation(internal_id, "assistant", message)
-                logger.info(f"✅ Sent proactive message to user {internal_id} on {platform}")
+                logger.info(
+                    f"✅ Sent proactive message to user {internal_id} on {platform}"
+                )
             else:
-                logger.warning(f"Failed to send proactive message to user {internal_id} on {platform}")
-    
+                logger.warning(
+                    f"Failed to send proactive message to user {internal_id} on {platform}"
+                )
+
     async def _generate_proactive_message(self, internal_id: str) -> str:
         """
         Generate a natural, caring check-in message.
-        
+
         Args:
             internal_id: User's internal ID
-        
+
         Returns:
             Generated message text
         """
         # Load user profile and recent history
         user_profile = UserManager.get_user_profile(internal_id) or {}
         history = ConversationManager.load_recent_conversation(internal_id, limit=6)
-        
+
         # Build context for LLM
         persona = self.agent.persona
         prompt = (
@@ -526,40 +588,48 @@ class ProactiveMessagingService:
             "CRITICAL: Do NOT reveal you're checking in automatically. Just be natural, be a real genuine, caring friend.\n"
             "Keep it SHORT and CASUAL - 1-2 sentences only!\n"
         )
-        
+
         if user_profile:
             prompt += "\nWhat you know about them:\n"
             for k, v in user_profile.items():
-                if k not in ['_id', 'internal_id', 'busy', 'proactive_messaging_enabled', 'proactive_interval_hours']:
+                if k not in [
+                    "_id",
+                    "internal_id",
+                    "busy",
+                    "proactive_messaging_enabled",
+                    "proactive_interval_hours",
+                ]:
                     prompt += f"- {k}: {v}\n"
-        
+
         if history:
             prompt += "\nRecent conversation snippets:\n"
             # Last 3 messages (could be mix of user and assistant)
             for role, msg in history[-3:]:
                 prompt += f"{role.capitalize()}: {msg[:100]}...\n"
-        
+
         prompt += "\nYour casual, friendly check-in (1-2 sentences max):"
-        
+
         # Generate message
         message = await asyncio.to_thread(
             manager.ask_llm,
             prompt,
             temperature=0.9,  # Higher temperature for more natural variation
-            max_tokens=100  # Reduced to ensure brevity
+            max_tokens=100,  # Reduced to ensure brevity
         )
-        
+
         return message.strip()
-    
-    async def _send_via_connector(self, connector, external_user_id: str, message: str) -> bool:
+
+    async def _send_via_connector(
+        self, connector, external_user_id: str, message: str
+    ) -> bool:
         """
         Send message via the appropriate connector.
-        
+
         Args:
             connector: The connector instance
             external_user_id: Platform-specific user ID
             message: Message to send
-        
+
         Returns:
             True if successful, False otherwise
         """
@@ -582,7 +652,9 @@ class ProactiveMessagingService:
 
             # 1. Preferred interface: `send_message(external_user_id, message)`
             if hasattr(connector, "send_message"):
-                await _call_maybe_async(connector.send_message, external_user_id, message)
+                await _call_maybe_async(
+                    connector.send_message, external_user_id, message
+                )
                 return True
 
             # 2. Common generic interfaces on some connectors: `send` or `send_text`

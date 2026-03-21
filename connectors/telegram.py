@@ -311,7 +311,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Enable Markdown for skill responses that return formatted content
     response_text = result.get("text", "[Error: No response]")
-    parse_mode = "Markdown" if result.get("model_used") in MARKDOWN_SKILL_MODELS else None
+    parse_mode = (
+        "Markdown" if result.get("model_used") in MARKDOWN_SKILL_MODELS else None
+    )
     await update.message.reply_text(response_text, parse_mode=parse_mode)
 
 

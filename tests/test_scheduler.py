@@ -12,8 +12,14 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Stub heavy DB dependencies before importing the skill
-for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions",
-             "pymongo", "pymongo.collection", "pymongo.errors"):
+for _mod in (
+    "psycopg2",
+    "psycopg2.extras",
+    "psycopg2.extensions",
+    "pymongo",
+    "pymongo.collection",
+    "pymongo.errors",
+):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
@@ -27,6 +33,7 @@ from agent.skills.scheduler import (  # noqa: E402
 # ------------------------------------------------------------------
 # is_reminder_query
 # ------------------------------------------------------------------
+
 
 class TestIsReminderQuery:
     def test_remind_me(self):
@@ -60,6 +67,7 @@ class TestIsReminderQuery:
 # ------------------------------------------------------------------
 # _parse_due_time
 # ------------------------------------------------------------------
+
 
 class TestParseDueTime:
     def _now(self):
@@ -122,6 +130,7 @@ class TestParseDueTime:
 # _extract_reminder_message
 # ------------------------------------------------------------------
 
+
 class TestExtractReminderMessage:
     def test_remind_me_to(self):
         msg = _extract_reminder_message("remind me to call mom at 3pm")
@@ -132,7 +141,9 @@ class TestExtractReminderMessage:
         assert "team meeting" in msg.lower()
 
     def test_dont_forget_to(self):
-        msg = _extract_reminder_message("don't forget to take your medication in 1 hour")
+        msg = _extract_reminder_message(
+            "don't forget to take your medication in 1 hour"
+        )
         assert "take" in msg.lower() or "medication" in msg.lower()
 
     def test_reminder_colon(self):
@@ -144,16 +155,19 @@ class TestExtractReminderMessage:
 # handle_reminder_query (async, with DB mocked)
 # ------------------------------------------------------------------
 
+
 class TestHandleReminderQueryAsync:
     @pytest.mark.asyncio
     async def test_returns_none_for_non_reminder(self):
         from agent.skills.scheduler import handle_reminder_query
+
         result = await handle_reminder_query("what's the weather?")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_asks_for_time_when_none_found(self):
         from agent.skills.scheduler import handle_reminder_query
+
         result = await handle_reminder_query("remind me to buy milk")
         assert result is not None
         assert "when" in result.lower() or "remind" in result.lower()
@@ -165,7 +179,9 @@ class TestHandleReminderQueryAsync:
         mock_col = MagicMock()
         mock_col.insert_one.return_value = MagicMock(inserted_id="abc123")
 
-        with patch("agent.skills.scheduler._get_reminders_collection", return_value=mock_col):
+        with patch(
+            "agent.skills.scheduler._get_reminders_collection", return_value=mock_col
+        ):
             result = await handle_reminder_query(
                 "remind me in 30 minutes to call mom",
                 internal_id="user_1",
@@ -173,7 +189,11 @@ class TestHandleReminderQueryAsync:
             )
 
         assert result is not None
-        assert "call mom" in result.lower() or "reminder" in result.lower() or "⏰" in result
+        assert (
+            "call mom" in result.lower()
+            or "reminder" in result.lower()
+            or "⏰" in result
+        )
 
     @pytest.mark.asyncio
     async def test_lists_reminders_empty(self):
@@ -182,8 +202,12 @@ class TestHandleReminderQueryAsync:
         mock_col = MagicMock()
         mock_col.find.return_value = []
 
-        with patch("agent.skills.scheduler._get_reminders_collection", return_value=mock_col):
-            result = await handle_reminder_query("list my reminders", internal_id="user_1")
+        with patch(
+            "agent.skills.scheduler._get_reminders_collection", return_value=mock_col
+        ):
+            result = await handle_reminder_query(
+                "list my reminders", internal_id="user_1"
+            )
 
         assert result is not None
         assert "no" in result.lower() or "upcoming" in result.lower()
@@ -195,8 +219,12 @@ class TestHandleReminderQueryAsync:
         mock_col = MagicMock()
         mock_col.delete_many.return_value = MagicMock(deleted_count=2)
 
-        with patch("agent.skills.scheduler._get_reminders_collection", return_value=mock_col):
-            result = await handle_reminder_query("cancel all reminders", internal_id="user_1")
+        with patch(
+            "agent.skills.scheduler._get_reminders_collection", return_value=mock_col
+        ):
+            result = await handle_reminder_query(
+                "cancel all reminders", internal_id="user_1"
+            )
 
         assert result is not None
         assert "deleted" in result.lower() or "🗑️" in result
@@ -205,4 +233,5 @@ class TestHandleReminderQueryAsync:
 def test_import_guard():
     """Confirm the scheduler module can be imported without DB connections."""
     import agent.skills.scheduler  # noqa: F401
+
     assert True

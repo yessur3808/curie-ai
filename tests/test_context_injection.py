@@ -15,8 +15,14 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Stub heavy dependencies before import
-for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions",
-             "pymongo", "pymongo.collection", "pymongo.errors"):
+for _mod in (
+    "psycopg2",
+    "psycopg2.extras",
+    "psycopg2.extensions",
+    "pymongo",
+    "pymongo.collection",
+    "pymongo.errors",
+):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
@@ -24,16 +30,19 @@ for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions",
 import agent.chat_workflow as _cw_module
 from agent.chat_workflow import _select_relevant_facts
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_workflow(**persona_overrides):
     """Return a minimal ChatWorkflow instance with a mocked persona."""
-    with patch("agent.chat_workflow.UserManager"), \
-         patch("agent.chat_workflow.get_session_manager"):
+    with (
+        patch("agent.chat_workflow.UserManager"),
+        patch("agent.chat_workflow.get_session_manager"),
+    ):
         from agent.chat_workflow import ChatWorkflow
+
         persona = {"system_prompt": "You are a helpful assistant."}
         persona.update(persona_overrides)
         wf = ChatWorkflow.__new__(ChatWorkflow)
@@ -41,6 +50,7 @@ def _make_workflow(**persona_overrides):
         # Minimal cache that always misses so we exercise the full code path
         from collections import OrderedDict
         from agent.chat_workflow import PromptCache
+
         wf.prompt_cache = PromptCache()
         wf.minimal_sanitization = True
         wf.enable_small_talk = False
@@ -48,12 +58,15 @@ def _make_workflow(**persona_overrides):
 
 
 def _build(workflow, user_profile: dict, user_text: str = "hello") -> str:
-    return workflow._build_structured_prompt(user_profile, [], user_text, internal_id="test-user")
+    return workflow._build_structured_prompt(
+        user_profile, [], user_text, internal_id="test-user"
+    )
 
 
 # ---------------------------------------------------------------------------
 # [USER CONTEXT] block — always present
 # ---------------------------------------------------------------------------
+
 
 class TestUserContextBlock:
     def test_context_block_present_with_empty_profile(self):
@@ -88,6 +101,7 @@ class TestUserContextBlock:
 # Timezone resolution order
 # ---------------------------------------------------------------------------
 
+
 class TestTimezoneResolution:
     def test_profile_timezone_takes_priority(self):
         """If user has a timezone in their profile it should be used."""
@@ -120,6 +134,7 @@ class TestTimezoneResolution:
 # ---------------------------------------------------------------------------
 # Location resolution
 # ---------------------------------------------------------------------------
+
 
 class TestLocationResolution:
     def test_profile_location_shown(self):
@@ -154,6 +169,7 @@ class TestLocationResolution:
 # ---------------------------------------------------------------------------
 # User preferences injection
 # ---------------------------------------------------------------------------
+
 
 class TestPreferencesInjection:
     def test_name_is_injected(self):
@@ -198,6 +214,7 @@ class TestPreferencesInjection:
 # ---------------------------------------------------------------------------
 # _select_relevant_facts — critical keys always included
 # ---------------------------------------------------------------------------
+
 
 class TestSelectRelevantFacts:
     def test_name_always_returned(self):

@@ -42,7 +42,9 @@ logger = logging.getLogger(__name__)
 # Configuration (all overridable via environment variables)
 # ---------------------------------------------------------------------------
 
-_ENABLED: bool = os.getenv("ENABLE_TIME_VERIFICATION", "true").strip().lower() != "false"
+_ENABLED: bool = (
+    os.getenv("ENABLE_TIME_VERIFICATION", "true").strip().lower() != "false"
+)
 
 # Public time API — returns JSON with a "utc_datetime" field.
 # worldtimeapi.org is used because it requires no API key and is NTP-backed.
@@ -133,16 +135,16 @@ def _check_internet_time() -> None:
                 "ahead of" if drift > 0 else "behind",
             )
         else:
-            logger.debug(
-                "system_time: clock verified OK (drift=%.3f s)", drift
-            )
+            logger.debug("system_time: clock verified OK (drift=%.3f s)", drift)
 
         with _lock:
             _internet_ok = True
             _last_drift_seconds = drift
 
     except Exception as exc:
-        logger.debug("system_time: internet time check failed (%s) — using system clock", exc)
+        logger.debug(
+            "system_time: internet time check failed (%s) — using system clock", exc
+        )
         with _lock:
             _internet_ok = False
 

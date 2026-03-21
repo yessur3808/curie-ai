@@ -8,12 +8,17 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils.formatting import plain_links, strip_markdown, format_for_platform, MARKDOWN_SKILL_MODELS  # noqa: E402
-
+from utils.formatting import (
+    plain_links,
+    strip_markdown,
+    format_for_platform,
+    MARKDOWN_SKILL_MODELS,
+)  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # plain_links
 # ---------------------------------------------------------------------------
+
 
 class TestPlainLinks:
     def test_single_link_converted(self):
@@ -24,7 +29,9 @@ class TestPlainLinks:
     def test_multiple_links_converted(self):
         text = "[Google Maps](https://g.co) and [Apple Maps](https://maps.apple.com)"
         result = plain_links(text)
-        assert result == "Google Maps: https://g.co and Apple Maps: https://maps.apple.com"
+        assert (
+            result == "Google Maps: https://g.co and Apple Maps: https://maps.apple.com"
+        )
 
     def test_no_links_unchanged(self):
         text = "Hello, this is plain text with no links."
@@ -54,9 +61,14 @@ class TestPlainLinks:
         assert "Waze: https://waze.com/ul?ll=51.5,0.1" in result
 
     def test_url_with_query_params_preserved(self):
-        text = "[Bing Maps](https://bing.com/maps/default.aspx?rtp=pos.1_2~pos.3_4&mode=D)"
+        text = (
+            "[Bing Maps](https://bing.com/maps/default.aspx?rtp=pos.1_2~pos.3_4&mode=D)"
+        )
         result = plain_links(text)
-        assert result == "Bing Maps: https://bing.com/maps/default.aspx?rtp=pos.1_2~pos.3_4&mode=D"
+        assert (
+            result
+            == "Bing Maps: https://bing.com/maps/default.aspx?rtp=pos.1_2~pos.3_4&mode=D"
+        )
 
     def test_empty_string(self):
         assert plain_links("") == ""
@@ -65,6 +77,7 @@ class TestPlainLinks:
 # ---------------------------------------------------------------------------
 # strip_markdown
 # ---------------------------------------------------------------------------
+
 
 class TestStripMarkdown:
     def test_bold_double_asterisks(self):
@@ -125,6 +138,7 @@ class TestStripMarkdown:
 # MARKDOWN_SKILL_MODELS constant
 # ---------------------------------------------------------------------------
 
+
 class TestMarkdownSkillModels:
     def test_navigation_in_set(self):
         assert "navigation_skill" in MARKDOWN_SKILL_MODELS
@@ -140,6 +154,7 @@ class TestMarkdownSkillModels:
 # format_for_platform
 # ---------------------------------------------------------------------------
 
+
 class TestFormatForPlatform:
     _SAMPLE_MARKDOWN = (
         "Route ready!\n"
@@ -149,16 +164,27 @@ class TestFormatForPlatform:
 
     # Platforms that support Markdown links — text should pass through unchanged
     def test_telegram_unchanged(self):
-        assert format_for_platform(self._SAMPLE_MARKDOWN, "telegram") == self._SAMPLE_MARKDOWN
+        assert (
+            format_for_platform(self._SAMPLE_MARKDOWN, "telegram")
+            == self._SAMPLE_MARKDOWN
+        )
 
     def test_discord_unchanged(self):
-        assert format_for_platform(self._SAMPLE_MARKDOWN, "discord") == self._SAMPLE_MARKDOWN
+        assert (
+            format_for_platform(self._SAMPLE_MARKDOWN, "discord")
+            == self._SAMPLE_MARKDOWN
+        )
 
     def test_api_unchanged(self):
-        assert format_for_platform(self._SAMPLE_MARKDOWN, "api") == self._SAMPLE_MARKDOWN
+        assert (
+            format_for_platform(self._SAMPLE_MARKDOWN, "api") == self._SAMPLE_MARKDOWN
+        )
 
     def test_websocket_unchanged(self):
-        assert format_for_platform(self._SAMPLE_MARKDOWN, "websocket") == self._SAMPLE_MARKDOWN
+        assert (
+            format_for_platform(self._SAMPLE_MARKDOWN, "websocket")
+            == self._SAMPLE_MARKDOWN
+        )
 
     # Platforms that do NOT support Markdown — full Markdown stripping applied
     def test_whatsapp_strips_markdown_links(self):
@@ -193,4 +219,5 @@ class TestFormatForPlatform:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

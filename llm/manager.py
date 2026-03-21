@@ -388,7 +388,9 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                 effective_max_tokens = min(max_tokens, available_tokens)
 
         except Exception as tokenize_exc:
-            logger.debug("Tokenization failed (%s); using fallback budget", tokenize_exc)
+            logger.debug(
+                "Tokenization failed (%s); using fallback budget", tokenize_exc
+            )
             if max_tokens is None:
                 effective_max_tokens = FALLBACK_MAX_TOKENS
             else:
