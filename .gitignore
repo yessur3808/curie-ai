@@ -35,6 +35,11 @@ models/*.gguf
 /assets/persona.json
 /assets/*.jpg
 /assets/personality/*.json
+!/assets/personality/bagley.json
+!/assets/personality/friday.json
+!/assets/personality/gideon.json
+!/assets/personality/jarvis.json
+!/assets/personality/personality.json
 /log
 *.pub
 *.key
