@@ -29,6 +29,8 @@ from threading import Lock
 from memory import UserManager
 from memory.session_store import get_session_manager
 from llm import manager as llm_manager
+from agent.personality_context import PersonalityContext
+from utils.persona import normalize_persona
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
@@ -302,6 +304,7 @@ class ChatWorkflow:
         self.enable_small_talk = enable_small_talk
         self.idle_threshold_minutes = idle_threshold_minutes
         self.minimal_sanitization = minimal_sanitization
+        self.personality_context = PersonalityContext(self.persona)
 
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
         self.prompt_cache = PromptCache(max_size=100)
@@ -317,11 +320,14 @@ class ChatWorkflow:
         )
         if os.path.exists(persona_file):
             with open(persona_file) as f:
-                return json.load(f)
-        return {
-            "name": "Assistant",
-            "system_prompt": "You are a helpful assistant.",
-        }
+                return normalize_persona(json.load(f))
+        return normalize_persona(
+            {
+                "name": "Assistant",
+                "description": "Default assistant persona",
+                "system_prompt": "You are a helpful assistant.",
+            }
+        )
 
     async def process_message(self, normalized_input: Dict) -> Dict:
         """
@@ -537,6 +543,8 @@ class ChatWorkflow:
                 user_profile, history, user_text, internal_id=internal_id
             )
 
+            temperature = self.personality_context.get_response_temperature()
+
             # Call the best available LLM provider (cloud or local).
             # Pass max_tokens=None so:
             #  - Cloud APIs use their model defaults (generous, no artificial cap).
@@ -546,16 +554,26 @@ class ChatWorkflow:
             try:
                 from llm.providers import ask_best_provider
 
-                response = ask_best_provider(prompt, temperature=0.7, max_tokens=None)
+                response = ask_best_provider(
+                    prompt, temperature=temperature, max_tokens=None
+                )
             except Exception:
                 pass
 
             # Hard fallback: local llama.cpp (max_tokens=None → fully dynamic)
             if response is None or response.startswith("[Error"):
-                response = llm_manager.ask_llm(prompt, max_tokens=None, temperature=0.7)
+                response = llm_manager.ask_llm(
+                    prompt, max_tokens=None, temperature=temperature
+                )
 
             # Sanitize output
             response = self._sanitize_output(response)
+            response = self.personality_context.apply_response_style(
+                response,
+                user_text,
+                user_profile=user_profile,
+                history=history,
+            )
 
             # Save to conversation history
             sm = get_session_manager()
@@ -722,6 +740,11 @@ class ChatWorkflow:
         5. Current user message
         """
         history_str = "\n".join([f"{role}: {msg[:50]}" for role, msg in history[-5:]])
+        personality_directives = self.personality_context.build_prompt_directives(
+            user_text,
+            user_profile=user_profile,
+            history=history,
+        )
 
         # Resolve timezone: prefer learned profile → operator default → UTC
         user_tz = (
@@ -771,6 +794,9 @@ class ChatWorkflow:
                 "system_prompt", "You are a helpful assistant."
             )
             lines.append(system_prompt)
+
+            lines.append("\n[PERSONALITY STATE]")
+            lines.extend(personality_directives)
 
             lines.append("\n[IMPORTANT RULES]")
             lines.append(
@@ -868,7 +894,9 @@ class ChatWorkflow:
         )
         if os.path.exists(persona_file):
             with open(persona_file) as f:
-                self.persona = json.load(f)
+                self.persona = normalize_persona(json.load(f))
+            self.personality_context = PersonalityContext(self.persona)
+            self.prompt_cache = PromptCache(max_size=100)
             logger.info(f"Switched to persona: {persona_name}")
             return True
         logger.warning(f"Persona not found: {persona_name}")

@@ -71,6 +71,50 @@ def validate_persona(persona: Dict) -> bool:
     return all(field in persona for field in required_fields)
 
 
+def normalize_persona(persona: Dict) -> Dict:
+    """Backfill optional persona fields so runtime modules can rely on a stable shape."""
+    normalized = dict(persona or {})
+
+    normalized.setdefault("core_values", [])
+    normalized.setdefault("beliefs", {})
+    normalized.setdefault("emotional_profile", {})
+    normalized.setdefault("language_profile", {})
+    normalized.setdefault("style_modulation", {})
+    normalized.setdefault("decision_profile", {})
+    normalized.setdefault("memory_preferences", {})
+    normalized.setdefault("relationship_dynamics", {})
+    normalized.setdefault("settings", {})
+
+    response_style = normalized.get("response_style") or {}
+    response_style.setdefault("tone", "warm")
+    response_style.setdefault("humor", "balanced")
+    response_style.setdefault("brevity", "concise")
+    response_style.setdefault("clarity", "prioritized")
+    normalized["response_style"] = response_style
+
+    settings = normalized.get("settings") or {}
+    settings.setdefault("language", "en")
+    settings.setdefault("default_temperature", 0.7)
+    settings.setdefault("personality_depth", "standard")
+    normalized["settings"] = settings
+
+    if normalized.get("name", "").strip().lower() == "curie":
+        language_profile = normalized.get("language_profile") or {}
+        language_profile.setdefault("primary_language", "english")
+        language_profile.setdefault("secondary_language", "french")
+        french_cfg = language_profile.get("french_integration") or {}
+        french_cfg.setdefault("enabled", True)
+        french_cfg.setdefault("target_frequency", "light")
+        french_cfg.setdefault(
+            "rule",
+            "Keep English dominant and add short French phrases naturally.",
+        )
+        language_profile["french_integration"] = french_cfg
+        normalized["language_profile"] = language_profile
+
+    return normalized
+
+
 def load_persona(filename=None, assets_dir="assets/personality") -> Dict:
     """Load persona from JSON file, with environment variable fallback"""
     # Load environment variables
@@ -107,6 +151,8 @@ def load_persona(filename=None, assets_dir="assets/personality") -> Dict:
             # Validate persona
             if not validate_persona(persona):
                 raise ValueError("Invalid persona format: missing required fields")
+
+            persona = normalize_persona(persona)
 
             print(f"\nLoaded persona: {persona.get('name', 'Unknown')}")
             return persona
