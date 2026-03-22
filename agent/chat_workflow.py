@@ -314,9 +314,9 @@ class ChatWorkflow:
         )
 
     def _load_default_persona(self) -> Dict:
-        """Load default persona (Curie) if not provided."""
+        """Load default persona from personality.json if not provided."""
         persona_file = os.path.join(
-            os.path.dirname(__file__), "..", "assets", "personality", "curie.json"
+            os.path.dirname(__file__), "..", "assets", "personality", "personality.json"
         )
         if os.path.exists(persona_file):
             with open(persona_file) as f:

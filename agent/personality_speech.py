@@ -1,5 +1,26 @@
 import random
+import hashlib
+import logging
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_float(value, default=0.2):
+    """Safely convert value to float, logging errors and returning default on failure."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.debug(f"Could not convert {value!r} to float, using default {default}")
+        return default
+
+
+def _deterministic_seed(text: str, context: str, mode: str) -> int:
+    """Generate a deterministic seed from input strings (hash-randomization safe)."""
+    combined = f"{text}:{context}:{mode}"
+    hash_bytes = hashlib.sha256(combined.encode()).digest()
+    # Use first 8 bytes as an int seed
+    return int.from_bytes(hash_bytes[:8], byteorder="big")
 
 
 class PersonalitySpeechEngine:
@@ -30,13 +51,15 @@ class PersonalitySpeechEngine:
 
         mode = context.get("mode", "casual")
         modulation = persona.get("style_modulation", {}).get(mode, {})
-        intensity = float(modulation.get("french_intensity", 0.2))
+        intensity = _safe_float(modulation.get("french_intensity", 0.2), default=0.2)
 
         # Keep French light and natural: at most 1 phrase most of the time.
         if intensity <= 0:
             return response
 
-        seed = hash((response[:80], context.get("user_emotion", "neutral"), mode))
+        seed = _deterministic_seed(
+            response[:80], context.get("user_emotion", "neutral"), mode
+        )
         rng = random.Random(seed)
         insert_phrase = rng.random() < min(max(intensity, 0.05), 0.5)
         if not insert_phrase:
@@ -54,7 +77,9 @@ class PersonalitySpeechEngine:
 
         mode = context.get("mode", "casual")
         modulation = persona.get("style_modulation", {}).get(mode, {})
-        accent_intensity = float(modulation.get("accent_intensity", 0.2))
+        accent_intensity = _safe_float(
+            modulation.get("accent_intensity", 0.2), default=0.2
+        )
         if accent_intensity < 0.2:
             return response
 

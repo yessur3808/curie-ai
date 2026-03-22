@@ -85,24 +85,34 @@ def normalize_persona(persona: Dict) -> Dict:
     normalized.setdefault("relationship_dynamics", {})
     normalized.setdefault("settings", {})
 
-    response_style = normalized.get("response_style") or {}
+    # Ensure response_style is a dict before calling setdefault
+    response_style = normalized.get("response_style")
+    if not isinstance(response_style, dict):
+        response_style = {}
     response_style.setdefault("tone", "warm")
     response_style.setdefault("humor", "balanced")
     response_style.setdefault("brevity", "concise")
     response_style.setdefault("clarity", "prioritized")
     normalized["response_style"] = response_style
 
-    settings = normalized.get("settings") or {}
+    # Ensure settings is a dict before calling setdefault
+    settings = normalized.get("settings")
+    if not isinstance(settings, dict):
+        settings = {}
     settings.setdefault("language", "en")
     settings.setdefault("default_temperature", 0.7)
     settings.setdefault("personality_depth", "standard")
     normalized["settings"] = settings
 
     if normalized.get("name", "").strip().lower() == "curie":
-        language_profile = normalized.get("language_profile") or {}
+        language_profile = normalized.get("language_profile")
+        if not isinstance(language_profile, dict):
+            language_profile = {}
         language_profile.setdefault("primary_language", "english")
         language_profile.setdefault("secondary_language", "french")
-        french_cfg = language_profile.get("french_integration") or {}
+        french_cfg = language_profile.get("french_integration")
+        if not isinstance(french_cfg, dict):
+            french_cfg = {}
         french_cfg.setdefault("enabled", True)
         french_cfg.setdefault("target_frequency", "light")
         french_cfg.setdefault(

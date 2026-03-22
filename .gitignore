@@ -40,6 +40,8 @@ models/*.gguf
 !/assets/personality/gideon.json
 !/assets/personality/jarvis.json
 !/assets/personality/personality.json
+!/assets/personality/curie.json
+!/assets/personality/andreja.json
 /log
 *.pub
 *.key
