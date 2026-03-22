@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: install install-optional run start test migrate migrate-down lint format shell verify help
+.PHONY: install install-optional run start test migrate migrate-down lint format check install-hooks shell verify help
 .PHONY: db-start db-stop db-restart db-status setup-db
 .PHONY: run-telegram run-discord run-whatsapp run-api run-all
 .PHONY: check-ports test-imports clean sync-env sync-env-add sync-env-clean sync-env-backup restart-clean
@@ -67,6 +67,15 @@ lint:  ## Lint code with flake8
 
 format:  ## Format code with black
 	black agent/ connectors/ llm/ memory/ services/ utils/ scripts/ main.py tests/
+
+check:  ## Run lint + format-check in one shot (non-destructive)
+	flake8 agent/ connectors/ llm/ memory/ services/ utils/ main.py tests/ \
+	    --exclude=__pycache__,migrations
+	black --check agent/ connectors/ llm/ memory/ services/ utils/ scripts/ main.py tests/
+
+install-hooks:  ## Install git pre-commit and pre-push hooks via pre-commit
+	pre-commit install
+	pre-commit install --hook-type pre-push
 
 check-ports:  ## Check if required ports are available
 	python scripts/check_ports.py
@@ -136,6 +145,12 @@ help:  ## Show available commands
 	@echo ""
 	@echo "  5. Clean restart:"
 	@echo "     make restart-clean     # Clean, restart DB, and run"
+	@echo ""
+	@echo "  6. Code quality:"
+	@echo "     make check             # Run flake8 + black --check (non-destructive)"
+	@echo "     make lint              # Run flake8"
+	@echo "     make format            # Auto-format with black"
+	@echo "     make install-hooks     # Install git pre-commit and pre-push hooks"
 	@echo ""
 
 	

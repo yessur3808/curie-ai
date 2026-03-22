@@ -5,6 +5,7 @@ import argparse
 from contextlib import contextmanager
 from psycopg2.extras import DictCursor
 from dotenv import load_dotenv, find_dotenv
+
 load_dotenv(find_dotenv())
 
 PG_CONN_INFO = {
@@ -15,6 +16,7 @@ PG_CONN_INFO = {
     "password": os.getenv("POSTGRES_PASSWORD"),
 }
 
+
 @contextmanager
 def get_pg_conn():
     conn = psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
@@ -23,9 +25,12 @@ def get_pg_conn():
     finally:
         conn.close()
 
+
 # Allowlist of valid channel names — these map to column identifiers in SQL so
 # we must validate before interpolating to prevent SQL injection.
-_ALLOWED_CHANNELS = frozenset(["telegram", "slack", "whatsapp", "signal", "discord", "api"])
+_ALLOWED_CHANNELS = frozenset(
+    ["telegram", "slack", "whatsapp", "signal", "discord", "api"]
+)
 
 
 def _validate_channel(channel: str) -> None:
@@ -35,7 +40,15 @@ def _validate_channel(channel: str) -> None:
         )
 
 
-def get_or_create_user_id(channel, external_id, name=None, email=None, is_master=False, internal_id=None, secret_username=None):
+def get_or_create_user_id(
+    channel,
+    external_id,
+    name=None,
+    email=None,
+    is_master=False,
+    internal_id=None,
+    secret_username=None,
+):
     if not secret_username:
         raise ValueError("secret_username is required!")
     _validate_channel(channel)
@@ -45,20 +58,26 @@ def get_or_create_user_id(channel, external_id, name=None, email=None, is_master
         field = f"{channel}_id"
 
         # Platform ID columns are TEXT[]; use ANY() for the lookup
-        cur.execute(f"SELECT internal_id FROM users WHERE %s = ANY({field})", (str(external_id),))
+        cur.execute(
+            f"SELECT internal_id FROM users WHERE %s = ANY({field})",
+            (str(external_id),),
+        )
         row = cur.fetchone()
         if row:
             # Update the updated_at timestamp and updated_by
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE users 
                 SET updated_at = CURRENT_TIMESTAMP, 
                     updated_by = 'master'
                 WHERE internal_id = %s
                 RETURNING internal_id
-            """, (str(row['internal_id']),))
+            """,
+                (str(row["internal_id"]),),
+            )
             conn.commit()
             updated_row = cur.fetchone()
-            return str(updated_row['internal_id'])
+            return str(updated_row["internal_id"])
 
         # Use provided internal_id or generate new one
         new_uuid = internal_id if internal_id else str(uuid.uuid4())
@@ -71,7 +90,7 @@ def get_or_create_user_id(channel, external_id, name=None, email=None, is_master
             "secret_username",
             "roles",
             "updated_by",
-            "updated_at"
+            "updated_at",
         ]
         # Platform ID column is TEXT[]; wrap the value in an ARRAY literal
         values = [
@@ -100,55 +119,68 @@ def get_or_create_user_id(channel, external_id, name=None, email=None, is_master
         cur.execute(sql, tuple(values))
         conn.commit()
         new_row = cur.fetchone()
-        return str(new_row['internal_id'])
+        return str(new_row["internal_id"])
+
 
 def delete_master_user():
     master_internal_id = os.getenv("MASTER_USER_ID")
-    
+
     if not master_internal_id:
         raise RuntimeError("MASTER_USER_ID must be set in your .env file!")
-    
+
     with get_pg_conn() as conn:
         cur = conn.cursor()
         try:
             # First, check if the master user exists
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT internal_id 
                 FROM users 
                 WHERE internal_id = %s AND is_master = TRUE
-            """, (master_internal_id,))
+            """,
+                (master_internal_id,),
+            )
             user = cur.fetchone()
-            
+
             if not user:
                 print("⚠️  Master user not found in database!")
                 return False
-            
+
             # Update the record first with final update timestamp
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE users 
                 SET updated_at = CURRENT_TIMESTAMP,
                     updated_by = 'master'
                 WHERE internal_id = %s AND is_master = TRUE
-            """, (master_internal_id,))
-            
+            """,
+                (master_internal_id,),
+            )
+
             # Then delete the master user
-            cur.execute("""
+            cur.execute(
+                """
                 DELETE FROM users 
                 WHERE internal_id = %s AND is_master = TRUE
-            """, (master_internal_id,))
+            """,
+                (master_internal_id,),
+            )
             conn.commit()
-            
+
             if cur.rowcount > 0:
-                print(f"🗑️  Successfully deleted master user with internal_id: {master_internal_id}")
+                print(
+                    f"🗑️  Successfully deleted master user with internal_id: {master_internal_id}"
+                )
                 return True
             else:
                 print("⚠️  Failed to delete master user!")
                 return False
-                
+
         except Exception as e:
             print(f"❌ Error deleting master user: {str(e)}")
             conn.rollback()
             return False
+
 
 def ensure_master_user():
     master_channel = "telegram"
@@ -157,16 +189,16 @@ def ensure_master_user():
     master_email = os.getenv("MASTER_EMAIL", "")
     master_internal_id = os.getenv("MASTER_USER_ID")
     master_secret_username = os.getenv("MASTER_SECRET_USERNAME")
-    
+
     if not master_internal_id:
         raise RuntimeError("MASTER_USER_ID must be set in your .env file!")
-    
+
     if not master_external_id:
         raise RuntimeError("MASTER_TELEGRAM_ID must be set in your .env file!")
-    
+
     if not master_secret_username:
         raise RuntimeError("MASTER_SECRET_USERNAME must be set in your .env file!")
-    
+
     print(f"👤 Ensuring master user: {master_secret_username}")
 
     return get_or_create_user_id(
@@ -176,15 +208,15 @@ def ensure_master_user():
         email=master_email,
         is_master=True,
         internal_id=master_internal_id,
-        secret_username=master_secret_username
+        secret_username=master_secret_username,
     )
 
 
-        
-        
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Manage master user in the database')
-    parser.add_argument('-d', '--delete', action='store_true', help='Delete the master user')
+    parser = argparse.ArgumentParser(description="Manage master user in the database")
+    parser.add_argument(
+        "-d", "--delete", action="store_true", help="Delete the master user"
+    )
     args = parser.parse_args()
 
     if args.delete:

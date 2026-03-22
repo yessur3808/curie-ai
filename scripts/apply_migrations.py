@@ -9,6 +9,7 @@ PG_CONN_INFO = {
     "password": os.getenv("POSTGRES_PASSWORD", "assistantpass"),
 }
 
+
 def apply_migrations(migrations_dir="./migrations"):
     files = sorted([f for f in os.listdir(migrations_dir) if f.endswith(".up.sql")])
     with psycopg2.connect(**PG_CONN_INFO) as conn:
@@ -21,6 +22,7 @@ def apply_migrations(migrations_dir="./migrations"):
                 cur.execute(sql)
         conn.commit()
     print("All migrations applied.")
+
 
 if __name__ == "__main__":
     apply_migrations()

@@ -27,7 +27,9 @@ def get_pg_conn():
 
 # Allowlist of valid channel names — these map to column identifiers in SQL so
 # we must validate before interpolating to prevent SQL injection.
-_ALLOWED_CHANNELS = frozenset(["telegram", "slack", "whatsapp", "signal", "discord", "api"])
+_ALLOWED_CHANNELS = frozenset(
+    ["telegram", "slack", "whatsapp", "signal", "discord", "api"]
+)
 
 
 def _validate_channel(channel: str) -> None:
@@ -43,7 +45,10 @@ def get_or_create_user_id(channel, external_id):
         cur = conn.cursor()
         field = f"{channel}_id"
         # Platform ID columns are TEXT[]; use ANY() for the membership lookup
-        cur.execute(f"SELECT internal_id FROM users WHERE %s = ANY({field})", (str(external_id),))
+        cur.execute(
+            f"SELECT internal_id FROM users WHERE %s = ANY({field})",
+            (str(external_id),),
+        )
         row = cur.fetchone()
         if row:
             return row[0]

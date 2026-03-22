@@ -10,11 +10,12 @@ PG_CONN_INFO = {
     "password": os.getenv("POSTGRES_PASSWORD", "assistantpass"),
 }
 
+
 def rollback_all_migrations(migrations_dir="migrations"):
     # Find all down migrations
     files = sorted(
         [f for f in os.listdir(migrations_dir) if f.endswith(".down.sql")],
-        reverse=True  # Descending order: 003, 002, 001...
+        reverse=True,  # Descending order: 003, 002, 001...
     )
     with psycopg2.connect(**PG_CONN_INFO) as conn:
         cur = conn.cursor()
@@ -29,6 +30,7 @@ def rollback_all_migrations(migrations_dir="migrations"):
                     print(f"Error in {filename}: {e}")
         conn.commit()
     print("All down migrations applied (database rolled back).")
+
 
 if __name__ == "__main__":
     rollback_all_migrations()

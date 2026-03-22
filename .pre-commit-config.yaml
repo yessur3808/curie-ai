@@ -1,0 +1,36 @@
+# Pre-commit and pre-push hooks for curie-ai.
+#
+# Setup (one-time, after installing requirements):
+#   pre-commit install            # installs the pre-commit hook
+#   pre-commit install --hook-type pre-push   # installs the pre-push hook
+#
+# Run all hooks manually against every tracked file:
+#   pre-commit run --all-files
+#
+# Or via Make:
+#   make install-hooks   # installs both hooks
+#   make check           # runs lint + format-check in one shot
+
+repos:
+  # ---------------------------------------------------------------------------
+  # black — code formatter
+  # Runs on pre-commit (fast) to block badly-formatted commits.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        language_version: python3
+        stages: [pre-commit, pre-push]
+
+  # ---------------------------------------------------------------------------
+  # flake8 — linter
+  # Uses the project's .flake8 config file automatically.
+  # Runs on pre-commit and pre-push.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.2.0
+    hooks:
+      - id: flake8
+        additional_dependencies: []
+        stages: [pre-commit, pre-push]
