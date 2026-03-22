@@ -3,12 +3,39 @@
 import sys
 import os
 import asyncio
-from unittest.mock import AsyncMock, patch, Mock
+from unittest.mock import AsyncMock, MagicMock, patch, Mock
 
 # Add parent directory to path to import agent modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from agent.skills.find_info import (
+# ---------------------------------------------------------------------------
+# Dependency stubs
+# ---------------------------------------------------------------------------
+# Stub psycopg2/pymongo so memory.* imports succeed without a real DB driver.
+for _mod in (
+    "psycopg2",
+    "psycopg2.extras",
+    "psycopg2.extensions",
+    "psycopg2.sql",
+    "pymongo",
+    "pymongo.collection",
+    "pymongo.errors",
+):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
+
+# ---------------------------------------------------------------------------
+# Module isolation
+# ---------------------------------------------------------------------------
+# test_connectors.py loads first alphabetically and may have injected a
+# MagicMock for "memory" and "llm" into sys.modules.  Remove those stubs so
+# the real local packages can be imported below.
+for _k in [k for k in sys.modules if k == "memory" or k.startswith("memory.")]:
+    del sys.modules[_k]
+for _k in [k for k in sys.modules if k == "llm" or k.startswith("llm.")]:
+    del sys.modules[_k]
+
+from agent.skills.find_info import (  # noqa: E402
     search_sources_llm,
     scrape_url,
     cross_reference_llm,

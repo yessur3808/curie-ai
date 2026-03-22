@@ -25,6 +25,14 @@ for _mod in (
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
+# ---------------------------------------------------------------------------
+# Module isolation
+# ---------------------------------------------------------------------------
+# test_connectors.py loads first alphabetically and stubs sys.modules["llm"]
+# with a MagicMock.  Clear those stubs so the real local llm package loads.
+for _k in [k for k in sys.modules if k == "llm" or k.startswith("llm.")]:
+    del sys.modules[_k]
+
 from llm.providers import (  # noqa: E402
     _is_simple_query,
     _COMPLEX_PATTERNS,
