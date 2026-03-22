@@ -32,11 +32,14 @@ logger = logging.getLogger(__name__)
 # Config helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_scope() -> str:
     raw = os.getenv("SESSION_SCOPE", "per_channel_user").strip().lower()
     valid = {"single", "per_user", "per_channel_user"}
     if raw not in valid:
-        logger.warning("Unknown SESSION_SCOPE=%r, falling back to 'per_channel_user'", raw)
+        logger.warning(
+            "Unknown SESSION_SCOPE=%r, falling back to 'per_channel_user'", raw
+        )
         return "per_channel_user"
     return raw
 
@@ -52,6 +55,7 @@ def _get_max_history() -> int:
 # Session key builder
 # ---------------------------------------------------------------------------
 
+
 def build_session_key(channel: str, user_id: str | int) -> str:
     """
     Return a MongoDB document key for this (channel, user) combination.
@@ -64,7 +68,7 @@ def build_session_key(channel: str, user_id: str | int) -> str:
     """
     scope = _get_scope()
     uid = str(user_id)
-    ch  = channel.lower().strip()
+    ch = channel.lower().strip()
 
     if scope == "single":
         return "global:default"
@@ -122,6 +126,7 @@ if __name__ == "__main__":
 # SessionManager
 # ---------------------------------------------------------------------------
 
+
 class SessionManager:
     """
     Manages per-user conversation sessions backed by MongoDB.
@@ -145,7 +150,9 @@ class SessionManager:
     """
 
     def __init__(self, mongo_uri: str, db_name: str, collection_name: str = "sessions"):
-        self._client: MongoClient = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
+        self._client: MongoClient = MongoClient(
+            mongo_uri, serverSelectionTimeoutMS=3000
+        )
         # Force an early connection attempt so startup failures are fast and explicit.
         self._client.admin.command("ping")
         self._db = self._client[db_name]
@@ -155,7 +162,9 @@ class SessionManager:
         self._ensure_indexes()
         logger.info(
             "SessionManager ready  scope=%s  max_history=%d  collection=%s",
-            self._scope, self._max_history, collection_name,
+            self._scope,
+            self._max_history,
+            collection_name,
         )
 
     # ------------------------------------------------------------------
@@ -241,7 +250,7 @@ class SessionManager:
                 "$push": {
                     "messages": {
                         "$each": [message],
-                        "$slice": -self._max_history,   # keep most recent N
+                        "$slice": -self._max_history,  # keep most recent N
                     }
                 },
                 "$set": {"updated_at": self._now()},
@@ -264,7 +273,9 @@ class SessionManager:
         doc = self._get_or_create(channel, user_id)
         return doc.get("metadata", {})
 
-    def set_metadata(self, channel: str, user_id: str | int, key: str, value: Any) -> None:
+    def set_metadata(
+        self, channel: str, user_id: str | int, key: str, value: Any
+    ) -> None:
         """Set a single key in the per-user metadata store."""
         session_key = self._session_key(channel, user_id)
         self._get_or_create(channel, user_id)
@@ -298,9 +309,7 @@ class SessionManager:
                     "session scope %r",
                     getattr(self, "_scope", None),
                 )
-        return list(
-            self._col.find(query, {"messages": 0}).sort("updated_at", -1)
-        )
+        return list(self._col.find(query, {"messages": 0}).sort("updated_at", -1))
 
     def session_exists(self, channel: str, user_id: str | int) -> bool:
         key = self._session_key(channel, user_id)
@@ -322,11 +331,15 @@ class SessionManager:
             {"user_id": uid},
             {"$set": {"messages": [], "updated_at": self._now()}},
         )
-        logger.info("Reset all sessions for user_id=%s  count=%d", uid, result.modified_count)
+        logger.info(
+            "Reset all sessions for user_id=%s  count=%d", uid, result.modified_count
+        )
 
     def clear_all_sessions(self) -> None:
         """Wipe all conversation history across every session (admin use)."""
-        result = self._col.update_many({}, {"$set": {"messages": [], "updated_at": self._now()}})
+        result = self._col.update_many(
+            {}, {"$set": {"messages": [], "updated_at": self._now()}}
+        )
         logger.info("All sessions cleared  count=%d", result.modified_count)
 
     def close(self) -> None:

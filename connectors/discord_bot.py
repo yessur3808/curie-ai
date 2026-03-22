@@ -5,7 +5,6 @@ Receives Discord events, normalizes to standard format, calls ChatWorkflow.
 Supports text messages, voice channels, and DMs.
 """
 
-import asyncio
 import datetime
 import os
 import logging
@@ -22,6 +21,8 @@ except ImportError:
 from agent.chat_workflow import ChatWorkflow
 from utils.session import set_busy_temporarily, clear_user_busy
 from memory import UserManager
+from memory.session_store import get_session_manager
+from utils.db import is_master_user
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -53,7 +54,9 @@ async def send_message(external_user_id: str, message: str) -> bool:
         await user.send(message)
         return True
     except Exception as exc:
-        logger.error("Failed to send Discord proactive message to %s: %s", external_user_id, exc)
+        logger.error(
+            "Failed to send Discord proactive message to %s: %s", external_user_id, exc
+        )
         return False
 
 
@@ -315,11 +318,15 @@ if commands is not None:
         @bot.command(name="clear_memory")
         async def clear_memory_command(ctx):
             """Clear conversation memory (master users only)."""
-            from memory.session_store import get_session_manager
-            from utils.db import is_master_user
-
             discord_user_id = ctx.author.id
-            discord_username = f"{ctx.author.name}#{ctx.author.discriminator}"
+            # Discord migrated to a new username system where users no longer
+            # have a 4-digit discriminator suffix (#1234).  Users on the new
+            # system report discriminator as "0", so we use just their name.
+            # Users still on the legacy system are identified as "name#1234".
+            if ctx.author.discriminator == "0":
+                discord_username = ctx.author.name
+            else:
+                discord_username = f"{ctx.author.name}#{ctx.author.discriminator}"
             internal_id = get_internal_id(discord_user_id, discord_username)
 
             if not is_master_user(internal_id):

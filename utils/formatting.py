@@ -18,11 +18,13 @@ _MARKDOWN_LINK_PLATFORMS = {"telegram", "discord", "api", "websocket"}
 
 # Skills whose responses contain Markdown formatting that should be rendered.
 # Used by connectors to set parse_mode / equivalent.
-MARKDOWN_SKILL_MODELS = frozenset({
-    "navigation_skill",
-    "scheduler_skill",
-    "trip_planner_skill",
-})
+MARKDOWN_SKILL_MODELS = frozenset(
+    {
+        "navigation_skill",
+        "scheduler_skill",
+        "trip_planner_skill",
+    }
+)
 
 
 def plain_links(text: str) -> str:

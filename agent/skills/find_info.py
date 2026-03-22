@@ -14,6 +14,7 @@ import ipaddress
 
 logger = logging.getLogger(__name__)
 
+
 def _get_float_env(name: str, default: float) -> float:
     value = os.getenv(name)
     if value is None:
@@ -22,6 +23,7 @@ def _get_float_env(name: str, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
 
 def _get_int_env(name: str, default: int) -> int:
     value = os.getenv(name)
@@ -32,16 +34,24 @@ def _get_int_env(name: str, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
+
 # Info search task-specific configuration from environment variables
 INFO_SEARCH_TEMPERATURE = _get_float_env("INFO_SEARCH_TEMPERATURE", 0.2)
-INFO_SEARCH_MAX_TOKENS = _get_int_env("INFO_SEARCH_MAX_TOKENS", 512)  # Reduced default to leave room for prompt
-MAX_SOURCES = _get_int_env("INFO_SEARCH_MAX_SOURCES", 3)  # Limit number of sources to prevent context overflow
-MAX_SNIPPET_CHARS = _get_int_env("INFO_SEARCH_MAX_SNIPPET_CHARS", 400)  # Max chars per snippet (conservative estimate: ~100 tokens)
+INFO_SEARCH_MAX_TOKENS = _get_int_env(
+    "INFO_SEARCH_MAX_TOKENS", 512
+)  # Reduced default to leave room for prompt
+MAX_SOURCES = _get_int_env(
+    "INFO_SEARCH_MAX_SOURCES", 3
+)  # Limit number of sources to prevent context overflow
+MAX_SNIPPET_CHARS = _get_int_env(
+    "INFO_SEARCH_MAX_SNIPPET_CHARS", 400
+)  # Max chars per snippet (conservative estimate: ~100 tokens)
+
 
 async def is_safe_url(url: str) -> bool:
     """
     Validates URL to prevent SSRF attacks using async DNS resolution.
-    
+
     Returns True if the URL is safe to fetch, False otherwise.
     Blocks:
     - Non-http/https schemes
@@ -58,43 +68,45 @@ async def is_safe_url(url: str) -> bool:
         # Check URL length to prevent DoS
         MAX_URL_LENGTH = 2048
         if len(url) > MAX_URL_LENGTH:
-            logger.warning(f"Blocked URL exceeding max length ({len(url)} > {MAX_URL_LENGTH}): {url[:100]}...")
+            logger.warning(
+                f"Blocked URL exceeding max length ({len(url)} > {MAX_URL_LENGTH}): {url[:100]}..."
+            )
             return False
-        
+
         parsed = urlparse(url)
-        
+
         # Only allow http and https schemes
-        if parsed.scheme not in ('http', 'https'):
+        if parsed.scheme not in ("http", "https"):
             logger.warning(f"Blocked URL with invalid scheme: {url}")
             return False
-        
+
         # Get hostname
         hostname = parsed.hostname
         if not hostname:
             logger.warning(f"Blocked URL with no hostname: {url}")
             return False
-        
+
         # Check hostname length
         if len(hostname) > 253:  # Max DNS hostname length
             logger.warning(f"Blocked URL with excessively long hostname: {url}")
             return False
-        
+
         # Block localhost variations (pre-check before DNS resolution)
         # Note: DNS resolution below will catch additional loopback addresses
-        if hostname.lower() in ('localhost', '0.0.0.0', '127.0.0.1', '::1', '::'):
+        if hostname.lower() in ("localhost", "0.0.0.0", "127.0.0.1", "::1", "::"):
             logger.warning(f"Blocked localhost URL: {url}")
             return False
-        
+
         # Check for suspicious ports (optional but recommended)
         # Block common internal service ports to prevent port scanning
         # These ports are blocked unconditionally regardless of IP
         ALWAYS_BLOCKED_PORTS = {
-            22,    # SSH
-            23,    # Telnet
-            25,    # SMTP
-            135,   # Windows RPC
-            139,   # NetBIOS
-            445,   # SMB
+            22,  # SSH
+            23,  # Telnet
+            25,  # SMTP
+            135,  # Windows RPC
+            139,  # NetBIOS
+            445,  # SMB
             1433,  # MSSQL
             3306,  # MySQL
             3389,  # RDP
@@ -102,21 +114,21 @@ async def is_safe_url(url: str) -> bool:
             5900,  # VNC
             6379,  # Redis
             9200,  # Elasticsearch
-            27017, # MongoDB
+            27017,  # MongoDB
         }
-        
+
         # Ports that are only blocked if they resolve to private/internal IPs
         # Port 8080 is commonly used for legitimate public services (Jenkins, Tomcat, etc.)
         # but should be blocked for internal services to prevent SSRF
         CONDITIONAL_BLOCKED_PORTS = {
             8080,  # Common internal HTTP (allowed for public IPs)
         }
-        
+
         port = parsed.port
         if port and port in ALWAYS_BLOCKED_PORTS:
             logger.warning(f"Blocked URL with suspicious port {port}: {url}")
             return False
-        
+
         # Resolve hostname to IP address and validate ALL resolved IPs
         # If ANY resolved IP is unsafe, reject the URL (prevents DNS rebinding attacks)
         # Use asyncio.get_running_loop().getaddrinfo for non-blocking DNS resolution
@@ -127,7 +139,7 @@ async def is_safe_url(url: str) -> bool:
             for family, _, _, _, sockaddr in addr_info:
                 ip_str = sockaddr[0]
                 ip_obj = ipaddress.ip_address(ip_str)
-                
+
                 # Also validate any IPv4 address mapped into IPv6 (e.g. ::ffff:127.0.0.1)
                 ips_to_check = [ip_obj]
                 if isinstance(ip_obj, ipaddress.IPv6Address):
@@ -135,68 +147,73 @@ async def is_safe_url(url: str) -> bool:
                     if ipv4_mapped is not None:
                         # Check the mapped IPv4 address first
                         ips_to_check.insert(0, ipv4_mapped)
-                
+
                 for ip in ips_to_check:
                     # Check if IP is internal/private (used for conditional port blocking)
                     is_internal_ip = (
-                        (hasattr(ip, 'is_unspecified') and ip.is_unspecified) or
-                        ip.is_loopback or
-                        ip.is_private or
-                        ip.is_link_local or
-                        ip.is_multicast or
-                        ip.is_reserved
+                        (hasattr(ip, "is_unspecified") and ip.is_unspecified)
+                        or ip.is_loopback
+                        or ip.is_private
+                        or ip.is_link_local
+                        or ip.is_multicast
+                        or ip.is_reserved
                     )
-                    
+
                     # Block conditional ports (like 8080) only for internal IPs
                     # This allows public services on these ports while preventing SSRF
                     if is_internal_ip and port and port in CONDITIONAL_BLOCKED_PORTS:
-                        logger.warning(f"Blocked URL with port {port} on internal/private IP: {url} -> {ip}")
+                        logger.warning(
+                            f"Blocked URL with port {port} on internal/private IP: {url} -> {ip}"
+                        )
                         return False
-                    
+
                     # Block all internal/private IPs regardless of port
                     # (Note: These checks are explicit for clarity and better logging)
-                    
+
                     # Block unspecified addresses (0.0.0.0, ::)
-                    if hasattr(ip, 'is_unspecified') and ip.is_unspecified:
+                    if hasattr(ip, "is_unspecified") and ip.is_unspecified:
                         logger.warning(f"Blocked unspecified address: {url} -> {ip}")
                         return False
-                    
+
                     # Block loopback addresses
                     if ip.is_loopback:
                         logger.warning(f"Blocked loopback address: {url} -> {ip}")
                         return False
-                    
+
                     # Block private addresses
                     if ip.is_private:
                         logger.warning(f"Blocked private address: {url} -> {ip}")
                         return False
-                    
+
                     # Block link-local addresses (including 169.254.169.254)
                     if ip.is_link_local:
                         logger.warning(f"Blocked link-local address: {url} -> {ip}")
                         return False
-                    
+
                     # Block multicast addresses
                     if ip.is_multicast:
                         logger.warning(f"Blocked multicast address: {url} -> {ip}")
                         return False
-                    
+
                     # Block reserved addresses (future use, broadcast, etc.)
                     if ip.is_reserved:
                         logger.warning(f"Blocked reserved address: {url} -> {ip}")
                         return False
-        
+
         except (OSError, ValueError) as e:
             # DNS resolution failed or invalid IP
             # OSError covers socket.gaierror and socket.herror
-            logger.warning(f"Could not resolve hostname for URL validation: {url} - {e}")
+            logger.warning(
+                f"Could not resolve hostname for URL validation: {url} - {e}"
+            )
             return False
-        
+
         return True
-    
+
     except Exception as e:
         logger.error(f"Error validating URL {url}: {e}")
         return False
+
 
 async def search_sources_llm(query):
     prompt = (
@@ -204,23 +221,40 @@ async def search_sources_llm(query):
         f"Request: {query}\n"
         "Just output the URLs, one per line."
     )
-    response = await asyncio.to_thread(manager.ask_llm, prompt, temperature=INFO_SEARCH_TEMPERATURE, max_tokens=INFO_SEARCH_MAX_TOKENS)
-    urls = [line.strip() for line in response.splitlines() if line.strip().startswith("http")]
+    response = await asyncio.to_thread(
+        manager.ask_llm,
+        prompt,
+        temperature=INFO_SEARCH_TEMPERATURE,
+        max_tokens=INFO_SEARCH_MAX_TOKENS,
+    )
+    urls = [
+        line.strip()
+        for line in response.splitlines()
+        if line.strip().startswith("http")
+    ]
     # Filter URLs to only include safe ones (SSRF protection)
     # Batch validation using asyncio.gather for efficient async DNS resolution
-    validation_results = await asyncio.gather(*[is_safe_url(url) for url in urls]) if urls else []
+    validation_results = (
+        await asyncio.gather(*[is_safe_url(url) for url in urls]) if urls else []
+    )
     safe_urls = [url for url, is_safe in zip(urls, validation_results) if is_safe]
     if len(safe_urls) < len(urls):
-        logger.warning(f"Filtered out {len(urls) - len(safe_urls)} unsafe URLs from LLM response")
+        logger.warning(
+            f"Filtered out {len(urls) - len(safe_urls)} unsafe URLs from LLM response"
+        )
     return safe_urls
+
 
 def load_scraper_pattern(url):
     patterns = ScraperPatternManager.load_by_url(url)
     if patterns:
-        return patterns[0].get('content_pattern')
+        return patterns[0].get("content_pattern")
     return None
 
-def save_scraper_pattern(url, domain, query_type, content_pattern, success=True, error_msg=None):
+
+def save_scraper_pattern(
+    url, domain, query_type, content_pattern, success=True, error_msg=None
+):
     ScraperPatternManager.save_pattern(
         url=url,
         domain=domain,
@@ -229,48 +263,58 @@ def save_scraper_pattern(url, domain, query_type, content_pattern, success=True,
         last_success=datetime.utcnow() if success else None,
         last_error=error_msg if not success else None,
         reliability_score=0.9 if success else 0.2,
-        updated_at=datetime.utcnow()
+        updated_at=datetime.utcnow(),
     )
+
 
 async def scrape_url(url, pattern=None):
     # Validate URL to prevent SSRF attacks
     if not await is_safe_url(url):
         logger.error(f"Blocked unsafe URL in scrape_url: {url}")
         return f"Error scraping {url}: URL blocked for security reasons"
-    
+
     try:
         # Disable automatic redirects and handle them manually with validation
         # This prevents redirect-based SSRF attacks
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0), follow_redirects=False, max_redirects=0) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
+            follow_redirects=False,
+            max_redirects=0,
+        ) as client:
             resp = await client.get(url)
-            
+
             # Handle redirects manually with security validation
             redirect_count = 0
             MAX_REDIRECTS = 5
-            
-            while resp.status_code in (301, 302, 303, 307, 308) and redirect_count < MAX_REDIRECTS:
-                redirect_url = resp.headers.get('Location')
+
+            while (
+                resp.status_code in (301, 302, 303, 307, 308)
+                and redirect_count < MAX_REDIRECTS
+            ):
+                redirect_url = resp.headers.get("Location")
                 if not redirect_url:
                     break
-                
+
                 # Make redirect URL absolute if it's relative
-                if not redirect_url.startswith('http'):
+                if not redirect_url.startswith("http"):
                     redirect_url = urljoin(url, redirect_url)
-                
+
                 # Validate redirect target
                 if not await is_safe_url(redirect_url):
-                    logger.error(f"Blocked unsafe redirect from {url} to {redirect_url}")
+                    logger.error(
+                        f"Blocked unsafe redirect from {url} to {redirect_url}"
+                    )
                     return f"Error scraping {url}: Redirect to unsafe location blocked"
-                
+
                 logger.info(f"Following redirect from {url} to {redirect_url}")
                 url = redirect_url
                 resp = await client.get(url)
                 redirect_count += 1
-            
+
             if redirect_count >= MAX_REDIRECTS:
                 logger.warning(f"Too many redirects for {url}")
                 return f"Error scraping {url}: Too many redirects"
-            
+
             resp.raise_for_status()
             html = resp.text
 
@@ -287,7 +331,9 @@ async def scrape_url(url, pattern=None):
             except Exception as e:
                 # If pattern-based extraction fails, fall back to full-page text below.
                 # This exception is non-fatal and is logged for debugging purposes.
-                logger.warning(f"Pattern-based scraping failed for {url}: {e}", exc_info=True)
+                logger.warning(
+                    f"Pattern-based scraping failed for {url}: {e}", exc_info=True
+                )
         text = soup.get_text(separator="\n", strip=True)
         return text[:MAX_SNIPPET_CHARS]
     except httpx.TimeoutException as e:
@@ -303,6 +349,7 @@ async def scrape_url(url, pattern=None):
         logger.error(f"Unexpected error while scraping {url}: {e}", exc_info=True)
         return f"Error scraping {url}: {e}"
 
+
 async def cross_reference_llm(query, snippets):
     """
     Cross-references multiple source snippets to answer a query.
@@ -310,16 +357,18 @@ async def cross_reference_llm(query, snippets):
     """
     # Limit number of sources to prevent context overflow
     limited_snippets = snippets[:MAX_SOURCES]
-    
+
     # Truncate each snippet to max chars (accounting for truncation suffix)
     truncation_suffix = "... [truncated]"
     truncated_snippets = [
-        snippet[:MAX_SNIPPET_CHARS - len(truncation_suffix)] + truncation_suffix
-        if len(snippet) > MAX_SNIPPET_CHARS
-        else snippet
+        (
+            snippet[: MAX_SNIPPET_CHARS - len(truncation_suffix)] + truncation_suffix
+            if len(snippet) > MAX_SNIPPET_CHARS
+            else snippet
+        )
         for snippet in limited_snippets
     ]
-    
+
     joined = "\n---\n".join(truncated_snippets)
     prompt = (
         f"Given the following user request:\n{query}\n"
@@ -327,15 +376,26 @@ async def cross_reference_llm(query, snippets):
         f"{joined}\n"
         "Based on these, answer the user's question in a concise, up-to-date summary. If information conflicts, mention the discrepancy."
     )
-    
+
     # Early validation: check if prompt is reasonable
     # Conservative estimate: 4 chars per token (varies by tokenizer and language)
     # This is an approximation; actual token count may differ depending on the LLM's tokenizer
     estimated_prompt_tokens = len(prompt) / 4
-    if estimated_prompt_tokens > (manager.MODEL_CONTEXT_SIZE - INFO_SEARCH_MAX_TOKENS - manager.CONTEXT_BUFFER_TOKENS):
-        logger.warning(f"Prompt estimated at {estimated_prompt_tokens} tokens, may exceed context window")
-    
-    return await asyncio.to_thread(manager.ask_llm, prompt, temperature=INFO_SEARCH_TEMPERATURE, max_tokens=INFO_SEARCH_MAX_TOKENS)
+    if estimated_prompt_tokens > (
+        manager.MODEL_CONTEXT_SIZE
+        - INFO_SEARCH_MAX_TOKENS
+        - manager.CONTEXT_BUFFER_TOKENS
+    ):
+        logger.warning(
+            f"Prompt estimated at {estimated_prompt_tokens} tokens, may exceed context window"
+        )
+
+    return await asyncio.to_thread(
+        manager.ask_llm,
+        prompt,
+        temperature=INFO_SEARCH_TEMPERATURE,
+        max_tokens=INFO_SEARCH_MAX_TOKENS,
+    )
 
 
 class DynamicScraper:
@@ -377,6 +437,8 @@ class AdaptiveScraper:
             success=success,
             error_msg=error_msg,
         )
+
+
 async def find_info(query):
     scraper = DynamicScraper()
     adaptive = AdaptiveScraper()
@@ -400,16 +462,30 @@ async def find_info(query):
                 # Save the pattern (for demo, use main_selector=body or enhance with LLM)
                 example_pattern = {"main_selector": "body"}
                 await adaptive.save_scraper_pattern(
-                    url, domain, query_type=query, content_pattern=example_pattern, success=True
+                    url,
+                    domain,
+                    query_type=query,
+                    content_pattern=example_pattern,
+                    success=True,
                 )
             else:
                 await adaptive.save_scraper_pattern(
-                    url, domain, query_type=query, content_pattern=None, success=False, error_msg=data
+                    url,
+                    domain,
+                    query_type=query,
+                    content_pattern=None,
+                    success=False,
+                    error_msg=data,
                 )
             return data
         except Exception as e:
             await adaptive.save_scraper_pattern(
-                url, domain, query_type=query, content_pattern=None, success=False, error_msg=str(e)
+                url,
+                domain,
+                query_type=query,
+                content_pattern=None,
+                success=False,
+                error_msg=str(e),
             )
             return f"Error scraping {url}: {e}"
 

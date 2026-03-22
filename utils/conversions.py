@@ -20,23 +20,23 @@ _cache_duration = timedelta(hours=1)
 async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, float]]:
     """
     Fetch current exchange rates from exchangerate.host API.
-    
+
     Args:
         base_currency: Base currency code (e.g., 'USD', 'EUR')
-    
+
     Returns:
         Dictionary of currency codes to exchange rates, or None if failed
     """
     global _rate_cache
-    
+
     # Check if cache is still valid for this base currency
-    now = datetime.now(datetime.UTC) if hasattr(datetime, 'UTC') else datetime.utcnow()
+    now = datetime.now(datetime.UTC) if hasattr(datetime, "UTC") else datetime.utcnow()
     if base_currency in _rate_cache:
         cache_entry = _rate_cache[base_currency]
-        if (now - cache_entry['timestamp']) < _cache_duration:
+        if (now - cache_entry["timestamp"]) < _cache_duration:
             logger.debug(f"Using cached exchange rates for {base_currency}")
-            return cache_entry['rates']
-    
+            return cache_entry["rates"]
+
     try:
         url = f"https://api.exchangerate.host/latest?base={base_currency.upper()}"
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
@@ -46,17 +46,18 @@ async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, f
                 if data.get("success", False) and "rates" in data:
                     rates = data["rates"]
                     # Update cache with per-base timestamp
-                    _rate_cache[base_currency] = {
-                        'rates': rates,
-                        'timestamp': now
-                    }
-                    logger.info(f"Fetched {len(rates)} exchange rates for {base_currency}")
+                    _rate_cache[base_currency] = {"rates": rates, "timestamp": now}
+                    logger.info(
+                        f"Fetched {len(rates)} exchange rates for {base_currency}"
+                    )
                     return rates
                 else:
                     logger.error(f"API returned unsuccessful response: {data}")
                     return None
             else:
-                logger.error(f"Failed to fetch exchange rates: HTTP {response.status_code}")
+                logger.error(
+                    f"Failed to fetch exchange rates: HTTP {response.status_code}"
+                )
                 return None
     except httpx.TimeoutException as e:
         logger.error(f"Timeout fetching exchange rates: {e}")
@@ -70,18 +71,16 @@ async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, f
 
 
 async def convert_currency(
-    amount: float,
-    from_currency: str,
-    to_currency: str
+    amount: float, from_currency: str, to_currency: str
 ) -> Optional[Dict[str, Any]]:
     """
     Convert an amount from one currency to another.
-    
+
     Args:
         amount: Amount to convert
         from_currency: Source currency code (e.g., 'USD')
         to_currency: Target currency code (e.g., 'EUR')
-    
+
     Returns:
         Dictionary with conversion details:
         {
@@ -96,69 +95,98 @@ async def convert_currency(
     """
     from_currency = from_currency.upper()
     to_currency = to_currency.upper()
-    
+
     # Handle same currency
     if from_currency == to_currency:
         return {
-            'original_amount': amount,
-            'original_currency': from_currency,
-            'converted_amount': amount,
-            'converted_currency': to_currency,
-            'exchange_rate': 1.0,
-            'timestamp': datetime.now(datetime.UTC) if hasattr(datetime, 'UTC') else datetime.utcnow()
+            "original_amount": amount,
+            "original_currency": from_currency,
+            "converted_amount": amount,
+            "converted_currency": to_currency,
+            "exchange_rate": 1.0,
+            "timestamp": (
+                datetime.now(datetime.UTC)
+                if hasattr(datetime, "UTC")
+                else datetime.utcnow()
+            ),
         }
-    
+
     # Fetch exchange rates with from_currency as base
     rates = await get_exchange_rates(from_currency)
     if not rates:
         logger.error(f"Could not fetch exchange rates for {from_currency}")
         return None
-    
+
     # Check if target currency exists in rates
     if to_currency not in rates:
         logger.error(f"Target currency {to_currency} not found in exchange rates")
         return None
-    
+
     exchange_rate = rates[to_currency]
     converted_amount = amount * exchange_rate
-    
+
     return {
-        'original_amount': amount,
-        'original_currency': from_currency,
-        'converted_amount': round(converted_amount, 2),
-        'converted_currency': to_currency,
-        'exchange_rate': round(exchange_rate, 6),
-        'timestamp': datetime.now(datetime.UTC) if hasattr(datetime, 'UTC') else datetime.utcnow()
+        "original_amount": amount,
+        "original_currency": from_currency,
+        "converted_amount": round(converted_amount, 2),
+        "converted_currency": to_currency,
+        "exchange_rate": round(exchange_rate, 6),
+        "timestamp": (
+            datetime.now(datetime.UTC)
+            if hasattr(datetime, "UTC")
+            else datetime.utcnow()
+        ),
     }
 
 
 def get_popular_currencies() -> list:
     """Return a list of popular currency codes."""
     return [
-        'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD',
-        'CNY', 'INR', 'BRL', 'ZAR', 'MXN', 'SGD', 'HKD', 'KRW',
-        'SEK', 'NOK', 'DKK', 'RUB', 'TRY', 'THB', 'IDR', 'MYR'
+        "USD",
+        "EUR",
+        "GBP",
+        "JPY",
+        "CHF",
+        "CAD",
+        "AUD",
+        "NZD",
+        "CNY",
+        "INR",
+        "BRL",
+        "ZAR",
+        "MXN",
+        "SGD",
+        "HKD",
+        "KRW",
+        "SEK",
+        "NOK",
+        "DKK",
+        "RUB",
+        "TRY",
+        "THB",
+        "IDR",
+        "MYR",
     ]
 
 
 def format_currency_result(conversion: Dict[str, Any]) -> str:
     """
     Format a currency conversion result for display.
-    
+
     Args:
         conversion: Result from convert_currency()
-    
+
     Returns:
         Formatted string for display
     """
-    original = conversion['original_amount']
-    from_cur = conversion['original_currency']
-    converted = conversion['converted_amount']
-    to_cur = conversion['converted_currency']
-    rate = conversion['exchange_rate']
-    
+    original = conversion["original_amount"]
+    from_cur = conversion["original_currency"]
+    converted = conversion["converted_amount"]
+    to_cur = conversion["converted_currency"]
+    rate = conversion["exchange_rate"]
+
     result = f"💱 Currency Conversion:\n"
     result += f"{original:,.2f} {from_cur} = {converted:,.2f} {to_cur}\n"
     result += f"Exchange rate: 1 {from_cur} = {rate:.6f} {to_cur}"
-    
+
     return result

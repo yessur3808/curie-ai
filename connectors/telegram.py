@@ -20,9 +20,11 @@ from telegram.ext import (
 )
 from agent.chat_workflow import ChatWorkflow
 
-from utils.persona import load_persona
 from utils.session import set_busy_temporarily, clear_user_busy
+from utils.formatting import MARKDOWN_SKILL_MODELS
 from memory import UserManager
+from memory.session_store import get_session_manager
+from utils.db import is_master_user
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -215,9 +217,6 @@ async def handle_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from memory.session_store import get_session_manager
-    from utils.db import is_master_user
-
     tg_user_id = update.message.from_user.id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
     internal_id = get_internal_id(tg_user_id, telegram_username)
@@ -312,8 +311,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Enable Markdown for skill responses that return formatted content
     response_text = result.get("text", "[Error: No response]")
-    from utils.formatting import MARKDOWN_SKILL_MODELS
-    parse_mode = "Markdown" if result.get("model_used") in MARKDOWN_SKILL_MODELS else None
+    parse_mode = (
+        "Markdown" if result.get("model_used") in MARKDOWN_SKILL_MODELS else None
+    )
     await update.message.reply_text(response_text, parse_mode=parse_mode)
 
 

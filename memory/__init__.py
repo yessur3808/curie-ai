@@ -5,13 +5,10 @@ from .users import UserManager
 from .conversations import ConversationManager
 from .research import ResearchManager
 
+
 def init_memory():
     init_databases()
 
+
 # Export everything explicitly
-__all__ = [
-    'init_memory',
-    'UserManager',
-    'ConversationManager',
-    'ResearchManager'
-]
+__all__ = ["init_memory", "UserManager", "ConversationManager", "ResearchManager"]

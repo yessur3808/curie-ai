@@ -11,8 +11,14 @@ from unittest.mock import MagicMock, patch, AsyncMock
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Stub heavy DB dependencies before importing the skill
-for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions",
-             "pymongo", "pymongo.collection", "pymongo.errors"):
+for _mod in (
+    "psycopg2",
+    "psycopg2.extras",
+    "psycopg2.extensions",
+    "pymongo",
+    "pymongo.collection",
+    "pymongo.errors",
+):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
@@ -23,10 +29,10 @@ from agent.skills.trip_planner import (  # noqa: E402
     handle_trip_query,
 )
 
-
 # ------------------------------------------------------------------
 # is_trip_query
 # ------------------------------------------------------------------
+
 
 class TestIsTripQuery:
     def test_plan_a_trip(self):
@@ -63,6 +69,7 @@ class TestIsTripQuery:
 # ------------------------------------------------------------------
 # extract_trip_params
 # ------------------------------------------------------------------
+
 
 class TestExtractTripParams:
     def test_destination_extracted(self):
@@ -111,6 +118,7 @@ class TestExtractTripParams:
 # handle_trip_query (async, with LLM mocked)
 # ------------------------------------------------------------------
 
+
 class TestHandleTripQueryAsync:
     @pytest.mark.asyncio
     async def test_returns_none_for_non_trip(self):
@@ -151,7 +159,9 @@ class TestHandleTripQueryAsync:
     async def test_falls_back_to_local_llm_on_provider_failure(self):
         fake_response = "Here is a packing list..."
 
-        with patch("llm.providers.ask_best_provider", side_effect=Exception("No cloud")):
+        with patch(
+            "llm.providers.ask_best_provider", side_effect=Exception("No cloud")
+        ):
             with patch("llm.manager.ask_llm", return_value=fake_response):
                 result = await handle_trip_query("what should I pack for a ski trip?")
 
@@ -184,13 +194,13 @@ class TestHandleTripQueryAsync:
 
         assert result is not None
         # Compact prompt is shorter than verbose prompt
-        assert len(captured["prompt"]) < 700, (
-            f"Compact prompt should be short; got {len(captured['prompt'])} chars"
-        )
+        assert (
+            len(captured["prompt"]) < 700
+        ), f"Compact prompt should be short; got {len(captured['prompt'])} chars"
         # No hardcoded token cap — max_tokens should be None (fully dynamic)
-        assert captured["max_tokens"] is None, (
-            f"max_tokens should be None for dynamic allocation, got {captured['max_tokens']}"
-        )
+        assert (
+            captured["max_tokens"] is None
+        ), f"max_tokens should be None for dynamic allocation, got {captured['max_tokens']}"
 
     @pytest.mark.asyncio
     async def test_cloud_mode_uses_verbose_prompt(self):
@@ -208,9 +218,9 @@ class TestHandleTripQueryAsync:
 
         assert result is not None
         # Verbose prompt is longer than compact prompt
-        assert len(captured["prompt"]) > 400, (
-            f"Verbose prompt should be long; got {len(captured['prompt'])} chars"
-        )
+        assert (
+            len(captured["prompt"]) > 400
+        ), f"Verbose prompt should be long; got {len(captured['prompt'])} chars"
         # max_tokens is None — no cap applied
         assert captured["max_tokens"] is None
 
@@ -233,4 +243,5 @@ class TestHandleTripQueryAsync:
 def test_import_guard():
     """Confirm the trip_planner module can be imported without DB connections."""
     import agent.skills.trip_planner  # noqa: F401
+
     assert True

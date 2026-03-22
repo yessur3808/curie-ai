@@ -4,6 +4,7 @@ from psycopg2 import OperationalError, DatabaseError, Error
 from pymongo import MongoClient, errors as mongo_errors
 import logging
 import threading
+from contextlib import contextmanager
 from .config import PG_CONN_INFO, MONGODB_URI, MONGODB_DB
 
 logger = logging.getLogger(__name__)
@@ -18,56 +19,78 @@ _postgres_available = True
 def is_postgres_available() -> bool:
     return _postgres_available
 
+
+@contextmanager
 def get_pg_conn():
+    """Context manager that yields a psycopg2 connection and always closes it on exit.
+
+    Previously the callers used ``with get_pg_conn() as conn:`` relying on
+    psycopg2's built-in connection context manager, which only commits or
+    rolls back the transaction but never calls ``conn.close()``.  Every call
+    therefore leaked an open connection and would eventually exhaust the
+    database server's connection pool.  This context manager wraps the
+    connection in a ``try/finally`` block so the connection is guaranteed to be
+    closed regardless of whether the body raised an exception.
+    """
     if not _postgres_available:
         raise RuntimeError("Postgres is disabled due to startup connection failure")
     try:
         conn = psycopg2.connect(**PG_CONN_INFO, cursor_factory=DictCursor)
-        return conn
     except OperationalError as e:
         logger.error(f"Failed to connect to Postgres: {e}")
         raise RuntimeError(f"Failed to connect to Postgres: {e}") from e
+    try:
+        yield conn
+    finally:
+        conn.close()
+
 
 def _init_mongo_connection():
     """Initialize MongoDB connection. Called lazily on first access. Thread-safe."""
     global _mongo_client, _mongo_db
-    
+
     with _mongo_lock:
         # Double-check pattern to avoid multiple initializations
         if _mongo_client is not None:
             return
-        
+
         if not MONGODB_URI or not MONGODB_DB:
             raise RuntimeError(
                 "MongoDB configuration is missing. Please set MONGODB_URI and MONGODB_DB environment variables."
             )
-        
+
         try:
             _mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=3000)
             _mongo_db = _mongo_client[MONGODB_DB]
-            _mongo_client.admin.command('ping')
+            _mongo_client.admin.command("ping")
             logger.info("MongoDB connection established successfully.")
         except mongo_errors.PyMongoError as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
             raise RuntimeError(f"Failed to connect to MongoDB: {e}") from e
 
+
 class _MongoDBProxy:
     """Proxy class that lazily initializes MongoDB connection on first access."""
+
     def __getattr__(self, name):
         if _mongo_db is None:
             _init_mongo_connection()
         return getattr(_mongo_db, name)
 
+
 class _MongoClientProxy:
     """Proxy class that lazily initializes MongoDB client on first access."""
+
     def __getattr__(self, name):
         if _mongo_client is None:
             _init_mongo_connection()
         return getattr(_mongo_client, name)
 
+
 # Module-level instances that will initialize lazily
 mongo_db = _MongoDBProxy()
 mongo_client = _MongoClientProxy()
+
 
 def init_pg():
     try:
@@ -79,12 +102,15 @@ def init_pg():
                         CREATE TABLE IF NOT EXISTS users (
                             id SERIAL PRIMARY KEY,
                             internal_id UUID UNIQUE DEFAULT gen_random_uuid(),
-                            telegram_id TEXT,
-                            slack_id TEXT,
-                            whatsapp_id TEXT,
-                            signal_id TEXT,
+                            telegram_id  TEXT[],
+                            slack_id     TEXT[],
+                            whatsapp_id  TEXT[],
+                            signal_id    TEXT[],
+                            discord_id   TEXT[],
+                            api_id       TEXT[],
                             phone_number TEXT,
-                            email TEXT,
+                            email        TEXT[],
+                            display_name TEXT,
                             secret_username TEXT NOT NULL,
                             is_master BOOLEAN NOT NULL DEFAULT FALSE,
                             roles TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -92,6 +118,96 @@ def init_pg():
                             updated_at TIMESTAMPTZ DEFAULT now(),
                             updated_by TEXT NOT NULL
                         );
+                    """)
+                    # Idempotent migration for deployments that pre-date the TEXT[] schema:
+                    #
+                    # 1. For columns that already existed as TEXT, convert each value to a
+                    #    single-element TEXT[] (NULL stays NULL).
+                    # 2. For columns that did not yet exist (discord_id, api_id), add them
+                    #    as TEXT[].
+                    # 3. For columns that are already TEXT[], do nothing.
+                    #
+                    # All checks are inside a single DO $$ ... $$ block so the whole
+                    # migration is one round-trip and is safe to re-run on every startup.
+                    cur.execute("""
+                        DO $$
+                        DECLARE
+                            col_type TEXT;
+                        BEGIN
+                            -- telegram_id, slack_id, whatsapp_id, signal_id were TEXT
+                            -- in older deployments; convert to TEXT[] if necessary.
+                            FOR col_type IN
+                                SELECT data_type
+                                FROM information_schema.columns
+                                WHERE table_name = 'users'
+                                  AND column_name = 'telegram_id'
+                            LOOP
+                                IF col_type = 'text' THEN
+                                    ALTER TABLE users
+                                        ALTER COLUMN telegram_id  TYPE TEXT[]
+                                            USING CASE WHEN telegram_id  IS NULL THEN NULL ELSE ARRAY[telegram_id]  END,
+                                        ALTER COLUMN slack_id     TYPE TEXT[]
+                                            USING CASE WHEN slack_id     IS NULL THEN NULL ELSE ARRAY[slack_id]     END,
+                                        ALTER COLUMN whatsapp_id  TYPE TEXT[]
+                                            USING CASE WHEN whatsapp_id  IS NULL THEN NULL ELSE ARRAY[whatsapp_id]  END,
+                                        ALTER COLUMN signal_id    TYPE TEXT[]
+                                            USING CASE WHEN signal_id    IS NULL THEN NULL ELSE ARRAY[signal_id]    END;
+                                END IF;
+                            END LOOP;
+
+                            -- discord_id: add as TEXT[] if missing, convert TEXT→TEXT[] if needed.
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'discord_id'
+                            ) THEN
+                                ALTER TABLE users ADD COLUMN discord_id TEXT[];
+                            ELSE
+                                SELECT data_type INTO col_type
+                                FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'discord_id';
+                                IF col_type = 'text' THEN
+                                    ALTER TABLE users
+                                        ALTER COLUMN discord_id TYPE TEXT[]
+                                            USING CASE WHEN discord_id IS NULL THEN NULL ELSE ARRAY[discord_id] END;
+                                END IF;
+                            END IF;
+
+                            -- api_id: add as TEXT[] if missing, convert TEXT→TEXT[] if needed.
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'api_id'
+                            ) THEN
+                                ALTER TABLE users ADD COLUMN api_id TEXT[];
+                            ELSE
+                                SELECT data_type INTO col_type
+                                FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'api_id';
+                                IF col_type = 'text' THEN
+                                    ALTER TABLE users
+                                        ALTER COLUMN api_id TYPE TEXT[]
+                                            USING CASE WHEN api_id IS NULL THEN NULL ELSE ARRAY[api_id] END;
+                                END IF;
+                            END IF;
+
+                            -- email: convert TEXT→TEXT[] if still scalar so a user can
+                            -- have multiple email addresses registered.
+                            SELECT data_type INTO col_type
+                            FROM information_schema.columns
+                            WHERE table_name = 'users' AND column_name = 'email';
+                            IF col_type = 'text' THEN
+                                ALTER TABLE users
+                                    ALTER COLUMN email TYPE TEXT[]
+                                        USING CASE WHEN email IS NULL THEN NULL ELSE ARRAY[email] END;
+                            END IF;
+
+                            -- display_name: add the column if it is not present yet.
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = 'display_name'
+                            ) THEN
+                                ALTER TABLE users ADD COLUMN display_name TEXT;
+                            END IF;
+                        END $$;
                     """)
                     cur.execute("""
                         CREATE TABLE IF NOT EXISTS conversation_memory (
@@ -108,25 +224,29 @@ def init_pg():
                 except DatabaseError as e:
                     conn.rollback()
                     logger.error(f"Error initializing Postgres tables: {e}")
-                    raise RuntimeError(f"Error initializing Postgres tables: {e}") from e
+                    raise RuntimeError(
+                        f"Error initializing Postgres tables: {e}"
+                    ) from e
     except Error as e:
         logger.error(f"Error in init_pg: {e}")
         raise RuntimeError(f"Error in init_pg: {e}") from e
 
+
 def init_mongo():
     try:
-        mongo_db.research_memory.create_index([('topic', 1)])
-        mongo_db.research_memory.create_index([('user_id', 1)])
+        mongo_db.research_memory.create_index([("topic", 1)])
+        mongo_db.research_memory.create_index([("user_id", 1)])
         logger.info("MongoDB indexes created successfully.")
     except mongo_errors.PyMongoError as e:
         logger.error(f"Error creating MongoDB indexes: {e}")
         raise RuntimeError(f"Error creating MongoDB indexes: {e}") from e
 
+
 def init_databases():
     """Initialize databases with graceful degradation on connection failure."""
     global _postgres_available
     postgres_available = False
-    
+
     # Try PostgreSQL
     try:
         init_pg()
@@ -137,7 +257,7 @@ def init_databases():
         _postgres_available = False
         logger.warning(f"⚠️  PostgreSQL unavailable: {e}")
         logger.warning("Continuing without PostgreSQL - in-memory operations only")
-    
+
     # Try MongoDB
     try:
         # Eagerly initialize MongoDB connection at startup to catch configuration

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 # Add parent directory to path to import modules
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from utils.datetime_info import (
     get_current_datetime,
@@ -14,10 +14,10 @@ from utils.datetime_info import (
     extract_city_from_message,
 )
 
-
 # ---------------------------------------------------------------------------
 # get_current_datetime — now returns a formatted string (not a dict)
 # ---------------------------------------------------------------------------
+
 
 def test_get_current_datetime_utc():
     """get_current_datetime should return a string containing date/time/timezone."""
@@ -61,6 +61,7 @@ def test_get_current_datetime_tokyo():
 # extract_timezone_from_message — returns None when no match
 # ---------------------------------------------------------------------------
 
+
 def test_extract_timezone_no_match():
     """Returns None when no recognisable location found."""
     result = extract_timezone_from_message("What is the weather like?")
@@ -72,12 +73,17 @@ def test_extract_timezone_city_names():
     assert extract_timezone_from_message("What time is it in Tokyo?") == "Asia/Tokyo"
     assert extract_timezone_from_message("Current time in London") == "Europe/London"
     assert extract_timezone_from_message("Time in Paris") == "Europe/Paris"
-    assert extract_timezone_from_message("What's the time in Hong Kong?") == "Asia/Hong_Kong"
+    assert (
+        extract_timezone_from_message("What's the time in Hong Kong?")
+        == "Asia/Hong_Kong"
+    )
 
 
 def test_extract_timezone_abbreviations():
     """Common abbreviations should work."""
-    assert extract_timezone_from_message("What time is it in NYC?") == "America/New_York"
+    assert (
+        extract_timezone_from_message("What time is it in NYC?") == "America/New_York"
+    )
     assert extract_timezone_from_message("Time in SF") == "America/Los_Angeles"
 
 
@@ -101,6 +107,7 @@ def test_extract_timezone_case_insensitive():
 # extract_city_from_message
 # ---------------------------------------------------------------------------
 
+
 def test_extract_city_no_match():
     """Returns None when no city found."""
     assert extract_city_from_message("What is the weather?") is None
@@ -111,7 +118,10 @@ def test_extract_city_from_message():
     assert extract_city_from_message("What's the weather in Tokyo?") == "Tokyo"
     assert extract_city_from_message("Weather in Hong Kong") == "Hong Kong"
     assert extract_city_from_message("How's the weather in New York?") == "New York"
-    assert extract_city_from_message("Tell me the weather in San Francisco") == "San Francisco"
+    assert (
+        extract_city_from_message("Tell me the weather in San Francisco")
+        == "San Francisco"
+    )
 
 
 def test_extract_city_case_insensitive():
@@ -123,7 +133,9 @@ def test_extract_city_case_insensitive():
 def test_extract_city_multi_word():
     """Multi-word city names are handled correctly."""
     assert extract_city_from_message("Weather in Los Angeles?") == "Los Angeles"
-    assert extract_city_from_message("What's the weather in New York City?") == "New York"
+    assert (
+        extract_city_from_message("What's the weather in New York City?") == "New York"
+    )
     assert extract_city_from_message("How is Hong Kong today?") == "Hong Kong"
 
 

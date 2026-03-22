@@ -25,6 +25,14 @@ from utils.db import is_master_user
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Compiled UUID regex used to validate idempotency_key values.
+# Exported at module level so tests can import the production pattern
+# instead of maintaining a duplicate.
+_IDEMPOTENCY_KEY_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
 app = FastAPI(title="Curie AI API")
 
 # Shared workflow instance (set by main.py)
@@ -152,11 +160,7 @@ async def chat_api(req: MessageRequest):
 
     # Validate idempotency_key is safe for filesystem use (UUID format only)
     # This prevents path traversal attacks when generating voice files
-    if req.idempotency_key and not re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        req.idempotency_key,
-        re.IGNORECASE,
-    ):
+    if req.idempotency_key and not _IDEMPOTENCY_KEY_RE.match(req.idempotency_key):
         raise HTTPException(
             status_code=400, detail="idempotency_key must be a valid UUID format"
         )
@@ -303,13 +307,15 @@ async def websocket_chat(websocket: WebSocket):
 
             # Process message
             message_id = str(uuid.uuid4())
+            internal_id = get_internal_id(user_id)
             normalized_input = {
-                "platform": "websocket",
+                "platform": "api",
                 "external_user_id": user_id,
                 "external_chat_id": user_id,
                 "message_id": message_id,
                 "text": message,
                 "timestamp": datetime.datetime.utcnow(),
+                "internal_id": internal_id,
             }
 
             result = await _workflow.process_message(normalized_input)
@@ -397,7 +403,7 @@ async def transcribe_audio_api(
                 total_size += len(chunk)
                 if total_size > MAX_FILE_SIZE:
                     raise HTTPException(
-                        status_code=413, detail=f"File too large. Maximum size is 25MB"
+                        status_code=413, detail="File too large. Maximum size is 25MB"
                     )
                 f.write(chunk)
 

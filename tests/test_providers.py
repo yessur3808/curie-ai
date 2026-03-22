@@ -14,10 +14,24 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Stub heavy dependencies before import
-for _mod in ("psycopg2", "psycopg2.extras", "psycopg2.extensions",
-             "pymongo", "pymongo.collection", "pymongo.errors"):
+for _mod in (
+    "psycopg2",
+    "psycopg2.extras",
+    "psycopg2.extensions",
+    "pymongo",
+    "pymongo.collection",
+    "pymongo.errors",
+):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
+
+# ---------------------------------------------------------------------------
+# Module isolation
+# ---------------------------------------------------------------------------
+# test_connectors.py loads first alphabetically and stubs sys.modules["llm"]
+# with a MagicMock.  Clear those stubs so the real local llm package loads.
+for _k in [k for k in sys.modules if k == "llm" or k.startswith("llm.")]:
+    del sys.modules[_k]
 
 from llm.providers import (  # noqa: E402
     _is_simple_query,
@@ -26,10 +40,10 @@ from llm.providers import (  # noqa: E402
     compute_response_budget,
 )
 
-
 # ------------------------------------------------------------------
 # _is_simple_query  (semantic-only, no word-count threshold)
 # ------------------------------------------------------------------
+
 
 class TestIsSimpleQuery:
     # --- Trivially simple phrases that should be routed to local first ---
@@ -116,6 +130,7 @@ class TestIsSimpleQuery:
 # _COMPLEX_PATTERNS — ensure complex task keywords are detected
 # ------------------------------------------------------------------
 
+
 class TestComplexPatterns:
     def _matches(self, text: str) -> bool:
         return bool(_COMPLEX_PATTERNS.search(text))
@@ -164,13 +179,17 @@ class TestComplexPatterns:
 # is_local_only
 # ------------------------------------------------------------------
 
+
 class TestIsLocalOnly:
     def test_local_only_when_only_llama(self):
         with patch("llm.providers.get_active_providers", return_value=["llama.cpp"]):
             assert is_local_only() is True
 
     def test_not_local_only_with_cloud_plus_local(self):
-        with patch("llm.providers.get_active_providers", return_value=["anthropic", "llama.cpp"]):
+        with patch(
+            "llm.providers.get_active_providers",
+            return_value=["anthropic", "llama.cpp"],
+        ):
             assert is_local_only() is False
 
     def test_not_local_only_with_only_cloud(self):
@@ -189,6 +208,7 @@ class TestIsLocalOnly:
 # ------------------------------------------------------------------
 # compute_response_budget — dynamic token allocation, no hard cap
 # ------------------------------------------------------------------
+
 
 class TestComputeResponseBudget:
     def test_no_cap_returns_full_available(self):

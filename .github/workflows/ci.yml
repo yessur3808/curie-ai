@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  lint:
+    name: Lint (flake8)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install lint dependencies
+        run: pip install flake8
+
+      - name: Run flake8
+        # Flake8 settings are read from .flake8 in the repo root.
+        run: |
+          flake8 agent/ connectors/ llm/ memory/ services/ utils/ main.py tests/ \
+            --exclude=__pycache__,migrations
+
+  format-check:
+    name: Format check (black)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install black
+        run: pip install black
+
+      - name: Check formatting
+        run: black --check agent/ connectors/ llm/ memory/ services/ utils/ main.py tests/
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install core dependencies
+        # Install only the lightweight subset needed for the unit tests.
+        # Heavy optional packages (llama-cpp-python, discord.py, etc.) are
+        # mocked inside the test suite and are not required here.
+        run: |
+          pip install \
+            pytest \
+            pytest-asyncio \
+            python-dotenv \
+            pytz \
+            fastapi \
+            pydantic \
+            psycopg2-binary \
+            pymongo \
+            httpx \
+            gitpython \
+            beautifulsoup4 \
+            PyGithub
+
+      - name: Run tests
+        # Exclude test suites that require a live LLM model or GitHub token
+        # (test_code_reviewer, test_coding_service, test_advanced_coding_skills)
+        # — these call exit(1) when the runtime dependency is absent and are
+        # not expected to pass in a vanilla CI environment.
+        run: |
+          pytest tests/ -v --tb=short \
+            --ignore=tests/test_code_reviewer.py \
+            --ignore=tests/test_coding_service.py \
+            --ignore=tests/test_advanced_coding_skills.py

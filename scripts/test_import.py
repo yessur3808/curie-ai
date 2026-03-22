@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import sys
 import os
+
 print(f"Python: {sys.executable}")
 print(f"CWD: {os.getcwd()}")
 
 try:
     from dotenv import load_dotenv
+
     print("✅ dotenv imported")
     load_dotenv()
     print(f"✅ .env loaded")
@@ -15,4 +17,5 @@ try:
 except Exception as e:
     print(f"❌ Error: {e}")
     import traceback
+
     traceback.print_exc()

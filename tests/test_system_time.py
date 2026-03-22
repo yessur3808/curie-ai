@@ -13,17 +13,16 @@ import os
 from datetime import datetime, timezone as _stdtz
 from unittest.mock import patch, MagicMock
 
-import pytest
 import pytz
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import utils.system_time as st
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _reset_cache():
     """Reset module-level cache so each test starts fresh."""
@@ -35,6 +34,7 @@ def _reset_cache():
 # ---------------------------------------------------------------------------
 # get_verified_now
 # ---------------------------------------------------------------------------
+
 
 class TestGetVerifiedNow:
     def test_returns_timezone_aware_datetime(self):
@@ -74,6 +74,7 @@ class TestGetVerifiedNow:
 # Internet verification — successful path
 # ---------------------------------------------------------------------------
 
+
 class TestInternetVerificationSuccess:
     def setup_method(self):
         _reset_cache()
@@ -81,6 +82,7 @@ class TestInternetVerificationSuccess:
     def test_sets_internet_ok_on_success(self):
         """A valid API response marks internet_ok=True."""
         from datetime import timezone as _tz
+
         fake_utc = datetime.now(_tz.utc).isoformat()
         fake_resp = MagicMock()
         fake_resp.json.return_value = {"utc_datetime": fake_utc}
@@ -91,8 +93,10 @@ class TestInternetVerificationSuccess:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.get.return_value = fake_resp
 
-        with patch("utils.system_time._ENABLED", True), \
-             patch("httpx.Client", return_value=mock_client):
+        with (
+            patch("utils.system_time._ENABLED", True),
+            patch("httpx.Client", return_value=mock_client),
+        ):
             st._check_internet_time()
 
         assert st._internet_ok is True
@@ -120,9 +124,11 @@ class TestInternetVerificationSuccess:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.get.return_value = fake_resp
 
-        with patch("utils.system_time._ENABLED", True), \
-             patch("httpx.Client", return_value=mock_client), \
-             caplog.at_level(logging.WARNING, logger="utils.system_time"):
+        with (
+            patch("utils.system_time._ENABLED", True),
+            patch("httpx.Client", return_value=mock_client),
+            caplog.at_level(logging.WARNING, logger="utils.system_time"),
+        ):
             st._check_internet_time()
 
         assert any("clock" in rec.message.lower() for rec in caplog.records)
@@ -132,13 +138,16 @@ class TestInternetVerificationSuccess:
 # Internet verification — failure path
 # ---------------------------------------------------------------------------
 
+
 class TestInternetVerificationFailure:
     def setup_method(self):
         _reset_cache()
 
     def test_network_error_leaves_internet_ok_false(self):
-        with patch("utils.system_time._ENABLED", True), \
-             patch("httpx.Client", side_effect=Exception("network unreachable")):
+        with (
+            patch("utils.system_time._ENABLED", True),
+            patch("httpx.Client", side_effect=Exception("network unreachable")),
+        ):
             st._check_internet_time()
         assert st._internet_ok is False
 
@@ -152,8 +161,10 @@ class TestInternetVerificationFailure:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.get.return_value = fake_resp
 
-        with patch("utils.system_time._ENABLED", True), \
-             patch("httpx.Client", return_value=mock_client):
+        with (
+            patch("utils.system_time._ENABLED", True),
+            patch("httpx.Client", return_value=mock_client),
+        ):
             st._check_internet_time()
 
         assert st._internet_ok is False
@@ -170,13 +181,13 @@ class TestInternetVerificationFailure:
 # ENABLE_TIME_VERIFICATION=false
 # ---------------------------------------------------------------------------
 
+
 class TestVerificationDisabled:
     def setup_method(self):
         _reset_cache()
 
     def test_disabled_skips_network_call(self):
-        with patch.object(st, "_ENABLED", False), \
-             patch("httpx.Client") as mock_http:
+        with patch.object(st, "_ENABLED", False), patch("httpx.Client") as mock_http:
             st._maybe_refresh()
         mock_http.assert_not_called()
 
@@ -197,16 +208,17 @@ class TestVerificationDisabled:
 # Cache TTL — no redundant HTTP calls
 # ---------------------------------------------------------------------------
 
+
 class TestCacheTTL:
     def test_no_second_request_within_ttl(self):
         """After a successful check, a second call within TTL must not fire HTTP."""
         _reset_cache()
         # Mark a very recent check
         import time as _time
+
         st._last_check_mono = _time.monotonic()
 
-        with patch.object(st, "_ENABLED", True), \
-             patch("httpx.Client") as mock_http:
+        with patch.object(st, "_ENABLED", True), patch("httpx.Client") as mock_http:
             st._maybe_refresh()
 
         mock_http.assert_not_called()

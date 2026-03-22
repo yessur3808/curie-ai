@@ -43,7 +43,9 @@ _TRIP_KEYWORDS = re.compile(
 _MAX_DESTINATION_CHARS = 40
 
 _DESTINATION_PATTERN = re.compile(
-    r"\b(?:to|in|for|visit|visiting)\s+([A-Za-z][a-zA-Z\s,]{2," + str(_MAX_DESTINATION_CHARS) + r"}?)(?=\s+for|\s+in|\s*[,.]|$)",
+    r"\b(?:to|in|for|visit|visiting)\s+([A-Za-z][a-zA-Z\s,]{2,"
+    + str(_MAX_DESTINATION_CHARS)
+    + r"}?)(?=\s+for|\s+in|\s*[,.]|$)",
     re.IGNORECASE,
 )
 
@@ -71,6 +73,7 @@ def is_trip_query(text: str) -> bool:
 # ---------------------------------------------------------------------------
 # Parameter extraction
 # ---------------------------------------------------------------------------
+
 
 def extract_trip_params(text: str) -> dict:
     """
@@ -234,6 +237,7 @@ def _build_packing_prompt(params: dict, compact: bool = False) -> str:
 # Main skill handler
 # ---------------------------------------------------------------------------
 
+
 async def handle_trip_query(
     text: str,
     internal_id: str = "unknown",
@@ -254,7 +258,11 @@ async def handle_trip_query(
     # Detect whether we are running in local-only mode so we can adapt prompts
     # and token budgets accordingly.
     try:
-        from llm.providers import is_local_only, compute_response_budget  # noqa: PLC0415
+        from llm.providers import (
+            is_local_only,
+            compute_response_budget,
+        )  # noqa: PLC0415
+
         local_only = is_local_only()
     except Exception:
         local_only = False
@@ -282,6 +290,7 @@ async def handle_trip_query(
     response: Optional[str] = None
     try:
         from llm.providers import ask_best_provider  # noqa: PLC0415
+
         response = ask_best_provider(prompt, temperature=0.75, max_tokens=max_tokens)
     except Exception as exc:
         logger.warning("providers.ask_best_provider failed: %s", exc)
@@ -290,7 +299,10 @@ async def handle_trip_query(
     if response is None:
         try:
             from llm import manager as llm_manager  # noqa: PLC0415
-            response = llm_manager.ask_llm(prompt, temperature=0.75, max_tokens=max_tokens)
+
+            response = llm_manager.ask_llm(
+                prompt, temperature=0.75, max_tokens=max_tokens
+            )
         except Exception as exc:
             logger.error("Local LLM also failed for trip query: %s", exc)
             return (
@@ -311,6 +323,8 @@ async def handle_trip_query(
         response = header + response
     elif params["packing_focus"]:
         dest_label = destination or "your trip"
-        response = f"🧳 **Packing List for {escape_markdown(dest_label)}**\n\n" + response
+        response = (
+            f"🧳 **Packing List for {escape_markdown(dest_label)}**\n\n" + response
+        )
 
     return response

@@ -49,7 +49,9 @@ _DEFAULT_LOCATION: str = os.getenv("DEFAULT_LOCATION", "").strip()
 # Dedicated small thread pool for background learning tasks.
 # max_workers=2 caps concurrent LLM-based fact extractions without starving
 # the main event-loop thread pool used for DB I/O.
-_LEARNING_EXECUTOR = _ThreadPoolExecutor(max_workers=2, thread_name_prefix="curie-learning")
+_LEARNING_EXECUTOR = _ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="curie-learning"
+)
 
 # Maximum number of lines a single history message is truncated to when building prompts.
 _SUMMARY_CONTENT_MAX_LENGTH = 200
@@ -82,14 +84,21 @@ def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> di
         return {}
 
     # Facts that are always injected — they provide essential context for every reply.
-    _CRITICAL_KEYS = frozenset({
-        "name", "preferred_name",
-        "timezone", "location",
-        "language",
-        # Preference keys that are always relevant
-        "dietary_preferences", "travel_style", "occupation", "interests",
-        "reminders_preference",
-    })
+    _CRITICAL_KEYS = frozenset(
+        {
+            "name",
+            "preferred_name",
+            "timezone",
+            "location",
+            "language",
+            # Preference keys that are always relevant
+            "dietary_preferences",
+            "travel_style",
+            "occupation",
+            "interests",
+            "reminders_preference",
+        }
+    )
     critical = {k: v for k, v in user_profile.items() if k in _CRITICAL_KEYS}
 
     # Score remaining facts by keyword overlap with the query
@@ -117,21 +126,25 @@ class MessageDedupeCache:
     Stores processed message IDs with TTL to prevent duplicate responses.
     Key format: {platform}:{external_chat_id}:{message_id}
     """
-    
+
     def __init__(self, ttl_seconds=600, max_size=5000):
         self.ttl_seconds = ttl_seconds
         self.max_size = max_size
         self.cache = OrderedDict()  # {key: (timestamp, response)}
         self.lock = Lock()
-    
+
     def _cleanup_expired(self):
         """Remove expired entries."""
         now = time.time()
-        expired = [k for k, (ts, _) in self.cache.items() if now - ts > self.ttl_seconds]
+        expired = [
+            k for k, (ts, _) in self.cache.items() if now - ts > self.ttl_seconds
+        ]
         for k in expired:
             del self.cache[k]
-    
-    def get(self, platform: str, external_chat_id: str, message_id: str) -> Optional[str]:
+
+    def get(
+        self, platform: str, external_chat_id: str, message_id: str
+    ) -> Optional[str]:
         """Get cached response if message was already processed. Returns None if not found or expired."""
         key = f"{platform}:{external_chat_id}:{message_id}"
         with self.lock:
@@ -141,7 +154,7 @@ class MessageDedupeCache:
                 logger.debug(f"Dedupe cache hit: {key}")
                 return response
         return None
-    
+
     def set(self, platform: str, external_chat_id: str, message_id: str, response: str):
         """Store a processed message and its response."""
         key = f"{platform}:{external_chat_id}:{message_id}"
@@ -159,16 +172,22 @@ class PromptCache:
     Keys are hashes of (internal_id + system_prompt + user_facts + recent_history).
     internal_id is included so different users never share a cache entry.
     """
-    
+
     def __init__(self, max_size=100):
         self.cache = OrderedDict()
         self.max_size = max_size
         self.lock = Lock()
         self.hits = 0
         self.misses = 0
-    
-    def _make_key(self, system_prompt: str, user_facts: Dict, history_str: str,
-                  time_bucket: str = "", internal_id: str = "") -> str:
+
+    def _make_key(
+        self,
+        system_prompt: str,
+        user_facts: Dict,
+        history_str: str,
+        time_bucket: str = "",
+        internal_id: str = "",
+    ) -> str:
         """
         Create a hash key from prompt components.
         internal_id is included so two users with identical profiles never
@@ -177,11 +196,19 @@ class PromptCache:
         facts_str = json.dumps(user_facts, sort_keys=True) if user_facts else ""
         combined = f"{internal_id}|||{system_prompt}|||{facts_str}|||{history_str}|||{time_bucket}"
         return str(hash(combined))
-    
-    def get(self, system_prompt: str, user_facts: Dict, history_str: str,
-            time_bucket: str = "", internal_id: str = "") -> Optional[Tuple]:
+
+    def get(
+        self,
+        system_prompt: str,
+        user_facts: Dict,
+        history_str: str,
+        time_bucket: str = "",
+        internal_id: str = "",
+    ) -> Optional[Tuple]:
         """Returns (prompt_text, token_count) or None."""
-        key = self._make_key(system_prompt, user_facts, history_str, time_bucket, internal_id)
+        key = self._make_key(
+            system_prompt, user_facts, history_str, time_bucket, internal_id
+        )
         with self.lock:
             if key in self.cache:
                 self.hits += 1
@@ -190,11 +217,21 @@ class PromptCache:
                 return entry
             self.misses += 1
         return None
-    
-    def set(self, system_prompt: str, user_facts: Dict, history_str: str,
-            prompt_text: str, token_count: int, time_bucket: str = "", internal_id: str = ""):
+
+    def set(
+        self,
+        system_prompt: str,
+        user_facts: Dict,
+        history_str: str,
+        prompt_text: str,
+        token_count: int,
+        time_bucket: str = "",
+        internal_id: str = "",
+    ):
         """Store a tokenized prompt."""
-        key = self._make_key(system_prompt, user_facts, history_str, time_bucket, internal_id)
+        key = self._make_key(
+            system_prompt, user_facts, history_str, time_bucket, internal_id
+        )
         with self.lock:
             if key in self.cache:
                 del self.cache[key]
@@ -202,7 +239,7 @@ class PromptCache:
             # Evict oldest if exceeds max
             while len(self.cache) > self.max_size:
                 self.cache.popitem(last=False)
-    
+
     def stats(self) -> Dict:
         """Return cache hit/miss statistics."""
         total = self.hits + self.misses
@@ -212,14 +249,14 @@ class PromptCache:
             "misses": self.misses,
             "total": total,
             "hit_rate_percent": round(hit_rate, 1),
-            "size": len(self.cache)
+            "size": len(self.cache),
         }
 
 
 class ChatWorkflow:
     """
     Centralized chat intelligence, independent of connectors.
-    
+
     Normalized input format:
     {
         'platform': str (e.g., 'telegram', 'api', 'voice'),
@@ -230,7 +267,7 @@ class ChatWorkflow:
         'timestamp': datetime or float (unix timestamp),
         'internal_id': str (optional) - pre-identified internal user ID (bypasses lookup if provided)
     }
-    
+
     Output format:
     {
         'text': str (response),
@@ -239,73 +276,78 @@ class ChatWorkflow:
         'processing_time_ms': float
     }
     """
-    
-    # French phrases for code-level injection
-    FRENCH_PHRASES = [
-        "Oui!", "Non non", "Mon ami", "Magnifique!", "C'est bon", 
-        "Ah bon?", "D'accord", "Mais oui", "Très bien", "Fantastique!",
-        "Zut!", "Quelle horreur!", "Intéressant!", "Naturellement!"
-    ]
-    
+
     # Output sanitation patterns
     SPEAKER_TAG_PATTERN = re.compile(
-        r'^\s*(?:User:|Curie:|Assistant:|Coder:|System:)',
+        r"^\s*(?:User:|Curie:|Assistant:|Coder:|System:)",
         re.IGNORECASE | re.MULTILINE,
     )
-    META_NOTE_PATTERN = re.compile(r'\[(?:Note|Meta|Aside|System):[^\]]*\]', re.IGNORECASE)
-    ACTION_PATTERN = re.compile(r'\*[^*]*\*')  # *gestures*, *smiles*, etc.
-    CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```|```[\s\S]*$', re.MULTILINE)
-    INLINE_CODE_PATTERN = re.compile(r'`[^`]+`')
-    
-    def __init__(self, persona: Optional[Dict] = None, max_history: int = 5, 
-                 enable_small_talk: bool = False, idle_threshold_minutes: int = 30,
-                 minimal_sanitization: bool = True):
+    META_NOTE_PATTERN = re.compile(
+        r"\[(?:Note|Meta|Aside|System):[^\]]*\]", re.IGNORECASE
+    )
+    ACTION_PATTERN = re.compile(r"\*[^*]*\*")  # *gestures*, *smiles*, etc.
+    CODE_BLOCK_PATTERN = re.compile(r"```[\s\S]*?```|```[\s\S]*$", re.MULTILINE)
+    INLINE_CODE_PATTERN = re.compile(r"`[^`]+`")
+
+    def __init__(
+        self,
+        persona: Optional[Dict] = None,
+        max_history: int = 5,
+        enable_small_talk: bool = False,
+        idle_threshold_minutes: int = 30,
+        minimal_sanitization: bool = True,
+    ):
         self.persona = persona or self._load_default_persona()
         self.max_history = max_history
         self.enable_small_talk = enable_small_talk
         self.idle_threshold_minutes = idle_threshold_minutes
         self.minimal_sanitization = minimal_sanitization
-        
+
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
         self.prompt_cache = PromptCache(max_size=100)
-        
-        logger.info(f"ChatWorkflow initialized with persona: {self.persona.get('name', 'Unknown')}")
-    
+
+        logger.info(
+            f"ChatWorkflow initialized with persona: {self.persona.get('name', 'Unknown')}"
+        )
+
     def _load_default_persona(self) -> Dict:
         """Load default persona (Curie) if not provided."""
-        persona_file = os.path.join(os.path.dirname(__file__), "..", "assets", "personality", "curie.json")
+        persona_file = os.path.join(
+            os.path.dirname(__file__), "..", "assets", "personality", "curie.json"
+        )
         if os.path.exists(persona_file):
             with open(persona_file) as f:
                 return json.load(f)
         return {
             "name": "Assistant",
             "system_prompt": "You are a helpful assistant.",
-            "french_phrases": self.FRENCH_PHRASES
         }
-    
+
     async def process_message(self, normalized_input: Dict) -> Dict:
         """
         Main entry point: process a normalized message and return structured response.
         """
         start_time = time.time()
-        
-        platform = normalized_input.get('platform', 'unknown')
-        external_user_id = normalized_input.get('external_user_id')
-        external_chat_id = normalized_input.get('external_chat_id')
-        message_id = str(normalized_input.get('message_id', ''))
-        user_text = normalized_input.get('text', '').strip()
-        
+
+        platform = normalized_input.get("platform", "unknown")
+        external_user_id = normalized_input.get("external_user_id")
+        external_chat_id = normalized_input.get("external_chat_id")
+        message_id = str(normalized_input.get("message_id", ""))
+        user_text = normalized_input.get("text", "").strip()
+
         if not all([external_user_id, external_chat_id, user_text]):
-            logger.error(f"Invalid input: missing required fields. Input: {normalized_input}")
+            logger.error(
+                f"Invalid input: missing required fields. Input: {normalized_input}"
+            )
             return {
-                'text': "[Error: Invalid message format]",
-                'timestamp': datetime.utcnow(),
-                'model_used': 'N/A',
-                'processing_time_ms': 0
+                "text": "[Error: Invalid message format]",
+                "timestamp": datetime.utcnow(),
+                "model_used": "N/A",
+                "processing_time_ms": 0,
             }
-        
+
         # Resolve internal_id — use pre-identified one if provided, otherwise lookup/create
-        internal_id = normalized_input.get('internal_id')
+        internal_id = normalized_input.get("internal_id")
         if not internal_id:
             internal_id = UserManager.get_or_create_user_internal_id(
                 channel=platform,
@@ -313,16 +355,18 @@ class ChatWorkflow:
                 secret_username=f"{platform}_{external_user_id}",
                 updated_by="chat_workflow",
             )
-        
+
         # Deduplication cache check
-        cached_response = self.dedupe_cache.get(platform, str(external_chat_id), message_id)
+        cached_response = self.dedupe_cache.get(
+            platform, str(external_chat_id), message_id
+        )
         if cached_response:
             processing_time = (time.time() - start_time) * 1000
             return {
-                'text': cached_response,
-                'timestamp': datetime.utcnow(),
-                'model_used': 'dedupe_cache',
-                'processing_time_ms': round(processing_time, 2)
+                "text": cached_response,
+                "timestamp": datetime.utcnow(),
+                "model_used": "dedupe_cache",
+                "processing_time_ms": round(processing_time, 2),
             }
 
         # ── Per-user session commands ─────────────────────────────────────────
@@ -334,9 +378,12 @@ class ChatWorkflow:
             if command in ("/reset", "/new"):
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(
-                    None, lambda: get_session_manager().reset_session(platform, internal_id)
+                    None,
+                    lambda: get_session_manager().reset_session(platform, internal_id),
                 )
-                reset_response = "✅ Your conversation history has been cleared. Fresh start!"
+                reset_response = (
+                    "✅ Your conversation history has been cleared. Fresh start!"
+                )
                 processing_time = (time.time() - start_time) * 1000
                 return {
                     "text": reset_response,
@@ -348,7 +395,8 @@ class ChatWorkflow:
             if command == "/history":
                 loop = asyncio.get_running_loop()
                 history = await loop.run_in_executor(
-                    None, lambda: get_session_manager().get_history(platform, internal_id)
+                    None,
+                    lambda: get_session_manager().get_history(platform, internal_id),
                 )
                 count = len(history)
                 stats_response = (
@@ -363,7 +411,11 @@ class ChatWorkflow:
                     "processing_time_ms": round(processing_time, 2),
                 }
         except Exception:
-            logger.exception("Error while handling session command '%s' for user %s", command, internal_id)
+            logger.exception(
+                "Error while handling session command '%s' for user %s",
+                command,
+                internal_id,
+            )
             processing_time = (time.time() - start_time) * 1000
             return {
                 "text": "[Error: Unable to manage conversation history right now. Please try again later.]",
@@ -377,19 +429,22 @@ class ChatWorkflow:
             # Check for coding-related queries first (before LLM)
             try:
                 from agent.skills.coding_assistant import handle_coding_query
+
                 coding_response = await handle_coding_query(user_text)
                 if coding_response:
-                    logger.info(f"Coding skill handled the query")
+                    logger.info("Coding skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
                     sm.add_message(platform, internal_id, "assistant", coding_response)
-                    self.dedupe_cache.set(platform, str(external_chat_id), message_id, coding_response)
+                    self.dedupe_cache.set(
+                        platform, str(external_chat_id), message_id, coding_response
+                    )
                     processing_time = (time.time() - start_time) * 1000
                     return {
-                        'text': coding_response,
-                        'timestamp': datetime.utcnow(),
-                        'model_used': 'coding_skill',
-                        'processing_time_ms': round(processing_time, 2)
+                        "text": coding_response,
+                        "timestamp": datetime.utcnow(),
+                        "model_used": "coding_skill",
+                        "processing_time_ms": round(processing_time, 2),
                     }
             except Exception as e:
                 logger.debug(f"Coding skill check failed: {e}")
@@ -397,19 +452,22 @@ class ChatWorkflow:
             # Check for navigation / traffic queries
             try:
                 from agent.skills.navigation import handle_navigation_query
+
                 nav_response = await handle_navigation_query(user_text)
                 if nav_response:
                     logger.info("Navigation skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
                     sm.add_message(platform, internal_id, "assistant", nav_response)
-                    self.dedupe_cache.set(platform, str(external_chat_id), message_id, nav_response)
+                    self.dedupe_cache.set(
+                        platform, str(external_chat_id), message_id, nav_response
+                    )
                     processing_time = (time.time() - start_time) * 1000
                     return {
-                        'text': nav_response,
-                        'timestamp': datetime.utcnow(),
-                        'model_used': 'navigation_skill',
-                        'processing_time_ms': round(processing_time, 2)
+                        "text": nav_response,
+                        "timestamp": datetime.utcnow(),
+                        "model_used": "navigation_skill",
+                        "processing_time_ms": round(processing_time, 2),
                     }
             except Exception as e:
                 logger.debug(f"Navigation skill check failed: {e}")
@@ -417,6 +475,7 @@ class ChatWorkflow:
             # Check for reminders / scheduling queries
             try:
                 from agent.skills.scheduler import handle_reminder_query
+
                 reminder_response = await handle_reminder_query(
                     user_text, internal_id=internal_id, platform=platform
                 )
@@ -424,14 +483,18 @@ class ChatWorkflow:
                     logger.info("Scheduler skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
-                    sm.add_message(platform, internal_id, "assistant", reminder_response)
-                    self.dedupe_cache.set(platform, str(external_chat_id), message_id, reminder_response)
+                    sm.add_message(
+                        platform, internal_id, "assistant", reminder_response
+                    )
+                    self.dedupe_cache.set(
+                        platform, str(external_chat_id), message_id, reminder_response
+                    )
                     processing_time = (time.time() - start_time) * 1000
                     return {
-                        'text': reminder_response,
-                        'timestamp': datetime.utcnow(),
-                        'model_used': 'scheduler_skill',
-                        'processing_time_ms': round(processing_time, 2)
+                        "text": reminder_response,
+                        "timestamp": datetime.utcnow(),
+                        "model_used": "scheduler_skill",
+                        "processing_time_ms": round(processing_time, 2),
                     }
             except Exception as e:
                 logger.debug(f"Scheduler skill check failed: {e}")
@@ -439,25 +502,32 @@ class ChatWorkflow:
             # Check for trip / vacation planning queries
             try:
                 from agent.skills.trip_planner import handle_trip_query
-                trip_response = await handle_trip_query(user_text, internal_id=internal_id)
+
+                trip_response = await handle_trip_query(
+                    user_text, internal_id=internal_id
+                )
                 if trip_response:
                     logger.info("Trip planner skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
                     sm.add_message(platform, internal_id, "assistant", trip_response)
-                    self.dedupe_cache.set(platform, str(external_chat_id), message_id, trip_response)
+                    self.dedupe_cache.set(
+                        platform, str(external_chat_id), message_id, trip_response
+                    )
                     processing_time = (time.time() - start_time) * 1000
                     return {
-                        'text': trip_response,
-                        'timestamp': datetime.utcnow(),
-                        'model_used': 'trip_planner_skill',
-                        'processing_time_ms': round(processing_time, 2)
+                        "text": trip_response,
+                        "timestamp": datetime.utcnow(),
+                        "model_used": "trip_planner_skill",
+                        "processing_time_ms": round(processing_time, 2),
                     }
             except Exception as e:
                 logger.debug(f"Trip planner skill check failed: {e}")
 
             # Load user profile and conversation history in parallel
-            user_profile, history = await self._batch_load_context(internal_id, platform)
+            user_profile, history = await self._batch_load_context(
+                internal_id, platform
+            )
 
             # Summarise very long histories to stay within the context window
             history = self._maybe_summarise_history(history)
@@ -475,6 +545,7 @@ class ChatWorkflow:
             response: Optional[str] = None
             try:
                 from llm.providers import ask_best_provider
+
                 response = ask_best_provider(prompt, temperature=0.7, max_tokens=None)
             except Exception:
                 pass
@@ -485,10 +556,7 @@ class ChatWorkflow:
 
             # Sanitize output
             response = self._sanitize_output(response)
-            
-            if self.enable_small_talk and self._should_add_small_talk(history):
-                response = self._append_small_talk_thoughtfully(response)
-            
+
             # Save to conversation history
             sm = get_session_manager()
             sm.add_message(platform, internal_id, "user", user_text)
@@ -499,39 +567,46 @@ class ChatWorkflow:
             # extractions are capped and the main event-loop thread pool is not starved.
             try:
                 from memory.learning import learn_from_exchange
-                _LEARNING_EXECUTOR.submit(learn_from_exchange, internal_id, user_text, response)
+
+                _LEARNING_EXECUTOR.submit(
+                    learn_from_exchange, internal_id, user_text, response
+                )
             except Exception:
                 pass
-            
+
             self.dedupe_cache.set(platform, str(external_chat_id), message_id, response)
-            
+
             processing_time = (time.time() - start_time) * 1000
-            
+
             return {
-                'text': response,
-                'timestamp': datetime.utcnow(),
-                'model_used': llm_manager.DEFAULT_LLAMA_MODEL,
-                'processing_time_ms': round(processing_time, 2)
+                "text": response,
+                "timestamp": datetime.utcnow(),
+                "model_used": llm_manager.DEFAULT_LLAMA_MODEL,
+                "processing_time_ms": round(processing_time, 2),
             }
-            
+
         except Exception as e:
             logger.error(f"Error in process_message: {e}", exc_info=True)
             processing_time = (time.time() - start_time) * 1000
             return {
-                'text': f"[Error processing message: {str(e)[:100]}]",
-                'timestamp': datetime.utcnow(),
-                'model_used': 'N/A',
-                'processing_time_ms': round(processing_time, 2)
+                "text": f"[Error processing message: {str(e)[:100]}]",
+                "timestamp": datetime.utcnow(),
+                "model_used": "N/A",
+                "processing_time_ms": round(processing_time, 2),
             }
-    
-    async def _batch_load_context(self, internal_id: str, platform: str = "unknown") -> Tuple[Dict, list]:
+
+    async def _batch_load_context(
+        self, internal_id: str, platform: str = "unknown"
+    ) -> Tuple[Dict, list]:
         """
         Batch-load user profile and conversation history in parallel.
         History is returned as a list of (role, content) tuples.
         """
         loop = asyncio.get_running_loop()
 
-        user_profile_task = loop.run_in_executor(None, UserManager.get_user_profile, internal_id)
+        user_profile_task = loop.run_in_executor(
+            None, UserManager.get_user_profile, internal_id
+        )
 
         def load_history():
             messages = get_session_manager().get_history(platform, internal_id)
@@ -586,7 +661,9 @@ class ChatWorkflow:
         for role, content in older:
             label = "User" if role == "user" else "Assistant"
             if len(content) > _SUMMARY_CONTENT_MAX_LENGTH:
-                truncated = content[:_SUMMARY_CONTENT_MAX_LENGTH].rsplit(" ", 1)[0] + "…"
+                truncated = (
+                    content[:_SUMMARY_CONTENT_MAX_LENGTH].rsplit(" ", 1)[0] + "…"
+                )
             else:
                 truncated = content
             lines.append(f"{label}: {truncated}")
@@ -602,26 +679,35 @@ class ChatWorkflow:
         summary: Optional[str] = None
         try:
             from llm.providers import ask_best_provider  # noqa: PLC0415
+
             summary = ask_best_provider(summary_prompt, temperature=0.3, max_tokens=200)
         except Exception:
             pass
 
         if summary is None:
             try:
-                summary = llm_manager.ask_llm(summary_prompt, temperature=0.3, max_tokens=200)
+                summary = llm_manager.ask_llm(
+                    summary_prompt, temperature=0.3, max_tokens=200
+                )
             except Exception:
                 pass
 
         if summary and not summary.startswith("[Error"):
-            logger.debug("Summarised %d older history turns into a context note", len(older))
-            summary_entry = ("assistant", f"[Earlier conversation summary: {summary.strip()}]")
+            logger.debug(
+                "Summarised %d older history turns into a context note", len(older)
+            )
+            summary_entry = (
+                "assistant",
+                f"[Earlier conversation summary: {summary.strip()}]",
+            )
             return [summary_entry] + recent
 
         # Fallback: just truncate to the recent turns
         return recent
 
-    def _build_structured_prompt(self, user_profile: Dict, history: list,
-                                  user_text: str, internal_id: str = "") -> str:
+    def _build_structured_prompt(
+        self, user_profile: Dict, history: list, user_text: str, internal_id: str = ""
+    ) -> str:
         """
         Build prompt using structured chat format.
         internal_id is used to scope the prompt cache so users never share entries.
@@ -652,6 +738,7 @@ class ChatWorkflow:
         # Get current time from system clock (with background internet verification)
         try:
             from utils.system_time import get_verified_now, get_time_source_label
+
             now = get_verified_now(tz=tz)
             time_source = get_time_source_label()
         except Exception:
@@ -665,10 +752,10 @@ class ChatWorkflow:
             or ""
         )
 
-        time_bucket = now.strftime('%Y-%m-%d-%H')
+        time_bucket = now.strftime("%Y-%m-%d-%H")
 
         cached = self.prompt_cache.get(
-            self.persona.get('system_prompt', ''),
+            self.persona.get("system_prompt", ""),
             user_profile,
             history_str,
             time_bucket,
@@ -680,21 +767,35 @@ class ChatWorkflow:
         else:
             lines = []
 
-            system_prompt = self.persona.get('system_prompt', 'You are a helpful assistant.')
+            system_prompt = self.persona.get(
+                "system_prompt", "You are a helpful assistant."
+            )
             lines.append(system_prompt)
 
             lines.append("\n[IMPORTANT RULES]")
-            lines.append("- Be natural, conversational, and helpful like talking to a friend.")
-            lines.append("- Be concise but complete - answer questions fully without being overwhelming.")
+            lines.append(
+                "- Be natural, conversational, and helpful like talking to a friend."
+            )
+            lines.append(
+                "- Be concise but complete - answer questions fully without being overwhelming."
+            )
             lines.append("- If you don't know something, just say so naturally.")
-            lines.append("- Avoid meta-commentary like 'As an AI...' or '[Note: ...]' - just respond directly.")
-            lines.append("- Don't include action descriptions like *nods* or *gestures*.")
+            lines.append(
+                "- Avoid meta-commentary like 'As an AI...' or '[Note: ...]' - just respond directly."
+            )
+            lines.append(
+                "- Don't include action descriptions like *nods* or *gestures*."
+            )
 
             disallow_code = self.persona.get("disallow_code", False)
             if disallow_code:
-                lines.append("- When discussing technical topics, explain concepts clearly without code examples.")
+                lines.append(
+                    "- When discussing technical topics, explain concepts clearly without code examples."
+                )
             else:
-                lines.append("- Use code examples when helpful for technical discussions, but explain them in plain language too.")
+                lines.append(
+                    "- Use code examples when helpful for technical discussions, but explain them in plain language too."
+                )
 
             # Always include user context — even new users get date/time/location awareness
             lines.append("\n[USER CONTEXT]")
@@ -710,7 +811,8 @@ class ChatWorkflow:
                 # Filter out keys already shown in [USER CONTEXT] to avoid duplication
                 _context_keys = frozenset({"timezone", "location"})
                 extra_relevant = {
-                    k: v for k, v in _select_relevant_facts(user_profile, user_text).items()
+                    k: v
+                    for k, v in _select_relevant_facts(user_profile, user_text).items()
                     if k not in _context_keys
                 }
                 if extra_relevant:
@@ -727,7 +829,7 @@ class ChatWorkflow:
             base_prompt = "\n".join(lines)
 
             self.prompt_cache.set(
-                self.persona.get('system_prompt', ''),
+                self.persona.get("system_prompt", ""),
                 user_profile,
                 history_str,
                 base_prompt,
@@ -736,41 +838,33 @@ class ChatWorkflow:
                 internal_id=internal_id,
             )
 
-        prompt_parts = [
-            base_prompt,
-            f"\nUser: {user_text}",
-            "Assistant:"
-        ]
+        prompt_parts = [base_prompt, f"\nUser: {user_text}", "Assistant:"]
 
         return "\n".join(prompt_parts)
-    
+
     def _sanitize_output(self, response: str) -> str:
         """Clean output to remove unwanted artifacts."""
-        response = self.SPEAKER_TAG_PATTERN.sub('', response).strip()
-        response = self.META_NOTE_PATTERN.sub('', response).strip()
-        response = self.ACTION_PATTERN.sub('', response).strip()
-        
+        response = self.SPEAKER_TAG_PATTERN.sub("", response).strip()
+        response = self.META_NOTE_PATTERN.sub("", response).strip()
+        response = self.ACTION_PATTERN.sub("", response).strip()
+
         if not self.minimal_sanitization:
-            response = self.CODE_BLOCK_PATTERN.sub('', response).strip()
-            response = self.INLINE_CODE_PATTERN.sub('', response).strip()
-        
-        response = re.sub(r' +', ' ', response)
-        response = re.sub(r'\n\n\n+', '\n\n', response)
-        
+            response = self.CODE_BLOCK_PATTERN.sub("", response).strip()
+            response = self.INLINE_CODE_PATTERN.sub("", response).strip()
+
+        response = re.sub(r" +", " ", response)
+        response = re.sub(r"\n\n\n+", "\n\n", response)
+
         return response.strip()
-    
-    def _should_add_small_talk(self, history: list) -> bool:
-        if not history or len(history) < 2:
-            return False
-        return False
-    
-    def _append_small_talk_thoughtfully(self, main_response: str) -> str:
-        return main_response
-    
+
     def change_persona(self, persona_name: str) -> bool:
         """Switch to a different persona."""
         persona_file = os.path.join(
-            os.path.dirname(__file__), "..", "assets", "personality", f"{persona_name}.json"
+            os.path.dirname(__file__),
+            "..",
+            "assets",
+            "personality",
+            f"{persona_name}.json",
         )
         if os.path.exists(persona_file):
             with open(persona_file) as f:
@@ -779,11 +873,11 @@ class ChatWorkflow:
             return True
         logger.warning(f"Persona not found: {persona_name}")
         return False
-    
+
     def get_cache_stats(self) -> Dict:
         """Return cache statistics for monitoring."""
         return {
-            'prompt_cache': self.prompt_cache.stats(),
-            'dedupe_cache_size': len(self.dedupe_cache.cache),
-            'current_persona': self.persona.get('name', 'Unknown')
+            "prompt_cache": self.prompt_cache.stats(),
+            "dedupe_cache_size": len(self.dedupe_cache.cache),
+            "current_persona": self.persona.get("name", "Unknown"),
         }
