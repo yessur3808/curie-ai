@@ -260,6 +260,10 @@ def apply_bitbucket_code_change(
     Returns:
         Tuple of (branch_name, changes dict, PR URL)
     """
+    branch_name = (branch_name or "").strip()
+    if not branch_name:
+        raise ValueError("branch_name cannot be empty")
+
     from agent.skills.coder import (
         get_code_context,
         enhance_and_lint_files,
