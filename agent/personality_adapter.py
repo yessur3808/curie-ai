@@ -39,7 +39,11 @@ class PersonalityAdapter:
             user_emotion = "technical"
 
         urgency = bool(self._URGENT_PATTERNS.search(text))
-        mode = "urgent" if urgency else ("professional" if user_emotion == "technical" else "casual")
+        mode = (
+            "urgent"
+            if urgency
+            else ("professional" if user_emotion == "technical" else "casual")
+        )
 
         trust_signal = "new"
         history_len = len(history or [])

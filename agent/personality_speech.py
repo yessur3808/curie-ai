@@ -5,7 +5,9 @@ from typing import Dict, Optional
 class PersonalitySpeechEngine:
     """Applies lightweight post-generation speech traits for active persona."""
 
-    def apply(self, response: str, persona: Dict, context: Optional[Dict] = None) -> str:
+    def apply(
+        self, response: str, persona: Dict, context: Optional[Dict] = None
+    ) -> str:
         if not response or response.startswith("[Error"):
             return response
 
@@ -56,8 +58,8 @@ class PersonalitySpeechEngine:
         if accent_intensity < 0.2:
             return response
 
-        replacements = persona.get("speech_pattern", {}).get("accent", {}).get(
-            "modifications", {}
+        replacements = (
+            persona.get("speech_pattern", {}).get("accent", {}).get("modifications", {})
         )
         if not replacements:
             return response

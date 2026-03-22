@@ -49,6 +49,10 @@ per-file-ignores =
     utils/db.py:F821
     # global client cache and unused os import (pre-existing)
     utils/weather.py:F401,F824
+    # scripts: utility scripts with unused imports and f-strings without placeholders
+    scripts/*.py:F401,F541
+    # test_features.py: uses f"..." strings with emoji but no interpolation (pre-existing)
+    test_features.py:F541
 
 exclude =
     __pycache__,

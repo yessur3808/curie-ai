@@ -34,3 +34,18 @@ repos:
       - id: flake8
         additional_dependencies: []
         stages: [pre-commit, pre-push]
+
+  # ---------------------------------------------------------------------------
+  # pytest — run full test suite before every push.
+  # Uses pyproject.toml config (testpaths, asyncio_mode, etc.).
+  # language: system uses whatever pytest is on PATH (i.e. your active venv).
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: pytest
+        name: Run pytest
+        entry: pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

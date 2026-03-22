@@ -6,25 +6,29 @@ This script demonstrates the structure of the new features.
 Note: Requires dependencies from requirements.txt to be installed.
 """
 
+
 def main():
     """Show examples of how to use the enhanced coding modules"""
     print("=" * 60)
     print("Enhanced Coding Modules - Usage Examples")
     print("=" * 60)
-    
+
     print("\n1. CODE REVIEW")
     print("-" * 40)
-    print("""
+    print(
+        """
 from agent.skills.code_reviewer import CodeReviewer
 
 reviewer = CodeReviewer()
 result = reviewer.review_code_changes(diff_content, "file.py")
 comment = reviewer.format_review_comment(result)
-    """)
-    
+    """
+    )
+
     print("\n2. GITLAB INTEGRATION")
     print("-" * 40)
-    print("""
+    print(
+        """
 from agent.skills.gitlab_integration import GitLabIntegration
 
 gitlab = GitLabIntegration()
@@ -35,11 +39,13 @@ mr_data = gitlab.create_merge_request(
     title='New Feature',
     description='Description here'
 )
-    """)
-    
+    """
+    )
+
     print("\n3. BITBUCKET INTEGRATION")
     print("-" * 40)
-    print("""
+    print(
+        """
 from agent.skills.bitbucket_integration import BitbucketIntegration
 
 bitbucket = BitbucketIntegration()
@@ -51,11 +57,13 @@ pr_data = bitbucket.create_pull_request(
     title='New Feature',
     description='Description here'
 )
-    """)
-    
+    """
+    )
+
     print("\n4. SELF-UPDATE")
     print("-" * 40)
-    print("""
+    print(
+        """
 from agent.skills.self_updater import auto_update
 
 result = auto_update(
@@ -63,11 +71,13 @@ result = auto_update(
     update_deps=True,
     restart=False
 )
-    """)
-    
+    """
+    )
+
     print("\n5. STANDALONE CODING SERVICE")
     print("-" * 40)
-    print("""
+    print(
+        """
 from services.coding_service import CodingService
 
 service = CodingService(notification_callback=my_callback)
@@ -79,13 +89,14 @@ task_id = service.add_task('review', {
 })
 
 status = service.get_status()
-    """)
-    
+    """
+    )
+
     print("\n" + "=" * 60)
     print("For complete documentation, see:")
     print("  docs/CODING_MODULES_GUIDE.md")
     print("=" * 60)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

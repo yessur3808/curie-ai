@@ -128,9 +128,11 @@ class ScraperPatternManager:
         values.append(id)
         with get_pg_conn() as conn:
             cur = conn.cursor()
-            query = sql.SQL("""
+            query = sql.SQL(
+                """
                 UPDATE scraper_patterns SET {}, updated_at = %s WHERE id = %s
-            """).format(set_clause)
+            """
+            ).format(set_clause)
             cur.execute(query, values)
             conn.commit()
             return cur.rowcount > 0

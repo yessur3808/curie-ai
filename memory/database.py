@@ -97,7 +97,8 @@ def init_pg():
         with get_pg_conn() as conn:
             with conn.cursor() as cur:
                 try:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         CREATE EXTENSION IF NOT EXISTS "pgcrypto";
                         CREATE TABLE IF NOT EXISTS users (
                             id SERIAL PRIMARY KEY,
@@ -118,7 +119,8 @@ def init_pg():
                             updated_at TIMESTAMPTZ DEFAULT now(),
                             updated_by TEXT NOT NULL
                         );
-                    """)
+                    """
+                    )
                     # Idempotent migration for deployments that pre-date the TEXT[] schema:
                     #
                     # 1. For columns that already existed as TEXT, convert each value to a
@@ -129,7 +131,8 @@ def init_pg():
                     #
                     # All checks are inside a single DO $$ ... $$ block so the whole
                     # migration is one round-trip and is safe to re-run on every startup.
-                    cur.execute("""
+                    cur.execute(
+                        """
                         DO $$
                         DECLARE
                             col_type TEXT;
@@ -208,8 +211,10 @@ def init_pg():
                                 ALTER TABLE users ADD COLUMN display_name TEXT;
                             END IF;
                         END $$;
-                    """)
-                    cur.execute("""
+                    """
+                    )
+                    cur.execute(
+                        """
                         CREATE TABLE IF NOT EXISTS conversation_memory (
                             id SERIAL PRIMARY KEY,
                             user_internal_id UUID NOT NULL,
@@ -218,7 +223,8 @@ def init_pg():
                             message TEXT NOT NULL,
                             FOREIGN KEY (user_internal_id) REFERENCES users(internal_id) ON DELETE CASCADE
                         );
-                    """)
+                    """
+                    )
                     conn.commit()
                     logger.info("Postgres tables initialized successfully.")
                 except DatabaseError as e:

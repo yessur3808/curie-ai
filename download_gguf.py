@@ -4,6 +4,7 @@ from huggingface_hub import snapshot_download
 # Faster downloads (optional)
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
+
 def dl(repo_id: str, out_dir: str, patterns):
     print(f"\n==> Downloading from {repo_id} to {out_dir}")
     snapshot_download(
@@ -12,6 +13,7 @@ def dl(repo_id: str, out_dir: str, patterns):
         local_dir_use_symlinks=False,
         allow_patterns=patterns,
     )
+
 
 # 1) Llama 3.3 70B Instruct (Q4_K_M)
 dl(
