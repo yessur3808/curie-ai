@@ -75,6 +75,23 @@ def normalize_persona(persona: Dict) -> Dict:
     """Backfill optional persona fields so runtime modules can rely on a stable shape."""
     normalized = dict(persona or {})
 
+    # Promote fields from nested 'personality' sub-dict when absent or empty at top level.
+    # This handles persona files that store runtime-relevant keys under a 'personality' object.
+    _PROMOTABLE_KEYS = (
+        "speech_pattern",
+        "style_modulation",
+        "decision_profile",
+        "settings",
+        "memory_preferences",
+        "relationship_dynamics",
+    )
+    personality_block = normalized.get("personality")
+    if isinstance(personality_block, dict):
+        for key in _PROMOTABLE_KEYS:
+            top_val = normalized.get(key)
+            if (top_val is None or top_val == {}) and key in personality_block:
+                normalized[key] = personality_block[key]
+
     normalized.setdefault("core_values", [])
     normalized.setdefault("beliefs", {})
     normalized.setdefault("emotional_profile", {})

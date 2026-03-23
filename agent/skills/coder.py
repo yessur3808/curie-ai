@@ -1,6 +1,7 @@
 # agent/skills/coder.py
 
 import os
+import uuid
 import git
 from github import Github
 import subprocess
@@ -165,7 +166,7 @@ def comment_ai_suggestions(pr, suggestions_md):
 def apply_code_change(goal, files_to_edit, repo_path, branch_name):
     branch_name = (branch_name or "").strip()
     if not branch_name:
-        raise ValueError("branch_name cannot be empty")
+        branch_name = f"curie-change-{uuid.uuid4().hex[:8]}"
 
     # --- Load configs ---
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
