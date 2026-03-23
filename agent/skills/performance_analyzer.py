@@ -35,7 +35,13 @@ class PerformanceAnalyzer:
                 from agent.skills.coder import get_coding_model_name
 
                 self.model_name = get_coding_model_name()
-            except ImportError:
+            except (ImportError, ValueError) as exc:
+                logger.warning(
+                    "Failed to resolve coding model name for PerformanceAnalyzer; "
+                    "AI performance analysis will be disabled. Error: %s",
+                    exc,
+                    exc_info=True,
+                )
                 self.model_name = None
 
     def analyze_complexity(self, code: str, language: Optional[str] = None) -> Dict:

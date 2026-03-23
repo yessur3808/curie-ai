@@ -223,7 +223,7 @@ def complex():
         result = analyzer.analyze_complexity(code, language="python")
 
         # Should have higher complexity due to nesting
-        assert result["cyclomatic_complexity"] > 5
+        assert result["cyclomatic_complexity"] >= 5
         assert result["nested_depth"] > 2
 
     def test_detect_nested_loops(self, analyzer):

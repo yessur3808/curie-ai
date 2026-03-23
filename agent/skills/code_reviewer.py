@@ -7,12 +7,15 @@ Supports GitHub, GitLab, Bitbucket and other Git platforms
 
 import os
 import re
+import logging
 from typing import Any, Dict, Optional
 import git
 import llm.manager
 
 # Maximum characters to read from a file for review (configurable)
 MAX_FILE_CONTENT_LENGTH = int(os.getenv("CODE_REVIEW_MAX_CHARS", "4000"))
+
+logger = logging.getLogger(__name__)
 
 
 class CodeReviewer:
@@ -27,9 +30,17 @@ class CodeReviewer:
         """
         self.model_name = model_name or os.getenv("CODING_MODEL_NAME")
         if not self.model_name:
-            from agent.skills.coder import get_coding_model_name
+            try:
+                from agent.skills.coder import get_coding_model_name
 
-            self.model_name = get_coding_model_name()
+                self.model_name = get_coding_model_name()
+            except (ImportError, ValueError) as exc:
+                logger.warning(
+                    "CodeReviewer: failed to determine coding model name via "
+                    "agent.skills.coder.get_coding_model_name: %s",
+                    exc,
+                )
+                self.model_name = None
 
     def review_code_changes(
         self, diff_content: str, file_path: str = None

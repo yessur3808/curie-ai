@@ -160,6 +160,7 @@ class CodingAssistant:
             r"\b(start|begin)\s+(pair\s+)?programming\b",
             r"\bpair\s+program(ming)?\b",
             r"\bcode\s+together\b",
+            r"\bcoding\s+together\b",
             r"\bcollaborate\s+on\s+code\b",
             r"\bworking\s+on\s+code\b",
             r"\bend\s+(pair\s+)?session\b",
