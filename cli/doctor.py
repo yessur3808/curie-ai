@@ -161,13 +161,19 @@ def run_doctor(verbose: bool = False) -> int:
 
     Returns 0 if everything is OK, 1 if there are failures.
     """
+    from cli.ui import spinner as _spinner  # noqa: PLC0415
+
+    # Wrap the slow network check in a spinner
+    with _spinner("Checking network connectivity…"):
+        network_rows = _check_network()
+
     all_checks: list[tuple[str, list[tuple[str, str, str]]]] = [
         ("Python Runtime", _check_python()),
         ("Core Dependencies", _check_core_deps()),
         ("Optional Dependencies", _check_optional_deps()),
         ("Environment Variables", _check_env_vars()),
         ("Files & Daemon", _check_services()),
-        ("Network", _check_network()),
+        ("Network", network_rows),
     ]
 
     has_failure = False

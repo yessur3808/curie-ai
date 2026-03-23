@@ -56,7 +56,9 @@ from pathlib import Path
 
 def _cmd_start(args: argparse.Namespace) -> int:
     from cli.daemon import start_daemon
-    connector_args = []
+    from cli import ui
+
+    connector_args: list[str] = []
     if args.telegram:
         connector_args.append("--telegram")
     if args.discord:
@@ -65,21 +67,54 @@ def _cmd_start(args: argparse.Namespace) -> int:
         connector_args.append("--api")
     if args.all_connectors:
         connector_args = ["--all"]
-    result = start_daemon(connector_args=connector_args if connector_args else None)
-    print(result["message"])
+
+    # Interactive connector picker if no flags were given AND we have a real TTY
+    if not connector_args and sys.stdin.isatty():
+        _connector_opts = ["API (HTTP REST)", "Telegram bot", "Discord bot", "All connectors"]
+        _connector_flags = ["--api", "--telegram", "--discord", "--all"]
+        try:
+            chosen = ui.multi_select(
+                _connector_opts,
+                title="Select connectors to enable (Space to toggle)",
+                defaults=[0],
+            )
+            if len(chosen) == len(_connector_opts) - 1:
+                connector_args = ["--all"]
+            elif chosen:
+                connector_args = [_connector_flags[i] for i in chosen]
+        except (KeyboardInterrupt, EOFError):
+            ui.warn("Aborted.")
+            return 130
+
+    label = f"Starting Curie daemon with {connector_args or 'defaults'!s}…"
+    with ui.spinner(label):
+        result = start_daemon(connector_args=connector_args if connector_args else None)
+
+    if result["success"]:
+        ui.success(result["message"])
+        ui.notify("Curie AI", result["message"])
+    else:
+        ui.error(result["message"])
     return 0 if result["success"] else 1
 
 
 def _cmd_stop(args: argparse.Namespace) -> int:
     from cli.daemon import stop_daemon
-    result = stop_daemon()
-    print(result["message"])
+    from cli import ui
+    with ui.spinner("Stopping Curie daemon…"):
+        result = stop_daemon()
+    if result["success"]:
+        ui.success(result["message"])
+        ui.notify("Curie AI", result["message"])
+    else:
+        ui.error(result["message"])
     return 0 if result["success"] else 1
 
 
 def _cmd_restart(args: argparse.Namespace) -> int:
     from cli.daemon import restart_daemon
-    connector_args = []
+    from cli import ui
+    connector_args: list[str] = []
     if args.telegram:
         connector_args.append("--telegram")
     if args.discord:
@@ -88,8 +123,13 @@ def _cmd_restart(args: argparse.Namespace) -> int:
         connector_args.append("--api")
     if args.all_connectors:
         connector_args = ["--all"]
-    result = restart_daemon(connector_args=connector_args if connector_args else None)
-    print(result["message"])
+    with ui.spinner("Restarting Curie daemon…"):
+        result = restart_daemon(connector_args=connector_args if connector_args else None)
+    if result["success"]:
+        ui.success(result["message"])
+        ui.notify("Curie AI", result["message"])
+    else:
+        ui.error(result["message"])
     return 0 if result["success"] else 1
 
 
@@ -165,31 +205,35 @@ def _cmd_service(args: argparse.Namespace) -> int:
 
 def _cmd_logs(args: argparse.Namespace) -> int:
     from cli.daemon import LOG_FILE
+    from cli import ui
+
     n = args.lines
     if not LOG_FILE.exists():
-        print(f"Log file not found: {LOG_FILE}")
-        return 1
-    try:
-        lines = LOG_FILE.read_text(errors="replace").splitlines()
-        for line in lines[-n:]:
-            print(line)
-    except OSError as e:
-        print(f"Could not read log: {e}")
+        ui.error(f"Log file not found: {LOG_FILE}")
         return 1
 
     if args.follow:
-        import time
-        try:
-            with open(LOG_FILE, errors="replace") as f:
-                f.seek(0, 2)  # seek to end
-                while True:
-                    line = f.readline()
-                    if line:
-                        print(line, end="")
-                    else:
-                        time.sleep(0.2)
-        except KeyboardInterrupt:
-            pass
+        # Rich live tail (press Ctrl-C to exit)
+        ui.live_tail(LOG_FILE, n_lines=n, label="Curie Daemon Log")
+        return 0
+
+    # Plain one-shot print
+    try:
+        lines = LOG_FILE.read_text(errors="replace").splitlines()
+        tail = lines[-n:]
+    except OSError as e:
+        ui.error(f"Could not read log: {e}")
+        return 1
+
+    try:
+        from rich.console import Console
+        from rich.text import Text
+        con = Console()
+        for line in tail:
+            con.print(ui._colourise_log_line(line))
+    except ImportError:
+        for line in tail:
+            print(line)
     return 0
 
 
@@ -261,13 +305,33 @@ def _cmd_memory(args: argparse.Namespace) -> int:
 
 def _cmd_auth(args: argparse.Namespace) -> int:
     from cli.auth import cmd_auth_login, cmd_auth_status, cmd_auth_use
+    from cli import ui
     sub = args.auth_action
     if sub == "login":
-        return cmd_auth_login(args.provider, api_key=getattr(args, "key", None))
+        provider = getattr(args, "provider", None)
+        if not provider:
+            # Interactive selector
+            _providers = ["openai", "anthropic", "gemini", "llama.cpp"]
+            try:
+                idx = ui.select(_providers, title="Choose LLM provider to configure")
+                provider = _providers[idx]
+            except (KeyboardInterrupt, Exception):
+                ui.warn("Aborted.")
+                return 130
+        return cmd_auth_login(provider, api_key=getattr(args, "key", None))
     if sub == "status":
         return cmd_auth_status()
     if sub == "use":
-        return cmd_auth_use(args.provider)
+        provider = getattr(args, "provider", None)
+        if not provider:
+            _providers = ["openai", "anthropic", "gemini", "llama.cpp"]
+            try:
+                idx = ui.select(_providers, title="Set active LLM provider")
+                provider = _providers[idx]
+            except (KeyboardInterrupt, Exception):
+                ui.warn("Aborted.")
+                return 130
+        return cmd_auth_use(provider)
     print(f"Unknown auth action: {sub!r}")
     return 1
 
@@ -489,18 +553,22 @@ Examples:
     auth_subs = p_auth.add_subparsers(dest="auth_action", metavar="ACTION")
 
     p_auth_login = auth_subs.add_parser("login", help="Store an API key for a provider")
-    p_auth_login.add_argument("--provider", required=True,
-                              choices=["openai", "anthropic", "gemini", "llama.cpp"],
-                              help="Provider name")
+    p_auth_login.add_argument(
+        "--provider", required=False, default=None,
+        choices=["openai", "anthropic", "gemini", "llama.cpp"],
+        help="Provider name (interactive selector if omitted)",
+    )
     p_auth_login.add_argument("--key", default=None, metavar="API_KEY",
                               help="API key (omit to enter interactively)")
 
     auth_subs.add_parser("status", help="Show configured LLM providers")
 
     p_auth_use = auth_subs.add_parser("use", help="Set active LLM provider priority")
-    p_auth_use.add_argument("--provider", required=True,
-                            choices=["openai", "anthropic", "gemini", "llama.cpp"],
-                            help="Provider to move to the top of the priority list")
+    p_auth_use.add_argument(
+        "--provider", required=False, default=None,
+        choices=["openai", "anthropic", "gemini", "llama.cpp"],
+        help="Provider to move to the top of the priority list (interactive selector if omitted)",
+    )
 
     p_auth.set_defaults(func=_cmd_auth)
 

@@ -3,6 +3,13 @@
 CLI interface to the Curie agent: interactive chat and single-message mode.
 Works standalone (without a running daemon) or by calling the HTTP API if the
 daemon is running on localhost:8000.
+
+Features
+--------
+  - Rich-formatted responses in a panel with sender label
+  - Per-message timestamps
+  - Animated "Curie is thinking…" spinner while waiting for a reply
+  - Graceful fallback when Rich is not installed
 """
 
 from __future__ import annotations
@@ -10,12 +17,14 @@ from __future__ import annotations
 import os
 import sys
 import json
+from datetime import datetime
 from pathlib import Path
 
 try:
     from rich.console import Console
     from rich.markdown import Markdown
     from rich.panel import Panel
+    from rich.rule import Rule
     from rich import box
     RICH_AVAILABLE = True
     console = Console()
@@ -24,11 +33,31 @@ except ImportError:
     console = None
 
 
+def _timestamp() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
 def _print_response(text: str, label: str = "Curie") -> None:
+    ts = _timestamp()
     if RICH_AVAILABLE and console:
-        console.print(Panel(Markdown(text), title=f"[cyan]{label}[/cyan]", box=box.ROUNDED))
+        console.print(
+            Panel(
+                Markdown(text),
+                title=f"[cyan]{label}[/cyan]",
+                subtitle=f"[dim]{ts}[/dim]",
+                box=box.ROUNDED,
+            )
+        )
     else:
-        print(f"\n{label}:\n{text}\n")
+        print(f"\n[{ts}] {label}:\n{text}\n")
+
+
+def _print_user_line(message: str) -> None:
+    ts = _timestamp()
+    if RICH_AVAILABLE and console:
+        console.print(f"[bold green]You[/bold green]  [dim]{ts}[/dim]  {message}")
+    else:
+        print(f"[{ts}] You: {message}")
 
 
 def _via_api(message: str, base_url: str = "http://127.0.0.1:8000") -> str | None:
@@ -54,11 +83,9 @@ def _via_workflow(message: str) -> str:
     Falls back to a plain string on error.
     """
     try:
-        # Lazy imports so the CLI doesn't require the full stack just for --help
         repo_root = Path(__file__).resolve().parent.parent
         sys.path.insert(0, str(repo_root))
 
-        # Minimal env bootstrap
         env_file = repo_root / ".env"
         if env_file.exists():
             try:
@@ -87,38 +114,80 @@ def _via_workflow(message: str) -> str:
         return f"[error invoking workflow: {e}]"
 
 
+def _fetch_with_spinner(
+    message: str,
+    *,
+    use_api: bool,
+    api_url: str,
+    api_available: bool,
+    workflow: object | None,
+) -> str:
+    """Fetch a response, showing a Rich spinner while waiting."""
+    from cli.ui import spinner as _spinner  # noqa: PLC0415
+
+    response: str = ""
+
+    with _spinner("Curie is thinking…"):
+        if use_api and api_available:
+            resp = _via_api(message, api_url)
+            if resp is not None:
+                response = resp
+            else:
+                response = "[no response from daemon]"
+        else:
+            if workflow is not None:
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    result = loop.run_until_complete(
+                        workflow.process_message(  # type: ignore[union-attr]
+                            user_message=message,
+                            platform="cli",
+                            external_user_id="cli_user",
+                        )
+                    )
+                    loop.close()
+                    response = result if isinstance(result, str) else str(result)
+                except Exception as e:
+                    response = f"[error: {e}]"
+            else:
+                response = _via_workflow(message)
+
+    return response
+
+
 def run_single_message(message: str, use_api: bool = True, api_url: str = "http://127.0.0.1:8000") -> None:
     """Send a single message to Curie and print the response."""
-    if RICH_AVAILABLE and console:
-        console.print(f"[bold]You:[/bold] {message}")
-
-    if use_api:
-        response = _via_api(message, api_url)
-        if response is None:
-            # daemon not running – fall back to in-process
-            response = _via_workflow(message)
-    else:
-        response = _via_workflow(message)
-
+    _print_user_line(message)
+    response = _fetch_with_spinner(
+        message,
+        use_api=use_api,
+        api_url=api_url,
+        api_available=use_api,
+        workflow=None,
+    )
     _print_response(response)
 
 
 def run_interactive_chat(use_api: bool = True, api_url: str = "http://127.0.0.1:8000") -> None:
     """Start an interactive REPL-style chat session with Curie."""
     if RICH_AVAILABLE and console:
-        console.print(Panel(
-            "[bold cyan]Curie AI – Interactive Chat[/bold cyan]\n"
-            "Type [bold]exit[/bold] or [bold]quit[/bold] to leave. "
-            "[bold]Ctrl-C[/bold] also works.",
-            box=box.ROUNDED,
-        ))
+        console.print(
+            Panel(
+                "[bold cyan]Curie AI – Interactive Chat[/bold cyan]\n\n"
+                "Type [bold]exit[/bold] or [bold]quit[/bold] to leave.  "
+                "[bold]Ctrl-C[/bold] also works.\n"
+                "[dim]Responses are rendered as Markdown.[/dim]",
+                box=box.ROUNDED,
+                padding=(1, 4),
+            )
+        )
     else:
         print("Curie AI – Interactive Chat (type 'exit' to quit)\n")
 
-    # Try to determine if daemon is available
+    # Check if the API daemon is reachable
     _api_available = use_api and (_via_api("ping", api_url) is not None)
 
-    # In-process workflow (created once for the session)
     workflow = None
     if not _api_available:
         if RICH_AVAILABLE and console:
@@ -135,50 +204,33 @@ def run_interactive_chat(use_api: bool = True, api_url: str = "http://127.0.0.1:
                     pass
             from utils.persona import load_persona
             from agent.chat_workflow import ChatWorkflow
-            import asyncio
             persona = load_persona()
             workflow = ChatWorkflow(persona=persona, max_history=5, enable_small_talk=False)
-            _loop = asyncio.new_event_loop()
         except Exception as e:
             print(f"Failed to initialize workflow: {e}")
             return
 
-    import asyncio
-
     while True:
         try:
             if RICH_AVAILABLE and console:
-                console.print("[bold green]You >[/bold green] ", end="")
-                user_input = input()
-            else:
-                user_input = input("You > ")
+                console.print("[bold green]You ›[/bold green] ", end="")
+            user_input = input()
         except (EOFError, KeyboardInterrupt):
             print()
             break
 
         if user_input.strip().lower() in ("exit", "quit", "bye", ":q"):
+            if RICH_AVAILABLE and console:
+                console.print("[dim]Goodbye 👋[/dim]")
             break
         if not user_input.strip():
             continue
 
-        if _api_available:
-            response = _via_api(user_input, api_url)
-            if response is None:
-                response = "[no response from daemon]"
-        else:
-            try:
-                loop = asyncio.new_event_loop()
-                response = loop.run_until_complete(
-                    workflow.process_message(
-                        user_message=user_input,
-                        platform="cli",
-                        external_user_id="cli_user",
-                    )
-                )
-                loop.close()
-                if not isinstance(response, str):
-                    response = str(response)
-            except Exception as e:
-                response = f"[error: {e}]"
-
+        response = _fetch_with_spinner(
+            user_input,
+            use_api=use_api,
+            api_url=api_url,
+            api_available=_api_available,
+            workflow=workflow,
+        )
         _print_response(response)

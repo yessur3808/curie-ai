@@ -454,3 +454,163 @@ class TestMainParsing:
             rc = main([])
         mock_help.assert_called_once()
         assert rc == 0
+
+
+# ─── cli.ui: interactive selector / multi_select / progress_bar / live_tail ───
+
+class TestUIInteractive:
+    """Tests for new interactive cli/ui.py helpers."""
+
+    # ── _can_use_arrow_keys ───────────────────────────────────────────────
+
+    def test_can_use_arrow_keys_windows(self):
+        import cli.ui as ui_mod
+        orig = ui_mod._OS
+        ui_mod._OS = "Windows"
+        try:
+            assert ui_mod._can_use_arrow_keys() is False
+        finally:
+            ui_mod._OS = orig
+
+    def test_can_use_arrow_keys_non_tty(self):
+        import cli.ui as ui_mod
+        orig = ui_mod._IS_TTY
+        ui_mod._IS_TTY = False
+        try:
+            assert ui_mod._can_use_arrow_keys() is False
+        finally:
+            ui_mod._IS_TTY = orig
+
+    # ── select (numbered fallback) ────────────────────────────────────────
+
+    def test_select_numbered_default(self, monkeypatch):
+        """select() uses default index when user presses Enter immediately."""
+        import cli.ui as ui_mod
+        # Force numbered fallback
+        monkeypatch.setattr(ui_mod, "_IS_TTY", False)
+        monkeypatch.setattr(ui_mod, "_RICH", False)
+        monkeypatch.setattr("builtins.input", lambda _: "")  # user hits Enter
+
+        idx = ui_mod.select(["alpha", "beta", "gamma"], title="Pick one", default=1)
+        assert idx == 1
+
+    def test_select_numbered_explicit_choice(self, monkeypatch):
+        import cli.ui as ui_mod
+        monkeypatch.setattr(ui_mod, "_IS_TTY", False)
+        monkeypatch.setattr(ui_mod, "_RICH", False)
+        monkeypatch.setattr("builtins.input", lambda _: "3")
+
+        idx = ui_mod.select(["a", "b", "c"], title="Choose")
+        assert idx == 2  # "3" → 0-based index 2
+
+    def test_select_empty_raises(self):
+        import cli.ui as ui_mod
+        with pytest.raises(ValueError):
+            ui_mod.select([])
+
+    # ── multi_select (numbered fallback) ──────────────────────────────────
+
+    def test_multi_select_numbered_empty_input(self, monkeypatch):
+        import cli.ui as ui_mod
+        monkeypatch.setattr(ui_mod, "_IS_TTY", False)
+        monkeypatch.setattr(ui_mod, "_RICH", False)
+        monkeypatch.setattr("builtins.input", lambda _: "")
+
+        result = ui_mod.multi_select(["x", "y", "z"], defaults=[0, 2])
+        # empty input → return defaults
+        assert result == [0, 2]
+
+    def test_multi_select_numbered_explicit(self, monkeypatch):
+        import cli.ui as ui_mod
+        monkeypatch.setattr(ui_mod, "_IS_TTY", False)
+        monkeypatch.setattr(ui_mod, "_RICH", False)
+        monkeypatch.setattr("builtins.input", lambda _: "1,3")
+
+        result = ui_mod.multi_select(["a", "b", "c"])
+        assert result == [0, 2]
+
+    def test_multi_select_empty_options(self):
+        import cli.ui as ui_mod
+        assert ui_mod.multi_select([]) == []
+
+    # ── progress_bar ──────────────────────────────────────────────────────
+
+    def test_progress_bar_runs_body(self):
+        import cli.ui as ui_mod
+        orig = ui_mod._RICH
+        ui_mod._RICH = False
+        advances = []
+        try:
+            with ui_mod.progress_bar(3, "Testing") as bar:
+                bar.advance()
+                advances.append(1)
+                bar.advance(2)
+                advances.append(2)
+        finally:
+            ui_mod._RICH = orig
+        assert advances == [1, 2]
+
+    def test_progress_bar_with_rich(self):
+        import cli.ui as ui_mod
+        if not ui_mod._RICH:
+            pytest.skip("Rich not available")
+        items = list(range(5))
+        processed = []
+        with ui_mod.progress_bar(len(items), "Items") as bar:
+            for item in items:
+                processed.append(item)
+                bar.advance()
+        assert processed == items
+
+    # ── live_tail ─────────────────────────────────────────────────────────
+
+    def test_live_tail_missing_file(self, capsys):
+        import cli.ui as ui_mod
+        import cli.ui
+        orig = ui_mod._RICH
+        ui_mod._RICH = False
+        try:
+            ui_mod.live_tail("/tmp/__no_such_file_curie__.log", n_lines=5)
+        finally:
+            ui_mod._RICH = orig
+        out = capsys.readouterr()
+        assert "not found" in (out.out + out.err).lower()
+
+    def test_live_tail_reads_existing_file(self, tmp_path, capsys):
+        """live_tail should read the last n lines when not following."""
+        import cli.ui as ui_mod
+        orig = ui_mod._RICH
+        ui_mod._RICH = False
+        log = tmp_path / "test.log"
+        log.write_text("\n".join(f"line {i}" for i in range(20)))
+        # Patch open to raise KeyboardInterrupt immediately so we don't follow
+        import builtins
+        real_open = builtins.open
+
+        class _FakeFile:
+            def seek(self, *a): pass
+            def readline(self): raise KeyboardInterrupt
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        import unittest.mock as _mock
+        with _mock.patch("builtins.open", return_value=_FakeFile()):
+            ui_mod.live_tail(log, n_lines=5)
+        ui_mod._RICH = orig
+
+    # ── _colourise_log_line ───────────────────────────────────────────────
+
+    def test_colourise_error_line(self):
+        import cli.ui as ui_mod
+        if not ui_mod._RICH:
+            pytest.skip("Rich not available")
+        text = ui_mod._colourise_log_line("ERROR: Something failed")
+        # Rich Text objects carry style info
+        assert str(text) == "ERROR: Something failed"
+
+    def test_colourise_info_line(self):
+        import cli.ui as ui_mod
+        if not ui_mod._RICH:
+            pytest.skip("Rich not available")
+        text = ui_mod._colourise_log_line("INFO started service")
+        assert "started service" in str(text)

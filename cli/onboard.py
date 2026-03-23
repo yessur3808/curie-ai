@@ -147,12 +147,32 @@ def run_onboard(verbose: bool = False) -> int:
     # ── LLM Provider ──────────────────────────────────────────────────────
     _print("\n[bold]2. LLM Provider[/bold]")
     _print("  Choose which AI model provider to use.")
-    _print("  Options: [cyan]llama.cpp[/cyan] (local), [cyan]openai[/cyan], [cyan]anthropic[/cyan], [cyan]gemini[/cyan]")
 
-    llm_priority = _prompt(
-        "  [cyan]LLM_PROVIDER_PRIORITY[/cyan]  (comma-separated priority list)",
-        default=existing.get("LLM_PROVIDER_PRIORITY", "llama.cpp"),
-    )
+    _providers = ["llama.cpp (local)", "openai", "anthropic", "gemini", "custom (enter manually)"]
+    _provider_values = ["llama.cpp", "openai", "anthropic", "gemini", None]
+    _existing_priority = existing.get("LLM_PROVIDER_PRIORITY", "llama.cpp")
+    # Determine default index from existing value
+    _default_idx = 0
+    for _i, _v in enumerate(_provider_values):
+        if _v and _v in _existing_priority:
+            _default_idx = _i
+            break
+
+    try:
+        from cli.ui import select as _ui_select  # noqa: PLC0415
+        _chosen_idx = _ui_select(_providers, title="Primary LLM provider", default=_default_idx)
+        _chosen_value = _provider_values[_chosen_idx]
+    except (ImportError, Exception):
+        _chosen_value = None
+
+    if _chosen_value is not None:
+        llm_priority = _chosen_value
+    else:
+        # "custom" or fallback: ask for free-form input
+        llm_priority = _prompt(
+            "  [cyan]LLM_PROVIDER_PRIORITY[/cyan]  (comma-separated priority list)",
+            default=_existing_priority,
+        )
     if llm_priority:
         updates["LLM_PROVIDER_PRIORITY"] = llm_priority
 
@@ -190,7 +210,27 @@ def run_onboard(verbose: bool = False) -> int:
     _print("\n[bold]3. Connectors[/bold]")
     _print("  Configure chat platform connectors (all are optional).")
 
-    if _confirm("  Set up [cyan]Telegram[/cyan] connector?", default=bool(existing.get("TELEGRAM_BOT_TOKEN"))):
+    # Interactive multi-select for connectors
+    _conn_opts = ["Telegram bot", "Discord bot", "REST API"]
+    _conn_defaults: list[int] = []
+    if existing.get("TELEGRAM_BOT_TOKEN"):
+        _conn_defaults.append(0)
+    if existing.get("DISCORD_BOT_TOKEN"):
+        _conn_defaults.append(1)
+    if existing.get("RUN_API", "true").lower() != "false":
+        _conn_defaults.append(2)
+
+    try:
+        from cli.ui import multi_select as _ui_multi  # noqa: PLC0415
+        _conn_chosen = _ui_multi(_conn_opts, title="Enable connectors (Space to toggle)", defaults=_conn_defaults)
+    except (ImportError, Exception):
+        _conn_chosen = _conn_defaults
+
+    _want_telegram = 0 in _conn_chosen
+    _want_discord = 1 in _conn_chosen
+    _want_api = 2 in _conn_chosen
+
+    if _want_telegram:
         token = _prompt(
             "  [cyan]TELEGRAM_BOT_TOKEN[/cyan]",
             default=existing.get("TELEGRAM_BOT_TOKEN", ""),
@@ -200,7 +240,7 @@ def run_onboard(verbose: bool = False) -> int:
             updates["TELEGRAM_BOT_TOKEN"] = token
             updates["RUN_TELEGRAM"] = "true"
 
-    if _confirm("  Set up [cyan]Discord[/cyan] connector?", default=bool(existing.get("DISCORD_BOT_TOKEN"))):
+    if _want_discord:
         token = _prompt(
             "  [cyan]DISCORD_BOT_TOKEN[/cyan]",
             default=existing.get("DISCORD_BOT_TOKEN", ""),
@@ -210,8 +250,7 @@ def run_onboard(verbose: bool = False) -> int:
             updates["DISCORD_BOT_TOKEN"] = token
             updates["RUN_DISCORD"] = "true"
 
-    api_enabled = _confirm("  Enable [cyan]REST API[/cyan] connector?", default=True)
-    updates["RUN_API"] = "true" if api_enabled else "false"
+    updates["RUN_API"] = "true" if _want_api else "false"
 
     # ── Master User ────────────────────────────────────────────────────────
     _print("\n[bold]4. Master User[/bold]")
