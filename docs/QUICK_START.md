@@ -1,286 +1,286 @@
-# Quick Start Guide for C.U.R.I.E. AI
+# Quick Start Guide — C.U.R.I.E. AI
 
-Get C.U.R.I.E. up and running in 5 minutes with this streamlined guide.
+Get C.U.R.I.E. up and running in about 10 minutes.
 
 ## Prerequisites
 
-- Python 3.10 or higher
-- PostgreSQL and MongoDB (or use Docker)
-- 10-15 minutes
+| Requirement | Version / Notes |
+|---|---|
+| Python | 3.10 or higher |
+| PostgreSQL | Any recent version (or use Docker) |
+| MongoDB | Any recent version (or use Docker) |
+| GGUF model | e.g. `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` |
 
-## Installation Steps
+---
 
-### 1. Clone and Setup
+## Step 1 — Clone & install
 
 ```bash
-# Clone the repository
 git clone https://github.com/yessur3808/curie-ai.git
 cd curie-ai
 
-# Create and activate virtual environment (recommended)
+# Create and activate a virtual environment (recommended)
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate          # Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install core dependencies
+pip install -r requirements.txt   # or: make install
 
-# Optional: Install voice features and extra connectors (Discord, WhatsApp)
-# Skip this if you're on Python 3.13+ or don't need these features
-# pip install -r requirements-optional.txt
+# Optional: voice (Whisper STT/TTS), Discord, and WhatsApp support
+# pip install -r requirements-optional.txt   # or: make install-optional
+
+# Verify that everything installed correctly
+python scripts/verify_setup.py    # or: make verify
 ```
 
-**Verify installation:**
-```bash
-python scripts/verify_setup.py
-```
+> **Python 3.13+ note:** `openai-whisper` may fail to build. Skip `requirements-optional.txt` if you don't need voice features — the application works fine without them.
 
-**Note:** If `pip install -r requirements-optional.txt` fails on Python 3.13+ with openai-whisper errors, that's expected. Whisper is only used for optional voice features and extra connectors, and the application will work fine without these optional dependencies.
+---
 
-If you see other errors, check the [Troubleshooting Guide](TROUBLESHOOTING.md).
-
-### 2. Configure Environment
+## Step 2 — Configure your environment
 
 ```bash
-# Copy the example environment file
 cp .env.example .env
-
-# Edit .env with your preferred editor
-nano .env  # or vim, code, etc.
+# Edit .env with your preferred editor (nano, vim, VS Code…)
 ```
 
-**Minimal configuration for Telegram:**
-```env
-# Telegram Bot Token (required for Telegram)
-TELEGRAM_BOT_TOKEN=your_token_from_botfather
+**Minimum required settings:**
 
-# Database Configuration
+```env
+# Telegram bot token (from @BotFather on Telegram)
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+
+# GGUF model filename — place the file in a models/ directory
+LLM_MODELS=Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+
+# PostgreSQL
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-POSTGRES_DB=curie
-POSTGRES_USER=your_user
-POSTGRES_PASSWORD=your_password
-MONGO_URI=mongodb://localhost:27017/curie
+POSTGRES_DB=assistant_db
+POSTGRES_USER=your_pg_user
+POSTGRES_PASSWORD=your_pg_password
 
-# Optional: LLM Model (can skip to test without AI)
-MODEL_PATH=models/your-model.gguf
+# MongoDB
+MONGODB_URI=mongodb://localhost:27017/
+MONGODB_DB=assistant_db
+
+# Your Telegram user ID — grants admin privileges
+MASTER_USER_ID=123456789
 ```
 
-### 3. Setup Databases
+> **Tip:** Run `make verify` after editing `.env` to catch configuration issues early.
 
-**Option A: Using Docker with Make (Easiest)**
-```bash
-# Start databases and run all migrations
-make db-start && make setup-db
-```
+---
 
-**Option B: Using Docker manually**
+## Step 3 — Start databases
+
+### Option A: Docker (easiest)
+
 ```bash
-# Start PostgreSQL and MongoDB with Docker
+# Start PostgreSQL and MongoDB containers
 docker-compose up -d postgres mongo
 
-# Wait a few seconds for databases to start
-sleep 5
+# Run migrations and create the master user record
+make setup-db
+```
 
+### Option B: Manual setup
+
+```bash
 # Run migrations
 python scripts/apply_migrations.py
+
+# Generate and insert the master user
 python scripts/gen_master_id.py
 python scripts/insert_master.py
 ```
 
-**Option C: Local Installation**
-```bash
-# Install PostgreSQL and MongoDB on your system
-# Then create the database:
-psql -U postgres -c "CREATE DATABASE curie;"
-psql -U postgres -c "CREATE USER your_user WITH PASSWORD 'your_password';"
-psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE curie TO your_user;"
+---
 
-# Run migrations
-python scripts/apply_migrations.py
-python scripts/gen_master_id.py
-python scripts/insert_master.py
+## Step 4 — Download a GGUF model
+
+Place a compatible `.gguf` file in a `models/` directory in the project root:
+
+```bash
+mkdir -p models
+# Download from HuggingFace, for example:
+# https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF
 ```
 
-### 4. Get a Telegram Bot Token
+Then set the filename in `.env`:
 
-1. Open Telegram and search for [@BotFather](https://t.me/botfather)
-2. Send `/newbot` and follow the instructions
-3. Copy the bot token
-4. Paste it in your `.env` file as `TELEGRAM_BOT_TOKEN`
-
-### 5. Run C.U.R.I.E.
-
-**Using Make commands (recommended):**
-```bash
-# Run with Telegram connector
-make run-telegram
-
-# Or run with API server
-make run-api
-
-# Or run all connectors
-make run-all
+```env
+LLM_MODELS=Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
 ```
 
-**Or run directly:**
+**Recommended models by hardware:**
+
+| RAM / VRAM | Recommended Model |
+|---|---|
+| 8 GB | Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf |
+| 16 GB | Meta-Llama-3-13B-Instruct-Q4_K_M.gguf |
+| 32 GB+ | Meta-Llama-3-70B-Instruct-Q4_K_M.gguf |
+
+---
+
+## Step 5 — Get a Telegram bot token
+
+1. Open Telegram and start a chat with [@BotFather](https://t.me/botfather)
+2. Send `/newbot` and follow the prompts
+3. Copy the token BotFather gives you
+4. Paste it into your `.env` as `TELEGRAM_BOT_TOKEN`
+
+---
+
+## Step 6 — Run C.U.R.I.E.
+
 ```bash
-# Run with Telegram connector
+# Using Make shortcuts (recommended):
+make run-telegram    # Telegram only
+make run-api         # REST/WebSocket API on port 8000 only
+make run-all         # All enabled connectors
+
+# Or directly:
 python main.py --telegram
-
-# Or run with API server
 python main.py --api
-
-# Or run all connectors
 python main.py --all
 ```
 
-You should see:
+You should see output similar to:
+
 ```
-✅ ChatWorkflow initialized with persona: Curie
+✅ ChatWorkflow initialized with persona: Jarvis
 Starting Telegram connector...
 ```
 
-### 6. Test It Out
+Open Telegram, find your bot, and send it a message — it should respond!
 
-Open Telegram and send a message to your bot. It should respond!
+---
 
-## Common Scenarios
+## Step 7 — (Optional) Customize your persona
 
-### Running Without LLM (Testing Mode)
+C.U.R.I.E. ships with built-in personas in `assets/personality/`:
 
-You can run C.U.R.I.E. without a language model for testing:
-1. Don't set `MODEL_PATH` in `.env`
-2. The app will warn but continue running
-3. Responses will be placeholders
+| Filename | Personality |
+|---|---|
+| `personality.json` | Default polished assistant |
+| `jarvis.json` | Formal, tactical, high-precision |
+| `friday.json` | Friendly, adaptive, proactive |
+| `gideon.json` | Analytical, strategic, context-heavy |
+| `bagley.json` | Witty, efficient, slightly sarcastic |
+| `curie.json` | Curious, warm, science-inspired |
+| `andreja.json` | Calm, thoughtful, diplomatic |
 
-### Using Docker for Everything
+Set the active persona in `.env`:
 
-```bash
-# Start all services (databases + app)
-docker-compose up
-
-# The app will be available at:
-# - Telegram: Connect to your bot
-# - API: http://localhost:8000
+```env
+ASSISTANT_NAME=jarvis
+PERSONA_FILE=jarvis.json
 ```
 
-### Using PM2 for Production
+You can also create a custom persona by copying any of the files above and editing the JSON.
+
+---
+
+## Running in Production
+
+### PM2 (recommended for servers)
 
 ```bash
-# Install PM2
 npm install -g pm2
-
-# Start with PM2
 pm2 start ecosystem.config.js
-
-# View logs
 pm2 logs curie-main
-
-# See status
 pm2 status
 ```
 
-## Next Steps
+See [PM2_SETUP.md](PM2_SETUP.md) for full configuration details.
 
-Once you have C.U.R.I.E. running:
+### Docker Compose (databases only)
 
-1. **Customize your persona**: Create `assets/personality/curie.json` (for example, copy from `assets/example_persona.json`) and edit it. The `assets/personality` folder is gitignored, so your persona file won’t be committed.
-2. **Add more platforms**: Configure Discord, WhatsApp, or API
-3. **Enable voice**: Set up speech recognition and TTS
-4. **Advanced features**: Check out the [Coding Modules Guide](CODING_MODULES_GUIDE.md)
+The included `docker-compose.yml` provisions PostgreSQL and MongoDB. The application itself runs on the host.
+
+---
+
+## Useful Make Commands
+
+```bash
+# Installation
+make install              # Install core dependencies
+make install-optional     # Install optional deps (voice, Discord, WhatsApp)
+make verify               # Verify setup and imports
+
+# Database
+make db-start             # Start databases with Docker
+make db-stop              # Stop database containers
+make db-status            # Check container status
+make setup-db             # Run migrations (after db-start)
+
+# Running
+make run-telegram         # Start Telegram connector
+make run-discord          # Start Discord connector
+make run-api              # Start REST/WebSocket API
+make run-all              # Start all connectors
+
+# Development
+make test                 # Run tests
+make lint                 # Lint with flake8
+make format               # Format with black
+make clean                # Remove cache files
+make check-ports          # Check if required ports are available
+```
+
+**Complete first-time setup in one line:**
+
+```bash
+make install && make db-start && make setup-db && make run-telegram
+```
+
+---
 
 ## Common Issues
 
 ### "openai-whisper installation fails" (Python 3.13+)
 
-**Error:**
-```
-Getting requirements to build wheel did not run successfully.
-exit code: 1
-```
+**Expected behavior.** Skip `requirements-optional.txt`. Voice features will use SpeechRecognition as a fallback and the application will work normally.
 
-**Solution:** This is expected on Python 3.13+. The core dependencies in `requirements.txt` no longer include openai-whisper. The application will work fine - voice features will automatically use SpeechRecognition as a fallback.
+### "ModuleNotFoundError: No module named …"
 
-For more details, see [Troubleshooting Guide - openai-whisper Installation Issues](TROUBLESHOOTING.md#openai-whisper-installation-issues-python-313).
+Install core dependencies:
 
-### "ModuleNotFoundError: No module named 'pytz'"
-
-**Solution:** Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
+Then run `make verify` to check what's missing.
+
 ### "Could not connect to database"
 
-**Solution:** 
-1. Check databases are running: `docker-compose ps` or check system services
-2. Verify connection details in `.env`
-3. Test connections:
-   ```bash
-   psql -h localhost -U your_user -d curie
-   mongosh "mongodb://localhost:27017/curie"
-   ```
+1. Check containers are running: `docker-compose ps`
+2. Verify credentials in `.env` match what you set up
+3. Test connections manually:
 
-### Bot not responding in Telegram
-
-**Solution:**
-1. Verify `TELEGRAM_BOT_TOKEN` is correct in `.env`
-2. Check the bot is running without errors: `python main.py --telegram`
-3. Ensure the bot is not already running elsewhere (only one instance allowed)
-
-## Getting Help
-
-- **Troubleshooting**: See [Troubleshooting Guide](TROUBLESHOOTING.md)
-- **Full Setup**: See main [README.md](../README.md)
-- **Platform-Specific**: See [Multi-Platform Guide](MULTI_PLATFORM_GUIDE.md)
-- **GitHub Issues**: [Report bugs or ask questions](https://github.com/yessur3808/curie-ai/issues)
-
-## Useful Make Commands
-
-For convenience, many common tasks have Make shortcuts. Run `make help` to see all available commands.
-
-**Quick reference:**
 ```bash
-# Installation
-make install              # Install core dependencies
-make install-optional     # Install optional dependencies (Whisper, Discord, WhatsApp)
-make verify              # Verify your setup
-
-# Database management
-make db-start            # Start databases with Docker
-make db-stop             # Stop databases
-make db-status           # Check database status
-make setup-db            # Run migrations (after db-start)
-
-# Running the application
-make run-telegram        # Start with Telegram
-make run-discord         # Start with Discord
-make run-whatsapp        # Start with WhatsApp
-make run-api             # Start with API server
-make run-all             # Start with all connectors
-
-# Development
-make test                # Run tests
-make clean               # Clean cache files
-make check-ports         # Check if ports are available
+psql -h localhost -U your_pg_user -d assistant_db
+mongosh "mongodb://localhost:27017/assistant_db"
 ```
 
-**Complete first-time setup:**
-```bash
-make install && make db-start && make setup-db && make run-telegram
-```
+### "Bot not responding in Telegram"
 
-## Verification Checklist
-
-Before asking for help, verify:
-
-- [ ] Python 3.10+ installed: `python --version`
-- [ ] Dependencies installed: `make verify` or `python scripts/verify_setup.py`
-- [ ] `.env` file configured correctly
-- [ ] Databases running and accessible
-- [ ] No other instance of the bot running
-- [ ] Checked logs for error messages
+1. Verify `TELEGRAM_BOT_TOKEN` is correct
+2. Only one instance can run per token — stop any other running instances
+3. Check logs for errors: `python main.py --telegram` (or `pm2 logs curie-main`)
 
 ---
 
-**Need more help?** Check the [Troubleshooting Guide](TROUBLESHOOTING.md) or open an issue on GitHub.
+## Next Steps
+
+- **Read the main README** for a full feature reference and API documentation
+- **Add more platforms**: Configure `RUN_DISCORD=true` or `RUN_WHATSAPP=true` in `.env`
+- **Enable voice**: Install `requirements-optional.txt` and set `WHISPER_MODEL=base`
+- **Connect cloud LLMs**: Add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` and update `LLM_PROVIDER_PRIORITY`
+- **Explore coding features**: See [ADVANCED_CODING_FEATURES.md](ADVANCED_CODING_FEATURES.md)
+- **Troubleshoot**: See [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+
+---
+
+**Need help?** Open an issue at [github.com/yessur3808/curie-ai](https://github.com/yessur3808/curie-ai/issues).
