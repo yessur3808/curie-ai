@@ -302,7 +302,12 @@ class CronRunner:
     def stop(self) -> None:
         self.running = False
         if self._thread:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=_CHECK_INTERVAL + 5)
+            if self._thread.is_alive():
+                logger.warning(
+                    "CronRunner thread did not stop within %ds; thread still alive",
+                    _CHECK_INTERVAL + 5,
+                )
         logger.info("CronRunner stopped")
 
     def _master_info(self) -> tuple[Optional[str], str, Optional[str]]:
