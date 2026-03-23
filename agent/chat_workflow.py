@@ -7,6 +7,7 @@ Centralized chat workflow: handles all chat intelligence independent of connecto
 - Prompt construction with structured message format
 - LLM inference with output sanitation
 - Deduplication at the chat level
+- System / CLI commands skill integration (status, metrics, tasks, doctor, logs, start/stop/restart)
 - Coding assistant skill integration
 - Reminders & scheduling skill integration
 - Trip / vacation planning skill integration
@@ -446,6 +447,31 @@ class ChatWorkflow:
         # ─────────────────────────────────────────────────────────────────────
 
         try:
+            # ── System / CLI commands (highest priority – no LLM tokens consumed) ──
+            try:
+                from agent.skills.system_commands import handle_system_command  # noqa: PLC0415
+
+                sys_response = handle_system_command(
+                    user_text, internal_id=internal_id, platform=platform
+                )
+                if sys_response is not None:
+                    logger.info("System-commands skill handled the query")
+                    sm = get_session_manager()
+                    sm.add_message(platform, internal_id, "user", user_text)
+                    sm.add_message(platform, internal_id, "assistant", sys_response)
+                    self.dedupe_cache.set(
+                        platform, str(external_chat_id), message_id, sys_response
+                    )
+                    processing_time = (time.time() - start_time) * 1000
+                    return {
+                        "text": sys_response,
+                        "timestamp": datetime.utcnow(),
+                        "model_used": "system_commands_skill",
+                        "processing_time_ms": round(processing_time, 2),
+                    }
+            except Exception as e:
+                logger.debug(f"System-commands skill check failed: {e}")
+
             # Check for coding-related queries first (before LLM)
             try:
                 from agent.skills.coding_assistant import handle_coding_query

@@ -200,8 +200,10 @@ def _build_metrics_table() -> "Table":
     gpu_rows = _gpu_rows()
     if gpu_rows:
         for gpu_name, gpu_util, gpu_mem, gpu_temp in gpu_rows:
-            gpu_pct_str = gpu_util.rstrip("%")
-            gpu_pct = float(gpu_pct_str) if gpu_pct_str.isdigit() else 0
+            try:
+                gpu_pct = float(gpu_util.rstrip("%"))
+            except (ValueError, AttributeError):
+                gpu_pct = 0.0
             table.add_row(
                 gpu_name,
                 Text(gpu_util, style=_color_pct(gpu_pct)),

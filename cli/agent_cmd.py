@@ -140,7 +140,7 @@ def run_interactive_chat(use_api: bool = True, api_url: str = "http://127.0.0.1:
             workflow = ChatWorkflow(persona=persona, max_history=5, enable_small_talk=False)
             _loop = asyncio.new_event_loop()
         except Exception as e:
-            print(f"Failed to initialise workflow: {e}")
+            print(f"Failed to initialize workflow: {e}")
             return
 
     import asyncio
