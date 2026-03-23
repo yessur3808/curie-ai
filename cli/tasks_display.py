@@ -2,6 +2,10 @@
 """
 Rich display helpers for task/sub-agent breakdown.
 Separate from cli/tasks.py so that the registry can be imported without rich.
+
+Provides two views:
+  show_tasks()      – classic table view (--live for auto-refresh)
+  show_agent_tree() – beautiful tree view  (--live for auto-refresh, --tree flag)
 """
 
 from __future__ import annotations
@@ -10,17 +14,21 @@ import time
 from typing import Any
 
 try:
-    from rich.console import Console
+    from rich.console import Console, Group
     from rich.table import Table
     from rich.panel import Panel
     from rich.live import Live
     from rich.text import Text
+    from rich.tree import Tree
     from rich import box
     RICH_AVAILABLE = True
     console = Console()
 except ImportError:
     RICH_AVAILABLE = False
     console = None
+
+# Rotating "thinking" frames used for running-agent animation.
+_SPIN_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
 def _age(ts: float | None) -> str:
@@ -34,6 +42,17 @@ def _age(ts: float | None) -> str:
     return f"{secs // 3600}h {(secs % 3600) // 60}m"
 
 
+def _dur(started: float | None, finished: float | None) -> str:
+    """Return a human-readable elapsed/duration string."""
+    if started is None:
+        return "—"
+    end = finished if finished else time.time()
+    secs = int(end - started)
+    if secs < 60:
+        return f"{secs}s"
+    return f"{secs // 60}m {secs % 60}s"
+
+
 def _status_style(status: str) -> str:
     return {
         "running": "green",
@@ -41,6 +60,20 @@ def _status_style(status: str) -> str:
         "failed": "red",
         "cancelled": "yellow",
     }.get(status, "white")
+
+
+def _status_icon(status: str) -> str:
+    return {
+        "running": "⚡",
+        "done": "✅",
+        "failed": "❌",
+        "cancelled": "⚠️",
+    }.get(status, "❓")
+
+
+# ---------------------------------------------------------------------------
+# Table view (original, kept for default)
+# ---------------------------------------------------------------------------
 
 
 def _build_task_table(tasks: list[dict[str, Any]], show_finished: bool = False) -> "Table":
@@ -96,7 +129,7 @@ def _build_sub_agent_table(task: dict[str, Any]) -> "Table":
     table.add_column("Model", min_width=14)
     table.add_column("Status", min_width=8)
     table.add_column("Duration", min_width=8)
-    table.add_column("Summary", min_width=30)
+    table.add_column("Activity / Summary", min_width=36)
 
     sub_agents = task.get("sub_agents", {})
     if not sub_agents:
@@ -106,30 +139,157 @@ def _build_sub_agent_table(task: dict[str, Any]) -> "Table":
     for agent in sub_agents.values():
         started = agent.get("started_at")
         finished = agent.get("finished_at")
-        if finished and started:
-            elapsed = int(finished - started)
-            dur_str = f"{elapsed}s"
-        else:
-            dur_str = _age(started) if started else "—"
+        dur_str = _dur(started, finished)
         status = agent.get("status", "?")
+        # Prefer live description; fall back to result summary
+        activity = agent.get("description") or agent.get("result_summary") or ""
         table.add_row(
             agent.get("id", "?")[:14],
             agent.get("role", "?")[:25],
             agent.get("model", "?")[:14] or "—",
             Text(status, style=_status_style(status)),
             dur_str,
-            (agent.get("result_summary") or "")[:40],
+            activity[:50],
         )
     return table
 
 
-def show_tasks(show_finished: bool = False, live: bool = False) -> None:
-    """Display task table. If live=True, refresh every second until Ctrl-C."""
+# ---------------------------------------------------------------------------
+# Tree view (new visualization)
+# ---------------------------------------------------------------------------
+
+# Role → friendly label mapping
+_ROLE_LABELS: dict[str, str] = {
+    "llm_inference":    "🧠 LLM Inference",
+    "coding_assistant": "💻 Coding Assistant",
+    "navigation":       "🗺️  Navigation",
+    "scheduler":        "⏰ Scheduler",
+    "trip_planner":     "✈️  Trip Planner",
+    "system_commands":  "⚙️  System Commands",
+}
+
+
+def _friendly_role(role: str) -> str:
+    return _ROLE_LABELS.get(role, f"🔧 {role}")
+
+
+def _build_agent_tree(
+    tasks: list[dict[str, Any]],
+    show_finished: bool = False,
+    tick: int = 0,
+) -> "Tree":
+    """
+    Build a Rich Tree that shows the full task → sub-agent hierarchy.
+
+    Each task is a branch; each sub-agent is a leaf with its role,
+    current activity / result, and elapsed time.  Running agents display
+    an animated spinner frame so the tree feels live even in static renders.
+    """
+    root = Tree("🤖 [bold cyan]Curie AI – Agent Activity[/bold cyan]")
+
+    visible = [t for t in tasks if show_finished or t.get("status") == "running"]
+    if not visible:
+        root.add("[dim italic]No active tasks – waiting for messages…[/dim italic]")
+        return root
+
+    for task in visible:
+        t_status = task.get("status", "?")
+        t_icon = _status_icon(t_status)
+        t_age = _age(task.get("started_at"))
+        t_channel = task.get("channel", "?")
+        t_desc = (task.get("description") or "(no description)")[:60]
+        t_id = task.get("id", "?")[:8]
+
+        style = _status_style(t_status)
+        task_label = (
+            f"{t_icon} [{style} bold]{t_desc}[/{style} bold]  "
+            f"[dim]#{t_id} · {t_channel} · {t_age}[/dim]"
+        )
+        task_branch = root.add(task_label)
+
+        sub_agents = task.get("sub_agents", {})
+        if not sub_agents:
+            task_branch.add("[dim italic]No sub-agents registered[/dim italic]")
+            continue
+
+        for agent in sub_agents.values():
+            ag_status = agent.get("status", "?")
+            ag_role = _friendly_role(agent.get("role", "?"))
+            ag_started = agent.get("started_at")
+            ag_finished = agent.get("finished_at")
+            ag_dur = _dur(ag_started, ag_finished)
+
+            # Live description (what the agent is doing right now)
+            activity = agent.get("description") or agent.get("result_summary") or ""
+
+            if ag_status == "running":
+                spin = _SPIN_FRAMES[tick % len(_SPIN_FRAMES)]
+                ag_label = (
+                    f"[green]{spin}[/green] [green bold]{ag_role}[/green bold]  "
+                    f"[green dim]{activity}[/green dim]  "
+                    f"[dim]({ag_dur})[/dim]"
+                )
+            elif ag_status == "done":
+                summary = activity or "done"
+                if summary == "skipped":
+                    ag_label = f"[dim]· {ag_role}  [italic]{summary}[/italic][/dim]"
+                else:
+                    ag_label = (
+                        f"[cyan]✔[/cyan] [cyan bold]{ag_role}[/cyan bold]  "
+                        f"[cyan dim]{summary}[/cyan dim]  "
+                        f"[dim]({ag_dur})[/dim]"
+                    )
+            elif ag_status == "failed":
+                ag_label = (
+                    f"[red]✖[/red] [red bold]{ag_role}[/red bold]  "
+                    f"[red dim]{activity}[/red dim]  "
+                    f"[dim]({ag_dur})[/dim]"
+                )
+            else:
+                ag_label = f"[dim]{ag_role}  {ag_status}[/dim]"
+
+            task_branch.add(ag_label)
+
+    return root
+
+
+def _summary_panel(summary: dict[str, int]) -> "Panel":
+    """Render a compact header panel with aggregate counts."""
+    rt = summary.get("running_tasks", 0)
+    tt = summary.get("total_tasks", 0)
+    ra = summary.get("running_sub_agents", 0)
+    ta = summary.get("total_sub_agents", 0)
+    content = (
+        f"  [bold]Tasks:[/bold] [green]{rt}[/green] running / {tt} total"
+        f"    [bold]Sub-agents:[/bold] [green]{ra}[/green] running / {ta} total"
+    )
+    return Panel(content, box=box.MINIMAL, padding=(0, 1))
+
+
+# ---------------------------------------------------------------------------
+# Public entry points
+# ---------------------------------------------------------------------------
+
+
+def show_tasks(show_finished: bool = False, live: bool = False, tree: bool = False) -> None:
+    """
+    Display task/sub-agent breakdown.
+
+    Parameters
+    ----------
+    show_finished : include finished/failed tasks (default: running only)
+    live          : refresh every second until Ctrl-C
+    tree          : use Rich Tree view instead of the default table view
+    """
     if not RICH_AVAILABLE:
         print("rich is required: pip install rich")
         return
 
     from cli.tasks import get_tasks, get_task_summary
+
+    if tree:
+        show_agent_tree(show_finished=show_finished, live=live)
+        return
 
     if live:
         with Live(console=console, refresh_per_second=1, screen=False) as lv:
@@ -143,7 +303,6 @@ def show_tasks(show_finished: bool = False, live: bool = False) -> None:
                         f"[bold]Sub-agents:[/bold] {summary['running_sub_agents']} running / "
                         f"{summary['total_sub_agents']} total"
                     )
-                    from rich.console import Group
                     lv.update(Group(
                         Panel(header, box=box.MINIMAL),
                         _build_task_table(tasks, show_finished),
@@ -167,3 +326,46 @@ def show_tasks(show_finished: bool = False, live: bool = False) -> None:
         for task in running:
             if task.get("sub_agents"):
                 console.print(_build_sub_agent_table(task))
+
+
+def show_agent_tree(show_finished: bool = False, live: bool = False) -> None:
+    """
+    Display a beautiful Rich Tree visualization of tasks and their sub-agents.
+
+    Each task is shown as a branch with its sub-agents as leaves,
+    including what each agent is currently doing.  When ``live=True``,
+    the tree refreshes at 4 Hz with animated spinners for running agents.
+
+    Parameters
+    ----------
+    show_finished : include finished/failed tasks (default: running only)
+    live          : auto-refresh with animated spinners until Ctrl-C
+    """
+    if not RICH_AVAILABLE:
+        print("rich is required: pip install rich")
+        return
+
+    from cli.tasks import get_tasks, get_task_summary
+
+    if live:
+        tick = 0
+        with Live(console=console, refresh_per_second=4, screen=False) as lv:
+            try:
+                while True:
+                    tasks = get_tasks()
+                    summary = get_task_summary()
+                    lv.update(
+                        Group(
+                            _summary_panel(summary),
+                            _build_agent_tree(tasks, show_finished, tick),
+                        )
+                    )
+                    time.sleep(0.25)
+                    tick += 1
+            except KeyboardInterrupt:
+                pass
+    else:
+        tasks = get_tasks()
+        summary = get_task_summary()
+        console.print(_summary_panel(summary))
+        console.print(_build_agent_tree(tasks, show_finished))

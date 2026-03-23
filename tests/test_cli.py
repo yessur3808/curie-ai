@@ -328,3 +328,151 @@ class TestDoctor:
         result = run_doctor()
         assert isinstance(result, int)
         assert result in (0, 1)
+
+
+# ─── cli.tasks (description field + update_sub_agent_description) ─────────────
+
+
+class TestTaskRegistryDescription:
+    """Tests for the new description field on sub-agents."""
+
+    def setup_method(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        import cli.tasks as _tasks_mod
+        self._tasks_mod = _tasks_mod
+        self._orig_curie_dir = _tasks_mod.CURIE_DIR
+        self._orig_tasks_file = _tasks_mod.TASKS_FILE
+        tmp_path = Path(self._tmpdir.name)
+        _tasks_mod.CURIE_DIR = tmp_path
+        _tasks_mod.TASKS_FILE = tmp_path / "tasks.json"
+
+    def teardown_method(self):
+        self._tasks_mod.CURIE_DIR = self._orig_curie_dir
+        self._tasks_mod.TASKS_FILE = self._orig_tasks_file
+        self._tmpdir.cleanup()
+
+    def test_register_sub_agent_with_description(self):
+        t = self._tasks_mod
+        t.register_task("d1", "task with description")
+        t.register_sub_agent("d1", "s1", role="coding_assistant",
+                             description="Scanning for coding query")
+        tasks = t.get_tasks()
+        agent = tasks[0]["sub_agents"]["s1"]
+        assert agent["description"] == "Scanning for coding query"
+
+    def test_register_sub_agent_description_defaults_empty(self):
+        t = self._tasks_mod
+        t.register_task("d2", "task no desc")
+        t.register_sub_agent("d2", "s2", role="navigation")
+        tasks = t.get_tasks()
+        agent = tasks[0]["sub_agents"]["s2"]
+        assert agent["description"] == ""
+
+    def test_update_sub_agent_description(self):
+        t = self._tasks_mod
+        t.register_task("d3", "task update desc")
+        t.register_sub_agent("d3", "s3", role="llm_inference",
+                             description="Initial description")
+        t.update_sub_agent_description("d3", "s3", "Running LLM inference")
+        tasks = t.get_tasks()
+        agent = tasks[0]["sub_agents"]["s3"]
+        assert agent["description"] == "Running LLM inference"
+
+    def test_update_sub_agent_description_unknown_task(self):
+        """Should not raise when task or agent does not exist."""
+        t = self._tasks_mod
+        t.update_sub_agent_description("nonexistent", "noagent", "test")
+
+    def test_update_sub_agent_description_unknown_agent(self):
+        t = self._tasks_mod
+        t.register_task("d4", "task missing agent")
+        t.update_sub_agent_description("d4", "ghost", "test")  # must not raise
+
+
+# ─── cli.tasks_display (tree visualization) ───────────────────────────────────
+
+
+class TestAgentTreeVisualization:
+    """Tests for the new Rich tree visualization."""
+
+    def setup_method(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        import cli.tasks as _tasks_mod
+        self._tasks_mod = _tasks_mod
+        self._orig_curie_dir = _tasks_mod.CURIE_DIR
+        self._orig_tasks_file = _tasks_mod.TASKS_FILE
+        tmp_path = Path(self._tmpdir.name)
+        _tasks_mod.CURIE_DIR = tmp_path
+        _tasks_mod.TASKS_FILE = tmp_path / "tasks.json"
+
+    def teardown_method(self):
+        self._tasks_mod.CURIE_DIR = self._orig_curie_dir
+        self._tasks_mod.TASKS_FILE = self._orig_tasks_file
+        self._tmpdir.cleanup()
+
+    def _seed_tasks(self):
+        t = self._tasks_mod
+        t.register_task("tr1", "Weather in Tokyo", channel="telegram")
+        t.register_sub_agent("tr1", "coding_skill", role="coding_assistant",
+                              description="Scanning for coding / programming query")
+        t.register_sub_agent("tr1", "llm_provider", role="llm_inference",
+                              description="Running LLM inference")
+        t.update_sub_agent("tr1", "coding_skill", "done", result_summary="skipped")
+
+    def test_build_agent_tree_empty(self):
+        try:
+            from cli.tasks_display import _build_agent_tree
+            from rich.tree import Tree
+        except ImportError:
+            pytest.skip("rich not installed")
+        tree = _build_agent_tree([], show_finished=False)
+        assert isinstance(tree, Tree)
+
+    def test_build_agent_tree_with_tasks(self):
+        try:
+            from cli.tasks_display import _build_agent_tree
+            from rich.tree import Tree
+        except ImportError:
+            pytest.skip("rich not installed")
+        self._seed_tasks()
+        tasks = self._tasks_mod.get_tasks()
+        tree = _build_agent_tree(tasks, show_finished=True, tick=3)
+        assert isinstance(tree, Tree)
+
+    def test_dur_helper(self):
+        from cli.tasks_display import _dur
+        assert _dur(None, None) == "—"
+        now = time.time()
+        assert "s" in _dur(now - 5, now)
+
+    def test_friendly_role_known(self):
+        from cli.tasks_display import _friendly_role
+        label = _friendly_role("llm_inference")
+        assert "LLM" in label
+
+    def test_friendly_role_unknown(self):
+        from cli.tasks_display import _friendly_role
+        label = _friendly_role("custom_agent")
+        assert "custom_agent" in label
+
+    def test_show_tasks_tree_flag_calls_show_agent_tree(self):
+        """show_tasks(tree=True) should delegate to show_agent_tree."""
+        try:
+            from cli.tasks_display import show_tasks
+        except ImportError:
+            pytest.skip("rich not installed")
+        with patch("cli.tasks_display.show_agent_tree") as mock_tree:
+            show_tasks(show_finished=False, live=False, tree=True)
+            mock_tree.assert_called_once_with(show_finished=False, live=False)
+
+    def test_tasks_tree_cli_flag(self):
+        """curie tasks --tree should parse correctly."""
+        from cli.main import _build_parser
+        args = _build_parser().parse_args(["tasks", "--tree"])
+        assert args.tree is True
+
+    def test_tasks_tree_live_cli_flags(self):
+        from cli.main import _build_parser
+        args = _build_parser().parse_args(["tasks", "--tree", "--live"])
+        assert args.tree is True
+        assert args.live is True

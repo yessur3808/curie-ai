@@ -60,7 +60,13 @@ def register_task(task_id: str, description: str, channel: str = "unknown") -> N
         _save_raw(data)
 
 
-def register_sub_agent(task_id: str, agent_id: str, role: str, model: str = "") -> None:
+def register_sub_agent(
+    task_id: str,
+    agent_id: str,
+    role: str,
+    model: str = "",
+    description: str = "",
+) -> None:
     """Register a sub-agent under a task."""
     with _lock:
         data = _load_raw()
@@ -71,11 +77,26 @@ def register_sub_agent(task_id: str, agent_id: str, role: str, model: str = "") 
             "id": agent_id,
             "role": role,
             "model": model,
+            "description": description,
             "status": "running",
             "started_at": time.time(),
             "finished_at": None,
             "result_summary": "",
         }
+        _save_raw(data)
+
+
+def update_sub_agent_description(task_id: str, agent_id: str, description: str) -> None:
+    """Update the live description of what a sub-agent is currently doing."""
+    with _lock:
+        data = _load_raw()
+        task = data["tasks"].get(task_id)
+        if task is None:
+            return
+        agent = task["sub_agents"].get(agent_id)
+        if agent is None:
+            return
+        agent["description"] = description
         _save_raw(data)
 
 
