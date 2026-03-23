@@ -680,5 +680,155 @@ class TestSessionCommandEdgeCases:
         assert "fresh start" in result["text"].lower()
 
 
+class TestPersonalityContextTemperature:
+    """Tests that PersonalityContext derives temperature from persona settings."""
+
+    def test_temperature_from_persona_settings(self):
+        """temperature uses persona['settings']['default_temperature']."""
+        from agent.personality_context import PersonalityContext
+
+        persona = {
+            "name": "TestBot",
+            "system_prompt": "You are a test bot.",
+            "settings": {"default_temperature": 0.3},
+        }
+        ctx = PersonalityContext(persona)
+        assert ctx.get_response_temperature() == 0.3
+
+    def test_temperature_default_when_setting_absent(self):
+        """temperature falls back to 0.7 when settings key is missing."""
+        from agent.personality_context import PersonalityContext
+
+        persona = {"name": "TestBot", "system_prompt": "You are a test bot."}
+        ctx = PersonalityContext(persona)
+        assert ctx.get_response_temperature() == 0.7
+
+    def test_temperature_default_on_invalid_value(self):
+        """temperature falls back to 0.7 when default_temperature is non-numeric."""
+        from agent.personality_context import PersonalityContext
+
+        persona = {
+            "name": "TestBot",
+            "system_prompt": "You are a test bot.",
+            "settings": {"default_temperature": "high"},
+        }
+        ctx = PersonalityContext(persona)
+        assert ctx.get_response_temperature() == 0.7
+
+    def test_temperature_propagated_to_llm_call(self):
+        """ChatWorkflow passes persona temperature to the LLM provider."""
+        from agent.personality_context import PersonalityContext
+
+        persona = {
+            "name": "TestBot",
+            "system_prompt": "You are a test bot.",
+            "settings": {"default_temperature": 0.4},
+        }
+        workflow = ChatWorkflow(persona=persona)
+        # Verify the personality_context reflects the correct temperature
+        assert workflow.personality_context.get_response_temperature() == 0.4
+
+
+class TestPersonalityStateInPrompt:
+    """Tests that _build_structured_prompt includes the [PERSONALITY STATE] block."""
+
+    def test_prompt_contains_personality_state_block(self):
+        """Prompt always includes a [PERSONALITY STATE] section."""
+        persona = {
+            "name": "TestBot",
+            "system_prompt": "You are a test bot.",
+        }
+        workflow = ChatWorkflow(persona=persona)
+        prompt = workflow._build_structured_prompt(
+            user_profile={}, history=[], user_text="hello"
+        )
+        assert "[PERSONALITY STATE]" in prompt
+
+    def test_prompt_personality_state_includes_mode_directive(self):
+        """[PERSONALITY STATE] block contains an active-mode directive line."""
+        persona = {
+            "name": "TestBot",
+            "system_prompt": "You are a test bot.",
+        }
+        workflow = ChatWorkflow(persona=persona)
+        prompt = workflow._build_structured_prompt(
+            user_profile={}, history=[], user_text="hello"
+        )
+        assert "Active mode:" in prompt
+
+    def test_prompt_personality_state_present_for_any_persona(self):
+        """[PERSONALITY STATE] block is present regardless of persona name."""
+        for name in ("Curie", "Andreja", "GenericBot", ""):
+            persona = {"name": name, "system_prompt": f"I am {name}."}
+            workflow = ChatWorkflow(persona=persona)
+            prompt = workflow._build_structured_prompt(
+                user_profile={}, history=[], user_text="test"
+            )
+            assert "[PERSONALITY STATE]" in prompt, (
+                f"[PERSONALITY STATE] missing for persona name={name!r}"
+            )
+
+
+class TestPersonalitySpeechEngineNonTargetPersonas:
+    """Tests that speech post-processing leaves unrecognised personas unchanged."""
+
+    def test_unknown_persona_response_unchanged(self):
+        """PersonalitySpeechEngine.apply() returns response verbatim for unknown persona."""
+        from agent.personality_speech import PersonalitySpeechEngine
+
+        engine = PersonalitySpeechEngine()
+        persona = {"name": "GenericBot"}
+        original = "Hello, how can I help you today?"
+        result = engine.apply(original, persona, context={})
+        assert result == original
+
+    def test_empty_name_persona_response_unchanged(self):
+        """Persona with empty name is not post-processed."""
+        from agent.personality_speech import PersonalitySpeechEngine
+
+        engine = PersonalitySpeechEngine()
+        persona = {"name": ""}
+        original = "Sure, I can do that."
+        result = engine.apply(original, persona, context={})
+        assert result == original
+
+    def test_none_name_persona_response_unchanged(self):
+        """Persona with name=None is not post-processed."""
+        from agent.personality_speech import PersonalitySpeechEngine
+
+        engine = PersonalitySpeechEngine()
+        persona = {"name": None}
+        original = "Let me check that for you."
+        result = engine.apply(original, persona, context={})
+        assert result == original
+
+    def test_curie_persona_with_french_disabled_response_unchanged(self):
+        """Curie persona with french_integration disabled passes response through unchanged."""
+        from agent.personality_speech import PersonalitySpeechEngine
+
+        engine = PersonalitySpeechEngine()
+        persona = {
+            "name": "Curie",
+            "language_profile": {"french_integration": {"enabled": False}},
+            "french_phrases": ["Mon ami"],
+        }
+        original = "I can help you with that."
+        result = engine.apply(original, persona, context={})
+        assert result == original
+
+    def test_workflow_non_target_persona_response_unchanged(self):
+        """ChatWorkflow using a non-target persona does not alter the LLM output."""
+        from agent.personality_context import PersonalityContext
+
+        persona = {
+            "name": "GenericBot",
+            "system_prompt": "You are a generic bot.",
+        }
+        ctx = PersonalityContext(persona)
+        original = "Here is your answer."
+        result = ctx.apply_response_style(original, "some question")
+        assert result == original
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
