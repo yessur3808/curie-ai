@@ -39,3 +39,7 @@ python-multipart==0.0.22
 
 # Timezone support
 pytz==2024.2
+
+# CLI dashboard and system metrics
+psutil>=5.9.0
+rich>=13.0.0
