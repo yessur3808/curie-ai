@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import time
+import uuid
 import pytz
 from datetime import datetime
 from typing import Optional, Dict, Tuple
@@ -30,6 +31,13 @@ from memory import UserManager
 from memory.session_store import get_session_manager
 from llm import manager as llm_manager
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
+
+# Task tracking (optional – import silently ignored if cli package unavailable)
+try:
+    from cli.tasks import register_task, register_sub_agent, update_sub_agent, finish_task as _finish_task
+    _TASK_TRACKING = True
+except Exception:
+    _TASK_TRACKING = False
 
 logger = logging.getLogger(__name__)
 
@@ -335,6 +343,18 @@ class ChatWorkflow:
         message_id = str(normalized_input.get("message_id", ""))
         user_text = normalized_input.get("text", "").strip()
 
+        # ── Task tracking ─────────────────────────────────────────────────
+        task_id = str(uuid.uuid4())[:8]
+        if _TASK_TRACKING:
+            try:
+                register_task(
+                    task_id,
+                    description=user_text[:80] if user_text else "(empty)",
+                    channel=platform,
+                )
+            except Exception:
+                pass
+
         if not all([external_user_id, external_chat_id, user_text]):
             logger.error(
                 f"Invalid input: missing required fields. Input: {normalized_input}"
@@ -430,8 +450,20 @@ class ChatWorkflow:
             try:
                 from agent.skills.coding_assistant import handle_coding_query
 
+                _sa_id = "coding_skill"
+                if _TASK_TRACKING:
+                    try:
+                        register_sub_agent(task_id, _sa_id, role="coding_assistant")
+                    except Exception:
+                        pass
                 coding_response = await handle_coding_query(user_text)
                 if coding_response:
+                    if _TASK_TRACKING:
+                        try:
+                            update_sub_agent(task_id, _sa_id, "done", result_summary="handled")
+                            _finish_task(task_id)
+                        except Exception:
+                            pass
                     logger.info("Coding skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
@@ -446,6 +478,11 @@ class ChatWorkflow:
                         "model_used": "coding_skill",
                         "processing_time_ms": round(processing_time, 2),
                     }
+                if _TASK_TRACKING:
+                    try:
+                        update_sub_agent(task_id, _sa_id, "done", result_summary="skipped")
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"Coding skill check failed: {e}")
 
@@ -453,8 +490,20 @@ class ChatWorkflow:
             try:
                 from agent.skills.navigation import handle_navigation_query
 
+                _sa_id = "navigation_skill"
+                if _TASK_TRACKING:
+                    try:
+                        register_sub_agent(task_id, _sa_id, role="navigation")
+                    except Exception:
+                        pass
                 nav_response = await handle_navigation_query(user_text)
                 if nav_response:
+                    if _TASK_TRACKING:
+                        try:
+                            update_sub_agent(task_id, _sa_id, "done", result_summary="handled")
+                            _finish_task(task_id)
+                        except Exception:
+                            pass
                     logger.info("Navigation skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
@@ -469,6 +518,11 @@ class ChatWorkflow:
                         "model_used": "navigation_skill",
                         "processing_time_ms": round(processing_time, 2),
                     }
+                if _TASK_TRACKING:
+                    try:
+                        update_sub_agent(task_id, _sa_id, "done", result_summary="skipped")
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"Navigation skill check failed: {e}")
 
@@ -476,10 +530,22 @@ class ChatWorkflow:
             try:
                 from agent.skills.scheduler import handle_reminder_query
 
+                _sa_id = "scheduler_skill"
+                if _TASK_TRACKING:
+                    try:
+                        register_sub_agent(task_id, _sa_id, role="scheduler")
+                    except Exception:
+                        pass
                 reminder_response = await handle_reminder_query(
                     user_text, internal_id=internal_id, platform=platform
                 )
                 if reminder_response:
+                    if _TASK_TRACKING:
+                        try:
+                            update_sub_agent(task_id, _sa_id, "done", result_summary="handled")
+                            _finish_task(task_id)
+                        except Exception:
+                            pass
                     logger.info("Scheduler skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
@@ -496,6 +562,11 @@ class ChatWorkflow:
                         "model_used": "scheduler_skill",
                         "processing_time_ms": round(processing_time, 2),
                     }
+                if _TASK_TRACKING:
+                    try:
+                        update_sub_agent(task_id, _sa_id, "done", result_summary="skipped")
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"Scheduler skill check failed: {e}")
 
@@ -503,10 +574,22 @@ class ChatWorkflow:
             try:
                 from agent.skills.trip_planner import handle_trip_query
 
+                _sa_id = "trip_planner_skill"
+                if _TASK_TRACKING:
+                    try:
+                        register_sub_agent(task_id, _sa_id, role="trip_planner")
+                    except Exception:
+                        pass
                 trip_response = await handle_trip_query(
                     user_text, internal_id=internal_id
                 )
                 if trip_response:
+                    if _TASK_TRACKING:
+                        try:
+                            update_sub_agent(task_id, _sa_id, "done", result_summary="handled")
+                            _finish_task(task_id)
+                        except Exception:
+                            pass
                     logger.info("Trip planner skill handled the query")
                     sm = get_session_manager()
                     sm.add_message(platform, internal_id, "user", user_text)
@@ -521,6 +604,11 @@ class ChatWorkflow:
                         "model_used": "trip_planner_skill",
                         "processing_time_ms": round(processing_time, 2),
                     }
+                if _TASK_TRACKING:
+                    try:
+                        update_sub_agent(task_id, _sa_id, "done", result_summary="skipped")
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"Trip planner skill check failed: {e}")
 
@@ -543,6 +631,12 @@ class ChatWorkflow:
             #  - The local llama.cpp manager computes the exact available context
             #    window after tokenising the prompt — responses are never truncated.
             response: Optional[str] = None
+            _llm_agent_id = "llm_provider"
+            if _TASK_TRACKING:
+                try:
+                    register_sub_agent(task_id, _llm_agent_id, role="llm_inference")
+                except Exception:
+                    pass
             try:
                 from llm.providers import ask_best_provider
 
@@ -553,6 +647,12 @@ class ChatWorkflow:
             # Hard fallback: local llama.cpp (max_tokens=None → fully dynamic)
             if response is None or response.startswith("[Error"):
                 response = llm_manager.ask_llm(prompt, max_tokens=None, temperature=0.7)
+
+            if _TASK_TRACKING:
+                try:
+                    update_sub_agent(task_id, _llm_agent_id, "done")
+                except Exception:
+                    pass
 
             # Sanitize output
             response = self._sanitize_output(response)
@@ -576,6 +676,12 @@ class ChatWorkflow:
 
             self.dedupe_cache.set(platform, str(external_chat_id), message_id, response)
 
+            if _TASK_TRACKING:
+                try:
+                    _finish_task(task_id)
+                except Exception:
+                    pass
+
             processing_time = (time.time() - start_time) * 1000
 
             return {
@@ -586,6 +692,11 @@ class ChatWorkflow:
             }
 
         except Exception as e:
+            if _TASK_TRACKING:
+                try:
+                    _finish_task(task_id, status="failed")
+                except Exception:
+                    pass
             logger.error(f"Error in process_message: {e}", exc_info=True)
             processing_time = (time.time() - start_time) * 1000
             return {
