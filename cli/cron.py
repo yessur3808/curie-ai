@@ -4,7 +4,7 @@ Cron-style scheduled-prompt management for Curie AI.
 
 Jobs are stored in ~/.curie/cron.json.  Each job has:
   - id: unique slug
-  - schedule: cron expression (e.g. "*/5 * * * *") or ISO offset (e.g. "@hourly")
+  - schedule: cron expression (e.g. "*/5 * * * *") or cron macro/named schedule (e.g. "@hourly", "@daily", "@reboot")
   - prompt: natural-language prompt to send to the agent when the job fires
   - enabled: bool
   - created_at: ISO timestamp
