@@ -110,6 +110,9 @@ class ProactiveMessagingService:
         self.last_contact = {}
         self.last_contact_lock = threading.Lock()  # Thread-safe access
 
+        # Cron job runner – started/stopped alongside this service
+        self._cron_runner = None
+
         logger.info("ProactiveMessagingService initialized")
 
     def start(self):
@@ -123,11 +126,29 @@ class ProactiveMessagingService:
         self.thread.start()
         logger.info("✅ ProactiveMessagingService started")
 
+        # Start the cron runner alongside
+        try:
+            from services.cron_runner import CronRunner  # noqa: PLC0415
+            workflow = getattr(self.agent, "workflow", self.agent)
+            self._cron_runner = CronRunner(workflow=workflow, connectors=self.connectors)
+            self._cron_runner.start()
+            logger.info("✅ CronRunner started")
+        except Exception as e:
+            logger.warning("CronRunner could not start: %s", e)
+
     def stop(self):
         """Stop the proactive messaging service."""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
+
+        if self._cron_runner is not None:
+            try:
+                self._cron_runner.stop()
+            except Exception as e:
+                logger.warning("CronRunner stop error: %s", e)
+            self._cron_runner = None
+
         logger.info("ProactiveMessagingService stopped")
 
     def _run_service(self):

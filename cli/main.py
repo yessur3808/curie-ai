@@ -236,11 +236,14 @@ def _cmd_cron(args: argparse.Namespace) -> int:
 
 def _cmd_memory(args: argparse.Namespace) -> int:
     from cli.memory_cmd import (
-        cmd_memory_list, cmd_memory_get, cmd_memory_stats, cmd_memory_clear_user,
+        cmd_memory_list, cmd_memory_keys, cmd_memory_get,
+        cmd_memory_stats, cmd_memory_clear_user,
     )
     sub = args.memory_action
     if sub == "list":
         return cmd_memory_list(limit=getattr(args, "limit", 20))
+    if sub == "keys":
+        return cmd_memory_keys(internal_id=getattr(args, "user", None))
     if sub == "get":
         return cmd_memory_get(args.key, internal_id=getattr(args, "user", None))
     if sub == "stats":
@@ -302,7 +305,9 @@ Examples:
   curie cron add '*/5 * * * *' --prompt 'Check health'
   curie cron remove job-id
   curie memory list                List users + memory facts
-  curie memory get hobby           Get a specific fact (master user)
+  curie memory keys                List all key names for master user
+  curie memory keys --user UID     List all key names for a specific user
+  curie memory get hobby           Get the value of 'hobby' key (master user)
   curie memory stats               Aggregate memory stats
   curie auth login --provider openai
   curie auth status                Show configured providers
@@ -428,11 +433,17 @@ Examples:
     p_mem = subs.add_parser("memory", help="Inspect and manage user memory")
     mem_subs = p_mem.add_subparsers(dest="memory_action", metavar="ACTION")
 
-    p_mem_list = mem_subs.add_parser("list", help="List users and fact counts")
+    p_mem_list = mem_subs.add_parser("list", help="List users and fact counts (with key preview)")
     p_mem_list.add_argument("--limit", type=int, default=20, metavar="N",
                             help="Max number of users to show (default: 20)")
 
-    p_mem_get = mem_subs.add_parser("get", help="Get a specific memory key")
+    p_mem_keys = mem_subs.add_parser(
+        "keys", help="List all memory key names and value previews for a user"
+    )
+    p_mem_keys.add_argument("--user", metavar="INTERNAL_ID", default=None,
+                            help="Target user (default: MASTER_USER_ID)")
+
+    p_mem_get = mem_subs.add_parser("get", help="Get the full value of a memory key")
     p_mem_get.add_argument("key", metavar="KEY")
     p_mem_get.add_argument("--user", metavar="INTERNAL_ID", default=None,
                            help="Target user (default: MASTER_USER_ID)")
