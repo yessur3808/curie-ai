@@ -182,14 +182,24 @@ class TestIsMaster:
 
 class TestRenderStatus:
     def test_running(self):
-        mock_st = {"running": True, "pid": 1234, "uptime_seconds": 3661, "log_file": "/tmp/curie.log"}
+        mock_st = {
+            "running": True,
+            "pid": 1234,
+            "uptime_seconds": 3661,
+            "log_file": "/tmp/curie.log",
+        }
         with patch("agent.skills.system_commands.get_status", return_value=mock_st):
             result = _render_status()
         assert "running" in result.lower()
         assert "1234" in result
 
     def test_not_running(self):
-        mock_st = {"running": False, "pid": None, "uptime_seconds": None, "log_file": "/tmp/curie.log"}
+        mock_st = {
+            "running": False,
+            "pid": None,
+            "uptime_seconds": None,
+            "log_file": "/tmp/curie.log",
+        }
         with patch("agent.skills.system_commands.get_status", return_value=mock_st):
             result = _render_status()
         assert "not running" in result.lower()
@@ -208,31 +218,33 @@ class TestRenderMetrics:
         m.cpu_freq.return_value = freq
         vm = MagicMock()
         vm.percent = 40.0
-        vm.used = 4 * 1024 ** 3
-        vm.total = 16 * 1024 ** 3
-        vm.available = 12 * 1024 ** 3
+        vm.used = 4 * 1024**3
+        vm.total = 16 * 1024**3
+        vm.available = 12 * 1024**3
         m.virtual_memory.return_value = vm
         sw = MagicMock()
         sw.percent = 0.0
         sw.used = 0
-        sw.total = 2 * 1024 ** 3
+        sw.total = 2 * 1024**3
         m.swap_memory.return_value = sw
         disk = MagicMock()
         disk.percent = 55.0
-        disk.used = 80 * 1024 ** 3
-        disk.total = 500 * 1024 ** 3
-        disk.free = 420 * 1024 ** 3
+        disk.used = 80 * 1024**3
+        disk.total = 500 * 1024**3
+        disk.free = 420 * 1024**3
         m.disk_usage.return_value = disk
         net = MagicMock()
-        net.bytes_sent = 10 * 1024 ** 2
-        net.bytes_recv = 50 * 1024 ** 2
+        net.bytes_sent = 10 * 1024**2
+        net.bytes_recv = 50 * 1024**2
         m.net_io_counters.return_value = net
         return m
 
     def test_contains_key_metrics(self):
         mock_psutil = self._mock_psutil()
-        with patch("agent.skills.system_commands._psutil", mock_psutil), \
-             patch("agent.skills.system_commands._PSUTIL_AVAILABLE", True):
+        with (
+            patch("agent.skills.system_commands._psutil", mock_psutil),
+            patch("agent.skills.system_commands._PSUTIL_AVAILABLE", True),
+        ):
             result = _render_metrics()
         # Should contain CPU and RAM info
         assert "CPU" in result or "cpu" in result.lower()
@@ -255,10 +267,18 @@ class TestRenderMetrics:
 
 class TestRenderTasks:
     def test_no_tasks(self):
-        with patch("agent.skills.system_commands.get_tasks", return_value=[]), \
-             patch("agent.skills.system_commands.get_task_summary",
-                   return_value={"running_tasks": 0, "total_tasks": 0,
-                                 "running_sub_agents": 0, "total_sub_agents": 0}):
+        with (
+            patch("agent.skills.system_commands.get_tasks", return_value=[]),
+            patch(
+                "agent.skills.system_commands.get_task_summary",
+                return_value={
+                    "running_tasks": 0,
+                    "total_tasks": 0,
+                    "running_sub_agents": 0,
+                    "total_sub_agents": 0,
+                },
+            ),
+        ):
             result = _render_tasks()
         assert "No active tasks" in result
 
@@ -272,16 +292,28 @@ class TestRenderTasks:
                 "status": "running",
                 "started_at": now - 5,
                 "sub_agents": {
-                    "llm": {"role": "llm_inference", "status": "running", "model": "llama3", "result_summary": ""},
+                    "llm": {
+                        "role": "llm_inference",
+                        "status": "running",
+                        "model": "llama3",
+                        "result_summary": "",
+                    },
                 },
             }
         ]
         mock_summary = {
-            "running_tasks": 1, "total_tasks": 1,
-            "running_sub_agents": 1, "total_sub_agents": 1,
+            "running_tasks": 1,
+            "total_tasks": 1,
+            "running_sub_agents": 1,
+            "total_sub_agents": 1,
         }
-        with patch("agent.skills.system_commands.get_tasks", return_value=mock_tasks), \
-             patch("agent.skills.system_commands.get_task_summary", return_value=mock_summary):
+        with (
+            patch("agent.skills.system_commands.get_tasks", return_value=mock_tasks),
+            patch(
+                "agent.skills.system_commands.get_task_summary",
+                return_value=mock_summary,
+            ),
+        ):
             result = _render_tasks()
         assert "abc12345" in result
         assert "telegram" in result
@@ -293,14 +325,24 @@ class TestRenderTasks:
 
 class TestRenderDoctor:
     def test_returns_health_report(self):
-        mock_st = {"running": False, "pid": None, "uptime_seconds": None, "log_file": "/tmp/curie.log"}
+        mock_st = {
+            "running": False,
+            "pid": None,
+            "uptime_seconds": None,
+            "log_file": "/tmp/curie.log",
+        }
         with patch("agent.skills.system_commands.get_status", return_value=mock_st):
             result = _render_doctor()
         assert "Health Report" in result
         assert "Python" in result
 
     def test_contains_env_section(self):
-        mock_st = {"running": False, "pid": None, "uptime_seconds": None, "log_file": "/tmp/curie.log"}
+        mock_st = {
+            "running": False,
+            "pid": None,
+            "uptime_seconds": None,
+            "log_file": "/tmp/curie.log",
+        }
         with patch("agent.skills.system_commands.get_status", return_value=mock_st):
             result = _render_doctor()
         assert "Environment" in result or "POSTGRES_DSN" in result
@@ -342,32 +384,48 @@ class TestHandleSystemCommand:
     """Test the top-level dispatcher."""
 
     def _mock_daemon_st(self, running=False):
-        return {"running": running, "pid": 42 if running else None,
-                "uptime_seconds": 120 if running else None, "log_file": "/tmp/curie.log"}
+        return {
+            "running": running,
+            "pid": 42 if running else None,
+            "uptime_seconds": 120 if running else None,
+            "log_file": "/tmp/curie.log",
+        }
 
     def test_returns_none_for_unrelated(self):
         result = handle_system_command("what's the weather?", internal_id="u1")
         assert result is None
 
     def test_status_command(self):
-        with patch("agent.skills.system_commands.get_status",
-                   return_value=self._mock_daemon_st(running=True)):
+        with patch(
+            "agent.skills.system_commands.get_status",
+            return_value=self._mock_daemon_st(running=True),
+        ):
             result = handle_system_command("/status", internal_id="u1")
         assert result is not None
         assert "running" in result.lower()
 
     def test_doctor_command(self):
-        with patch("agent.skills.system_commands.get_status",
-                   return_value=self._mock_daemon_st()):
+        with patch(
+            "agent.skills.system_commands.get_status",
+            return_value=self._mock_daemon_st(),
+        ):
             result = handle_system_command("/doctor", internal_id="u1")
         assert result is not None
         assert "Health" in result
 
     def test_tasks_command(self):
-        with patch("agent.skills.system_commands.get_tasks", return_value=[]), \
-             patch("agent.skills.system_commands.get_task_summary",
-                   return_value={"running_tasks": 0, "total_tasks": 0,
-                                 "running_sub_agents": 0, "total_sub_agents": 0}):
+        with (
+            patch("agent.skills.system_commands.get_tasks", return_value=[]),
+            patch(
+                "agent.skills.system_commands.get_task_summary",
+                return_value={
+                    "running_tasks": 0,
+                    "total_tasks": 0,
+                    "running_sub_agents": 0,
+                    "total_sub_agents": 0,
+                },
+            ),
+        ):
             result = handle_system_command("/tasks", internal_id="u1")
         assert result is not None
         assert "Task" in result
@@ -379,9 +437,13 @@ class TestHandleSystemCommand:
         assert "restricted" in result.lower() or "master" in result.lower()
 
     def test_privileged_command_allowed_for_master(self):
-        with patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}), \
-             patch("agent.skills.system_commands.start_daemon",
-                   return_value={"success": True, "pid": 99, "message": "started ok"}):
+        with (
+            patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}),
+            patch(
+                "agent.skills.system_commands.start_daemon",
+                return_value={"success": True, "pid": 99, "message": "started ok"},
+            ),
+        ):
             result = handle_system_command("/start", internal_id="master-user")
         assert result is not None
         assert "started" in result.lower() or "ok" in result.lower()
@@ -403,8 +465,10 @@ class TestHandleSystemCommand:
         assert len(result) > 10
 
     def test_natural_language_status(self):
-        with patch("agent.skills.system_commands.get_status",
-                   return_value=self._mock_daemon_st()):
+        with patch(
+            "agent.skills.system_commands.get_status",
+            return_value=self._mock_daemon_st(),
+        ):
             result = handle_system_command("is curie running?", internal_id="u1")
         assert result is not None
 
@@ -418,7 +482,10 @@ class TestHandleSystemCommand:
 
     def test_exception_returns_error_string(self):
         """If a renderer raises, the dispatcher returns an error string (not None)."""
-        with patch("agent.skills.system_commands._render_status", side_effect=RuntimeError("boom")):
+        with patch(
+            "agent.skills.system_commands._render_status",
+            side_effect=RuntimeError("boom"),
+        ):
             result = handle_system_command("/status", internal_id="u1")
         assert result is not None
         assert "Error" in result or "error" in result.lower()
@@ -443,17 +510,29 @@ class TestHandleSystemCommand:
         assert "restricted" in result.lower() or "master" in result.lower()
 
     def test_nl_start_allowed_for_master(self):
-        with patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}), \
-             patch("agent.skills.system_commands.start_daemon",
-                   return_value={"success": True, "pid": 77, "message": "Curie started (PID 77)"}):
+        with (
+            patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}),
+            patch(
+                "agent.skills.system_commands.start_daemon",
+                return_value={
+                    "success": True,
+                    "pid": 77,
+                    "message": "Curie started (PID 77)",
+                },
+            ),
+        ):
             result = handle_system_command("start curie", internal_id="master-user")
         assert result is not None
         assert "77" in result or "started" in result.lower()
 
     def test_nl_stop_allowed_for_master(self):
-        with patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}), \
-             patch("agent.skills.system_commands.stop_daemon",
-                   return_value={"success": True, "message": "Curie stopped (PID 77)"}):
+        with (
+            patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}),
+            patch(
+                "agent.skills.system_commands.stop_daemon",
+                return_value={"success": True, "message": "Curie stopped (PID 77)"},
+            ),
+        ):
             result = handle_system_command("stop curie", internal_id="master-user")
         assert result is not None
         assert "stopped" in result.lower()

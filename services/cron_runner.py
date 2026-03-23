@@ -68,13 +68,13 @@ _CHECK_INTERVAL = int(os.getenv("CRON_CHECK_INTERVAL", "30"))
 # ─── Named macro expansions ──────────────────────────────────────────────────
 
 _MACROS: dict[str, str] = {
-    "@hourly":    "0 * * * *",
-    "@daily":     "0 0 * * *",
-    "@midnight":  "0 0 * * *",
-    "@weekly":    "0 0 * * 0",
-    "@monthly":   "0 0 1 * *",
-    "@yearly":    "0 0 1 1 *",
-    "@annually":  "0 0 1 1 *",
+    "@hourly": "0 * * * *",
+    "@daily": "0 0 * * *",
+    "@midnight": "0 0 * * *",
+    "@weekly": "0 0 * * 0",
+    "@monthly": "0 0 1 * *",
+    "@yearly": "0 0 1 1 *",
+    "@annually": "0 0 1 1 *",
 }
 
 # Interval shortcuts: @every_<N><unit>  e.g. @every_5m, @every_2h, @every_1d
@@ -86,6 +86,7 @@ _INTERVAL_RE = re.compile(
 
 # ─── Cron expression parser ───────────────────────────────────────────────────
 
+
 def _expand_macro(schedule: str) -> str:
     """Expand named macro or @every_Xu shortcut to a 5-field expression or
     return the original string if it's already a 5-field expression.
@@ -96,7 +97,7 @@ def _expand_macro(schedule: str) -> str:
     m = _INTERVAL_RE.match(s)
     if m:
         n = int(m.group(1))
-        unit = m.group(2)[0]   # 'm', 'h', or 'd'
+        unit = m.group(2)[0]  # 'm', 'h', or 'd'
         if unit == "m":
             if n < 1 or n > 59:
                 raise ValueError(f"Interval minutes must be 1-59, got {n}")
@@ -171,10 +172,10 @@ def cron_matches(schedule: str, dt: datetime) -> bool:
     minute_f, hour_f, dom_f, month_f, dow_f = expr.split()
 
     minutes = _parse_field(minute_f, 0, 59)
-    hours   = _parse_field(hour_f,   0, 23)
-    doms    = _parse_field(dom_f,    1, 31)
-    months  = _parse_field(month_f,  1, 12)
-    dows    = _parse_field(dow_f,    0,  6)  # 0=Sunday
+    hours = _parse_field(hour_f, 0, 23)
+    doms = _parse_field(dom_f, 1, 31)
+    months = _parse_field(month_f, 1, 12)
+    dows = _parse_field(dow_f, 0, 6)  # 0=Sunday
 
     # isoweekday: Mon=1…Sun=7; cron: Sun=0…Sat=6
     iso_dow = dt.isoweekday() % 7  # Mon=1→1, Sun=7→0
@@ -189,10 +190,7 @@ def cron_matches(schedule: str, dt: datetime) -> bool:
         day_match = (dt.day in doms) and (iso_dow in dows)
 
     return (
-        dt.minute in minutes
-        and dt.hour in hours
-        and day_match
-        and dt.month in months
+        dt.minute in minutes and dt.hour in hours and day_match and dt.month in months
     )
 
 
@@ -216,7 +214,9 @@ def _is_due(job: dict, now: datetime) -> bool:
         if not cron_matches(schedule, now):
             return False
     except ValueError as e:
-        logger.warning("Cron job %r has invalid schedule %r: %s", job.get("id"), schedule, e)
+        logger.warning(
+            "Cron job %r has invalid schedule %r: %s", job.get("id"), schedule, e
+        )
         return False
 
     # Avoid double-firing in the same minute
@@ -227,9 +227,13 @@ def _is_due(job: dict, now: datetime) -> bool:
             if last_run.tzinfo is None:
                 last_run = last_run.replace(tzinfo=timezone.utc)
             # Same minute already fired
-            if (last_run.year, last_run.month, last_run.day,
-                    last_run.hour, last_run.minute) == (
-                        now.year, now.month, now.day, now.hour, now.minute):
+            if (
+                last_run.year,
+                last_run.month,
+                last_run.day,
+                last_run.hour,
+                last_run.minute,
+            ) == (now.year, now.month, now.day, now.hour, now.minute):
                 return False
         except (ValueError, TypeError):
             pass  # Bad timestamp → treat as never run
@@ -238,6 +242,7 @@ def _is_due(job: dict, now: datetime) -> bool:
 
 
 # ─── Job execution ────────────────────────────────────────────────────────────
+
 
 async def _run_job(
     job: dict,
@@ -264,9 +269,15 @@ async def _run_job(
             "internal_id": master_internal_id,
         }
         result = await workflow.process_message(normalized_input)
-        response = result.get("text", "[no response]") if isinstance(result, dict) else str(result)
+        response = (
+            result.get("text", "[no response]")
+            if isinstance(result, dict)
+            else str(result)
+        )
     except Exception as e:
-        logger.error("Cron: job %r failed during ChatWorkflow: %s", job_id, e, exc_info=True)
+        logger.error(
+            "Cron: job %r failed during ChatWorkflow: %s", job_id, e, exc_info=True
+        )
         response = f"[Cron job error: {e}]"
 
     # Deliver the response through the connector matching master_platform
@@ -283,10 +294,13 @@ async def _run_job(
                 logger.warning("Cron: could not deliver via %s: %s", master_platform, e)
 
     if not delivered:
-        logger.info("Cron: job %r result (no connector): %s", job_id, str(response)[:200])
+        logger.info(
+            "Cron: job %r result (no connector): %s", job_id, str(response)[:200]
+        )
 
 
 # ─── Cron runner service ──────────────────────────────────────────────────────
+
 
 class CronRunner:
     """
@@ -345,6 +359,7 @@ class CronRunner:
         try:
             from memory.database import get_pg_conn  # noqa: PLC0415
             from psycopg2 import sql as _sql  # noqa: PLC0415
+
             with get_pg_conn() as conn:
                 cur = conn.cursor()
                 for platform in ["telegram", "discord", "api"]:
@@ -368,20 +383,32 @@ class CronRunner:
     def _fire_reboot_jobs(self) -> None:
         """Run @reboot jobs once on startup."""
         from cli.cron import get_jobs, _save  # noqa: PLC0415
+
         jobs = get_jobs()
-        reboot_jobs = [j for j in jobs if j.get("schedule", "").strip().lower() == "@reboot"
-                       and j.get("enabled", True)]
+        reboot_jobs = [
+            j
+            for j in jobs
+            if j.get("schedule", "").strip().lower() == "@reboot"
+            and j.get("enabled", True)
+        ]
         if not reboot_jobs:
             return
 
         master_id, master_platform, master_ext = self._master_info()
         import asyncio  # noqa: PLC0415
+
         for job in reboot_jobs:
             logger.info("CronRunner: firing @reboot job %r", job.get("id"))
             try:
                 asyncio.run(
-                    _run_job(job, self.workflow, self.connectors,
-                             master_id, master_platform, master_ext)
+                    _run_job(
+                        job,
+                        self.workflow,
+                        self.connectors,
+                        master_id,
+                        master_platform,
+                        master_ext,
+                    )
                 )
                 # Update last_run
                 job["last_run"] = datetime.now(timezone.utc).isoformat()
@@ -390,8 +417,6 @@ class CronRunner:
         _save(jobs)
 
     def _loop(self) -> None:
-        import asyncio  # noqa: PLC0415
-
         # Fire @reboot jobs on first iteration
         if not self._reboot_jobs_fired:
             try:
@@ -404,7 +429,9 @@ class CronRunner:
             try:
                 self._tick()
             except Exception as e:
-                logger.error("CronRunner: unexpected error in tick: %s", e, exc_info=True)
+                logger.error(
+                    "CronRunner: unexpected error in tick: %s", e, exc_info=True
+                )
             time.sleep(_CHECK_INTERVAL)
 
     def _tick(self) -> None:
@@ -422,8 +449,12 @@ class CronRunner:
                 try:
                     asyncio.run(
                         _run_job(
-                            job, self.workflow, self.connectors,
-                            master_id, master_platform, master_ext,
+                            job,
+                            self.workflow,
+                            self.connectors,
+                            master_id,
+                            master_platform,
+                            master_ext,
                         )
                     )
                     job["last_run"] = now.isoformat()
@@ -431,7 +462,10 @@ class CronRunner:
                     logger.info("CronRunner: job %r fired successfully", job.get("id"))
                 except Exception as e:
                     logger.error(
-                        "CronRunner: error running job %r: %s", job.get("id"), e, exc_info=True
+                        "CronRunner: error running job %r: %s",
+                        job.get("id"),
+                        e,
+                        exc_info=True,
                     )
 
         if fired_any:

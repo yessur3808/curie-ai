@@ -764,9 +764,9 @@ class TestPersonalityStateInPrompt:
             prompt = workflow._build_structured_prompt(
                 user_profile={}, history=[], user_text="test"
             )
-            assert "[PERSONALITY STATE]" in prompt, (
-                f"[PERSONALITY STATE] missing for persona name={name!r}"
-            )
+            assert (
+                "[PERSONALITY STATE]" in prompt
+            ), f"[PERSONALITY STATE] missing for persona name={name!r}"
 
 
 class TestPersonalitySpeechEngineNonTargetPersonas:
