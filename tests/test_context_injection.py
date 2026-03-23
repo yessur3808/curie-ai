@@ -41,15 +41,19 @@ def _make_workflow(**persona_overrides):
         patch("agent.chat_workflow.UserManager"),
         patch("agent.chat_workflow.get_session_manager"),
     ):
-        from agent.chat_workflow import ChatWorkflow
+        from agent.chat_workflow import ChatWorkflow, PromptCache
+        from agent.personality_context import PersonalityContext
+        from utils.persona import normalize_persona
 
         persona = {"system_prompt": "You are a helpful assistant."}
         persona.update(persona_overrides)
+        persona = normalize_persona(persona)
+
         wf = ChatWorkflow.__new__(ChatWorkflow)
         wf.persona = persona
+        wf.personality_context = PersonalityContext(persona)
         # Minimal cache that always misses so we exercise the full code path
         from collections import OrderedDict
-        from agent.chat_workflow import PromptCache
 
         wf.prompt_cache = PromptCache()
         wf.minimal_sanitization = True

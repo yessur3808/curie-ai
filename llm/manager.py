@@ -343,12 +343,17 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
             selected_model = preferred_model
             llama_model = llama_models_cache[preferred_model]
         else:
-            # Check if any model is cached
-            for cached_name in llama_models_cache:
-                selected_model = cached_name
-                llama_model = llama_models_cache[cached_name]
-                logger.info(f"Using cached model: {cached_name}")
-                break
+            # Only fall back to a cached model if the requested model file
+            # does not exist on disk; otherwise we must load the right model.
+            preferred_path = os.path.join("models", preferred_model)
+            if not os.path.exists(preferred_path):
+                for cached_name in llama_models_cache:
+                    selected_model = cached_name
+                    llama_model = llama_models_cache[cached_name]
+                    logger.info(
+                        f"Preferred model not found on disk; using cached model: {cached_name}"
+                    )
+                    break
 
         # Lazy-load with fallback if no cached model available
         if llama_model is None:

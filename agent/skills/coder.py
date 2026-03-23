@@ -1,6 +1,7 @@
 # agent/skills/coder.py
 
 import os
+import uuid
 import git
 from github import Github
 import subprocess
@@ -163,9 +164,13 @@ def comment_ai_suggestions(pr, suggestions_md):
 
 
 def apply_code_change(goal, files_to_edit, repo_path, branch_name):
+    branch_name = (branch_name or "").strip()
+    if not branch_name:
+        branch_name = f"curie-change-{uuid.uuid4().hex[:8]}"
+
     # --- Load configs ---
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-    MAIN_REPO = os.getenv("MAIN_REPO")
+    MAIN_REPO = os.getenv("MAIN_REPO", "https://github.com/yessur3808/curie-ai")
     CODING_MODEL_NAME = get_coding_model_name()
     GITHUB_REPO = extract_github_repo(MAIN_REPO)
     MAIN_REVIEWER = os.getenv("MAIN_REVIEWER")

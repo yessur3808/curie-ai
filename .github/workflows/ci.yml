@@ -41,11 +41,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - name: Install black
-        run: pip install black
+        run: pip install black==25.1.0
 
       - name: Check formatting
         run: black --check agent/ connectors/ llm/ memory/ services/ utils/ main.py tests/

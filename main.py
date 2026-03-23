@@ -7,6 +7,7 @@ import sys
 import json
 import logging
 import time
+import re
 
 # Check for critical dependencies early to provide helpful error messages
 try:
@@ -41,6 +42,7 @@ except ModuleNotFoundError as e:
     sys.exit(1)
 
 logger = logging.getLogger(__name__)
+DEFAULT_MAIN_REPO_URL = "https://github.com/yessur3808/curie-ai"
 
 # Import Discord connector (optional - may not be installed)
 try:
@@ -116,6 +118,21 @@ def find_all_files(repo_path, exts=None):
             if exts is None or any(rel_path.endswith(ext) for ext in exts):
                 all_files.append(rel_path)
     return all_files
+
+
+def suggest_branch_name(goal):
+    sanitized_goal = re.sub(r"[^a-z0-9]+", "-", (goal or "").lower()).strip("-")
+    if not sanitized_goal:
+        sanitized_goal = "update"
+    branch_slug = sanitized_goal[:48].strip("-") or "update"
+    return f"enhancement/{branch_slug}"
+
+
+def resolve_branch_name(goal, branch_name):
+    cleaned_branch = (branch_name or "").strip()
+    if cleaned_branch:
+        return cleaned_branch
+    return suggest_branch_name(goal)
 
 
 # --- Connector Runners ---
@@ -210,9 +227,18 @@ def run_coder_interactive():
     print("Starting Coder skill (interactive mode)...")
     from agent.skills.coder import apply_code_change
 
+    if not os.getenv("MAIN_REPO"):
+        os.environ["MAIN_REPO"] = DEFAULT_MAIN_REPO_URL
+        print(f"MAIN_REPO not set. Using default: {DEFAULT_MAIN_REPO_URL}")
+
     goal = input("Describe the code enhancement goal: ").strip()
     repo_path = input("Enter local repo path (absolute or relative): ").strip()
-    branch_name = input("Enter the branch name to use: ").strip()
+    raw_branch_name = input(
+        "Enter the branch name to use (press Enter to auto-generate): "
+    ).strip()
+    branch_name = resolve_branch_name(goal, raw_branch_name)
+    if not raw_branch_name:
+        print(f"Auto-generated branch name: {branch_name}")
     files = input("Comma-separated filenames to edit (relative to repo): ").strip()
     files_to_edit = [f.strip() for f in files.split(",") if f.strip()]
     print(f"Running code enhancement for files: {files_to_edit} ...")
@@ -226,6 +252,12 @@ def run_coder_interactive():
 def run_coder_batch(goal, files_to_edit, repo_path, branch_name):
     print("Starting Coder skill (batch mode)...")
     from agent.skills.coder import apply_code_change
+
+    if not os.getenv("MAIN_REPO"):
+        os.environ["MAIN_REPO"] = DEFAULT_MAIN_REPO_URL
+        print(f"MAIN_REPO not set. Using default: {DEFAULT_MAIN_REPO_URL}")
+
+    branch_name = resolve_branch_name(goal, branch_name)
 
     print(f"Goal: {goal}")
     print(f"Repo path: {repo_path}")
@@ -406,8 +438,6 @@ def validate_coder_batch_params(goal, files_to_edit, repo_path, branch_name):
         missing.append("files_to_edit")
     if not repo_path:
         missing.append("repo_path")
-    if not branch_name:
-        missing.append("branch_name")
     if missing:
         print(f"Error: Missing batch coder parameters: {', '.join(missing)}")
         sys.exit(1)
