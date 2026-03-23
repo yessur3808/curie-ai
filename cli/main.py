@@ -18,6 +18,24 @@ Usage examples:
   curie service install       # Install as OS service
   curie service start|stop|restart|status
   curie logs [--lines N]      # Tail the daemon log
+  curie onboard               # Guided first-time setup wizard
+  curie channel list          # List configured channels
+  curie channel doctor        # Check channel connectivity
+  curie channel bind-telegram TOKEN
+  curie channel bind-discord TOKEN
+  curie cron list             # List scheduled prompt jobs
+  curie cron add "SCHEDULE" --prompt "text"
+  curie cron remove ID
+  curie cron enable|disable ID
+  curie memory list           # List users and memory facts
+  curie memory get KEY        # Get a specific memory key
+  curie memory stats          # Aggregate memory statistics
+  curie auth login --provider openai
+  curie auth status           # Show configured LLM providers
+  curie auth use --provider anthropic
+  curie completions bash      # Print bash completion script
+  curie completions zsh       # Print zsh completion script
+  curie completions fish      # Print fish completion script
 """
 
 from __future__ import annotations
@@ -170,6 +188,87 @@ def _cmd_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── New subcommand handlers ────────────────────────────────────────────────────
+
+
+def _cmd_onboard(args: argparse.Namespace) -> int:
+    from cli.onboard import run_onboard
+    return run_onboard(verbose=getattr(args, "verbose", False))
+
+
+def _cmd_channel(args: argparse.Namespace) -> int:
+    from cli.channel import cmd_channel_list, cmd_channel_doctor, cmd_channel_bind
+    sub = args.channel_action
+    if sub == "list":
+        return cmd_channel_list()
+    if sub == "doctor":
+        return cmd_channel_doctor()
+    if sub in ("bind-telegram", "bind-discord"):
+        platform = sub.split("-")[1]  # "telegram" or "discord"
+        token = getattr(args, "token", None)
+        if not token:
+            print(f"Usage: curie channel {sub} <TOKEN>")
+            return 1
+        return cmd_channel_bind(platform, token)
+    print(f"Unknown channel action: {sub!r}")
+    return 1
+
+
+def _cmd_cron(args: argparse.Namespace) -> int:
+    from cli.cron import cmd_cron_list, cmd_cron_add, cmd_cron_remove, cmd_cron_enable
+    sub = args.cron_action
+    if sub == "list":
+        return cmd_cron_list()
+    if sub == "add":
+        schedule = args.schedule
+        prompt = args.prompt
+        if not schedule or not prompt:
+            print("Usage: curie cron add <SCHEDULE> --prompt <TEXT>")
+            return 1
+        return cmd_cron_add(schedule, prompt)
+    if sub == "remove":
+        return cmd_cron_remove(args.job_id)
+    if sub in ("enable", "disable"):
+        return cmd_cron_enable(args.job_id, sub == "enable")
+    print(f"Unknown cron action: {sub!r}")
+    return 1
+
+
+def _cmd_memory(args: argparse.Namespace) -> int:
+    from cli.memory_cmd import (
+        cmd_memory_list, cmd_memory_get, cmd_memory_stats, cmd_memory_clear_user,
+    )
+    sub = args.memory_action
+    if sub == "list":
+        return cmd_memory_list(limit=getattr(args, "limit", 20))
+    if sub == "get":
+        return cmd_memory_get(args.key, internal_id=getattr(args, "user", None))
+    if sub == "stats":
+        return cmd_memory_stats()
+    if sub == "clear-user":
+        return cmd_memory_clear_user(args.user_id)
+    print(f"Unknown memory action: {sub!r}")
+    return 1
+
+
+def _cmd_auth(args: argparse.Namespace) -> int:
+    from cli.auth import cmd_auth_login, cmd_auth_status, cmd_auth_use
+    sub = args.auth_action
+    if sub == "login":
+        return cmd_auth_login(args.provider, api_key=getattr(args, "key", None))
+    if sub == "status":
+        return cmd_auth_status()
+    if sub == "use":
+        return cmd_auth_use(args.provider)
+    print(f"Unknown auth action: {sub!r}")
+    return 1
+
+
+def _cmd_completions(args: argparse.Namespace) -> int:
+    from cli.completions import cmd_completions
+    return cmd_completions(args.shell)
+
+
 # ─── parser setup ─────────────────────────────────────────────────────────────
 
 
@@ -195,6 +294,21 @@ Examples:
   curie service start              Start OS service
   curie logs -n 50                 Show last 50 log lines
   curie logs -f                    Follow log output
+  curie onboard                    First-time setup wizard
+  curie channel list               List configured channels
+  curie channel doctor             Check channel connectivity
+  curie channel bind-telegram TOKEN  Set Telegram token
+  curie cron list                  List scheduled jobs
+  curie cron add '*/5 * * * *' --prompt 'Check health'
+  curie cron remove job-id
+  curie memory list                List users + memory facts
+  curie memory get hobby           Get a specific fact (master user)
+  curie memory stats               Aggregate memory stats
+  curie auth login --provider openai
+  curie auth status                Show configured providers
+  curie auth use --provider anthropic
+  source <(curie completions bash)   Enable bash tab-completion
+  curie completions zsh > ~/.zfunc/_curie
 """,
     )
 
@@ -269,6 +383,96 @@ Examples:
     p_logs.add_argument("-f", "--follow", action="store_true",
                         help="Follow log output (like tail -f)")
     p_logs.set_defaults(func=_cmd_logs)
+
+    # ── onboard ────────────────────────────────────────────────────────────
+    p_onboard = subs.add_parser("onboard", help="Guided first-time setup wizard")
+    p_onboard.add_argument("--verbose", action="store_true", help="Show extra detail after setup")
+    p_onboard.set_defaults(func=_cmd_onboard)
+
+    # ── channel ────────────────────────────────────────────────────────────
+    p_channel = subs.add_parser("channel", help="Manage chat channel connectors")
+    p_channel.add_argument(
+        "channel_action",
+        choices=["list", "doctor", "bind-telegram", "bind-discord"],
+        metavar="ACTION",
+        help="list | doctor | bind-telegram TOKEN | bind-discord TOKEN",
+    )
+    p_channel.add_argument("token", nargs="?", default=None, metavar="TOKEN",
+                           help="Bot token (for bind-* actions)")
+    p_channel.set_defaults(func=_cmd_channel)
+
+    # ── cron ───────────────────────────────────────────────────────────────
+    p_cron = subs.add_parser("cron", help="Manage scheduled prompt jobs")
+    cron_subs = p_cron.add_subparsers(dest="cron_action", metavar="ACTION")
+
+    cron_subs.add_parser("list", help="List all scheduled jobs")
+
+    p_cron_add = cron_subs.add_parser("add", help="Add a new scheduled job")
+    p_cron_add.add_argument("schedule", metavar="SCHEDULE",
+                            help="Cron expression, e.g. '*/5 * * * *' or '@hourly'")
+    p_cron_add.add_argument("--prompt", required=True, metavar="TEXT",
+                            help="Prompt to run on schedule")
+
+    p_cron_remove = cron_subs.add_parser("remove", help="Remove a job by ID")
+    p_cron_remove.add_argument("job_id", metavar="ID")
+
+    p_cron_enable = cron_subs.add_parser("enable", help="Enable a disabled job")
+    p_cron_enable.add_argument("job_id", metavar="ID")
+
+    p_cron_disable = cron_subs.add_parser("disable", help="Disable a job without removing it")
+    p_cron_disable.add_argument("job_id", metavar="ID")
+
+    p_cron.set_defaults(func=_cmd_cron)
+
+    # ── memory ─────────────────────────────────────────────────────────────
+    p_mem = subs.add_parser("memory", help="Inspect and manage user memory")
+    mem_subs = p_mem.add_subparsers(dest="memory_action", metavar="ACTION")
+
+    p_mem_list = mem_subs.add_parser("list", help="List users and fact counts")
+    p_mem_list.add_argument("--limit", type=int, default=20, metavar="N",
+                            help="Max number of users to show (default: 20)")
+
+    p_mem_get = mem_subs.add_parser("get", help="Get a specific memory key")
+    p_mem_get.add_argument("key", metavar="KEY")
+    p_mem_get.add_argument("--user", metavar="INTERNAL_ID", default=None,
+                           help="Target user (default: MASTER_USER_ID)")
+
+    mem_subs.add_parser("stats", help="Aggregate memory statistics")
+
+    p_mem_clear = mem_subs.add_parser("clear-user", help="Clear session memory for a user")
+    p_mem_clear.add_argument("user_id", metavar="INTERNAL_ID")
+
+    p_mem.set_defaults(func=_cmd_memory)
+
+    # ── auth ───────────────────────────────────────────────────────────────
+    p_auth = subs.add_parser("auth", help="Manage LLM provider credentials")
+    auth_subs = p_auth.add_subparsers(dest="auth_action", metavar="ACTION")
+
+    p_auth_login = auth_subs.add_parser("login", help="Store an API key for a provider")
+    p_auth_login.add_argument("--provider", required=True,
+                              choices=["openai", "anthropic", "gemini", "llama.cpp"],
+                              help="Provider name")
+    p_auth_login.add_argument("--key", default=None, metavar="API_KEY",
+                              help="API key (omit to enter interactively)")
+
+    auth_subs.add_parser("status", help="Show configured LLM providers")
+
+    p_auth_use = auth_subs.add_parser("use", help="Set active LLM provider priority")
+    p_auth_use.add_argument("--provider", required=True,
+                            choices=["openai", "anthropic", "gemini", "llama.cpp"],
+                            help="Provider to move to the top of the priority list")
+
+    p_auth.set_defaults(func=_cmd_auth)
+
+    # ── completions ────────────────────────────────────────────────────────
+    p_completions = subs.add_parser("completions", help="Generate shell completion scripts")
+    p_completions.add_argument(
+        "shell",
+        choices=["bash", "zsh", "fish"],
+        metavar="SHELL",
+        help="Target shell: bash | zsh | fish",
+    )
+    p_completions.set_defaults(func=_cmd_completions)
 
     return parser
 

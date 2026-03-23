@@ -78,7 +78,8 @@ except ImportError:
 
 # Explicit slash-command prefix: /curie <cmd>, /status, /metrics, …
 _SLASH_PREFIX = re.compile(
-    r"^/(?:curie\s+)?(?P<cmd>status|metrics|tasks|doctor|logs|start|stop|restart|service)",
+    r"^/(?:curie\s+)?(?P<cmd>status|metrics|tasks|doctor|logs|start|stop|restart|service"
+    r"|channel|cron|memory|auth)",
     re.IGNORECASE,
 )
 
@@ -129,10 +130,31 @@ _NL_PATTERNS: dict[str, re.Pattern] = {
         r"|reload\s+curie)\b",
         re.IGNORECASE,
     ),
+    "channel": re.compile(
+        r"\b(?:(?:list|show|check|curie)\s+channels?|channel\s+(?:list|status|health|doctor)"
+        r"|configured\s+channels?|what\s+channels?\s+are\s+(?:set\s+up|configured|running))\b",
+        re.IGNORECASE,
+    ),
+    "cron": re.compile(
+        r"\b(?:(?:list|show)\s+(?:scheduled|cron)\s+(?:jobs?|tasks?)|cron\s+(?:jobs?|list)"
+        r"|scheduled\s+(?:prompts?|jobs?|tasks?)|what\s+(?:cron|scheduled)\s+jobs?\s+are\s+there)\b",
+        re.IGNORECASE,
+    ),
+    "memory": re.compile(
+        r"\b(?:(?:list|show|view)\s+(?:user\s+)?(?:memory|facts|profiles?)"
+        r"|memory\s+(?:list|stats?|usage)|user\s+memory\s+stats?|how\s+much\s+memory"
+        r"|stored\s+(?:facts?|memory|data))\b",
+        re.IGNORECASE,
+    ),
+    "auth": re.compile(
+        r"\b(?:(?:show|list|check)\s+(?:llm\s+)?(?:providers?|auth\s+status|api\s+keys?)"
+        r"|auth\s+status|which\s+(?:llm\s+)?provider|current\s+(?:llm\s+)?provider)\b",
+        re.IGNORECASE,
+    ),
 }
 
 # These commands require MASTER_USER_ID
-_PRIVILEGED_CMDS = {"start", "stop", "restart", "service"}
+_PRIVILEGED_CMDS = {"start", "stop", "restart", "service", "auth"}
 
 # Extract optional integer argument from text (e.g. "show last 50 logs" or "50 log lines")
 _LOG_LINES_RE = re.compile(r"\b(?:last\s+)?(\d+)\s+(?:logs?|log\s+lines?|lines?)\b", re.IGNORECASE)
@@ -400,48 +422,117 @@ def _render_logs(n: int = 20) -> str:
 
 def _render_start(connector_args: list[str] | None = None) -> str:
     result = start_daemon(connector_args=connector_args)
-    icon = "🟢" if result["success"] else "🔴"
+    icon = "\U0001f7e2" if result["success"] else "\U0001f534"
     return f"{icon} {result['message']}"
 
 
 def _render_stop() -> str:
     result = stop_daemon()
-    icon = "🟢" if result["success"] else "🔴"
+    icon = "\U0001f7e2" if result["success"] else "\U0001f534"
     return f"{icon} {result['message']}"
 
 
 def _render_restart() -> str:
     result = restart_daemon()
-    icon = "🟢" if result["success"] else "🔴"
+    icon = "\U0001f7e2" if result["success"] else "\U0001f534"
     return f"{icon} {result['message']}"
+
+
+def _render_channel_list() -> str:
+    """Plain-text channel list for chat."""
+    try:
+        from cli.channel import _CHANNELS, _channel_status  # noqa: PLC0415
+    except ImportError:
+        return "\u274c Channel module not available."
+
+    lines = ["\U0001f4e1 *Channel Configuration*", ""]
+    for ch in _CHANNELS:
+        st = _channel_status(ch)
+        cfg = "\u2705" if st["configured"] else "\u274c"
+        enabled = "enabled" if st["enabled"] else "disabled"
+        lines.append(f"{cfg} *{st['label']}* \u2013 {enabled}")
+        if st["token_env"]:
+            lines.append(f"   Token ({st['token_env']}): `{st['token_display']}`")
+    return "\n".join(lines)
+
+
+def _render_cron_list() -> str:
+    """Plain-text cron job list for chat."""
+    try:
+        from cli.cron import get_jobs  # noqa: PLC0415
+    except ImportError:
+        return "\u274c Cron module not available."
+
+    jobs = get_jobs()
+    if not jobs:
+        return ("\U0001f551 *No scheduled jobs configured.*\n\n"
+                "Add one with:\n`/cron add '*/5 * * * *' --prompt Check system health`")
+
+    lines = [f"\U0001f551 *Scheduled Jobs* ({len(jobs)} total)", ""]
+    for job in jobs:
+        enabled = "\u2705" if job.get("enabled") else "\u26d4"
+        last = job.get("last_run") or "never"
+        prompt_preview = (job["prompt"][:50] + "\u2026") if len(job["prompt"]) > 51 else job["prompt"]
+        lines.append(f"{enabled} `{job['id']}` \u2013 `{job['schedule']}`")
+        lines.append(f"   \u201c{prompt_preview}\u201d  (last: {last})")
+    return "\n".join(lines)
+
+
+def _render_auth_status() -> str:
+    """Plain-text LLM provider status for chat."""
+    try:
+        from cli.auth import _PROVIDERS, _PRIORITY_ENV  # noqa: PLC0415
+    except ImportError:
+        return "\u274c Auth module not available."
+
+    current_priority = os.getenv(_PRIORITY_ENV, "llama.cpp")
+    priority_list = [p.strip() for p in current_priority.split(",") if p.strip()]
+
+    lines = ["\U0001f511 *LLM Provider Status*", "", f"Active priority: `{current_priority}`", ""]
+    for name, pdef in _PROVIDERS.items():
+        if pdef["key_env"]:
+            configured = bool(os.getenv(pdef["key_env"]))
+            key_status = "\u2705 key set" if configured else "\u26a0\ufe0f  no key"
+        else:
+            key_status = "\u2705 local"
+        in_priority = name in priority_list
+        bullet = "\u25b6" if in_priority else "\u25ab"
+        lines.append(f"{bullet} *{pdef['label']}*: {key_status}")
+    return "\n".join(lines)
 
 
 # ─── Help text ────────────────────────────────────────────────────────────────
 
 
 _HELP_TEXT = """\
-🛠️ *Curie System Commands*
+\U0001f6e0\ufe0f *Curie System Commands*
 
 You can use either `/curie <command>` or plain English:
 
 *Information*
-• `/status` – daemon PID, uptime, log path
-• `/metrics` – CPU, RAM, Disk, Network, GPU snapshot
-• `/tasks` – active tasks & sub-agent breakdown
-• `/doctor` – full system health report
-• `/logs [N]` – last N log lines (default 20)
+\u2022 `/status` \u2013 daemon PID, uptime, log path
+\u2022 `/metrics` \u2013 CPU, RAM, Disk, Network, GPU snapshot
+\u2022 `/tasks` \u2013 active tasks & sub-agent breakdown
+\u2022 `/doctor` \u2013 full system health report
+\u2022 `/logs [N]` \u2013 last N log lines (default 20)
+\u2022 `/channel` \u2013 list configured channels
+\u2022 `/cron` \u2013 list scheduled prompt jobs
+\u2022 `/auth` \u2013 show LLM provider status (master only)
 
 *Control* (master user only)
-• `/start [--api|--telegram|--discord]` – start daemon
-• `/stop` – stop daemon
-• `/restart` – restart daemon
+\u2022 `/start [--api|--telegram|--discord]` \u2013 start daemon
+\u2022 `/stop` \u2013 stop daemon
+\u2022 `/restart` \u2013 restart daemon
 
 *Natural language examples*
-• "is curie running?"
-• "show me the system metrics"
-• "what tasks are running?"
-• "run a health check"
-• "show last 30 logs"
+\u2022 "is curie running?"
+\u2022 "show me the system metrics"
+\u2022 "what tasks are running?"
+\u2022 "run a health check"
+\u2022 "show last 30 logs"
+\u2022 "list channels" / "which channels are configured?"
+\u2022 "show scheduled jobs" / "list cron jobs"
+\u2022 "which llm provider is active?"
 """
 
 _HELP_TRIGGERS = re.compile(
@@ -519,8 +610,22 @@ def handle_system_command(
         if cmd == "restart":
             return _render_restart()
 
+        if cmd == "channel":
+            return _render_channel_list()
+
+        if cmd == "cron":
+            return _render_cron_list()
+
+        if cmd == "memory":
+            # Route to metrics to avoid confusion with system RAM "memory" – the
+            # NL pattern is intentionally specific to user/facts memory.
+            return _render_doctor()  # fall through to doctor for now (broad health)
+
+        if cmd == "auth":
+            return _render_auth_status()
+
     except Exception as e:
         logger.error("System command '%s' raised an exception: %s", cmd, e, exc_info=True)
-        return f"❌ Error executing `{cmd}`: {str(e)[:120]}"
+        return f"\u274c Error executing `{cmd}`: {str(e)[:120]}"
 
     return None
