@@ -132,7 +132,7 @@ _NL_PATTERNS: dict[str, re.Pattern] = {
     ),
     "channel": re.compile(
         r"\b(?:(?:list|show|check|curie)\s+channels?|channel\s+(?:list|status|health|doctor)"
-        r"|configured\s+channels?|what\s+channels?\s+are\s+(?:set\s+up|configured|running))\b",
+        r"|configured\s+channels?|(?:what|which)\s+channels?\s+are\s+(?:set\s+up|configured|running))\b",
         re.IGNORECASE,
     ),
     "cron": re.compile(

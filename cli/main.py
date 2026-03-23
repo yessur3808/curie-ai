@@ -28,14 +28,19 @@ Usage examples:
   curie cron remove ID
   curie cron enable|disable ID
   curie memory list           # List users and memory facts
+  curie memory keys           # List memory key names for master user
   curie memory get KEY        # Get a specific memory key
   curie memory stats          # Aggregate memory statistics
   curie auth login --provider openai
   curie auth status           # Show configured LLM providers
   curie auth use --provider anthropic
+  curie hardware discover     # Scan for connected devices
+  curie peripheral list       # List peripherals from cache
+  curie peripheral list --fresh  # Re-scan and list
   curie completions bash      # Print bash completion script
   curie completions zsh       # Print zsh completion script
   curie completions fish      # Print fish completion script
+  curie help                  # Full command reference
 """
 
 from __future__ import annotations
@@ -272,6 +277,26 @@ def _cmd_completions(args: argparse.Namespace) -> int:
     return cmd_completions(args.shell)
 
 
+def _cmd_hardware(args: argparse.Namespace) -> int:
+    from cli.hardware import cmd_hardware_discover
+    sub = args.hardware_action
+    if sub == "discover":
+        return cmd_hardware_discover()
+    print(f"Unknown hardware action: {sub!r}")
+    return 1
+
+
+def _cmd_peripheral(args: argparse.Namespace) -> int:
+    from cli.hardware import cmd_peripheral_list
+    fresh = getattr(args, "fresh", False)
+    return cmd_peripheral_list(fresh=fresh)
+
+
+def _cmd_help(args: argparse.Namespace) -> int:
+    from cli.help_cmd import print_full_help
+    return print_full_help()
+
+
 # ─── parser setup ─────────────────────────────────────────────────────────────
 
 
@@ -312,8 +337,12 @@ Examples:
   curie auth login --provider openai
   curie auth status                Show configured providers
   curie auth use --provider anthropic
+  curie hardware discover          Scan for connected devices (USB, serial, audio…)
+  curie peripheral list            List peripherals from cache
+  curie peripheral list --fresh    Re-scan and list
   source <(curie completions bash)   Enable bash tab-completion
   curie completions zsh > ~/.zfunc/_curie
+  curie help                       Full command reference with descriptions
 """,
     )
 
@@ -485,6 +514,46 @@ Examples:
     )
     p_completions.set_defaults(func=_cmd_completions)
 
+    # ── hardware ───────────────────────────────────────────────────────────
+    p_hw = subs.add_parser(
+        "hardware",
+        help="Hardware device management",
+        description="Scan for and inspect connected hardware devices.",
+    )
+    hw_subs = p_hw.add_subparsers(dest="hardware_action", metavar="ACTION")
+    hw_subs.add_parser(
+        "discover",
+        help="Scan for connected devices: USB, serial, audio, cameras, Bluetooth, network",
+    )
+    p_hw.set_defaults(func=_cmd_hardware)
+
+    # ── peripheral ─────────────────────────────────────────────────────────
+    p_periph = subs.add_parser(
+        "peripheral",
+        help="List connected peripherals (from cache or fresh scan)",
+        description=(
+            "Show connected peripherals.  Uses the cached result from\n"
+            "~/.curie/peripherals.json.  Pass --fresh to re-scan."
+        ),
+    )
+    p_periph_subs = p_periph.add_subparsers(dest="peripheral_action", metavar="ACTION")
+    p_periph_list = p_periph_subs.add_parser(
+        "list",
+        help="List peripherals (from cache; use --fresh to re-scan)",
+    )
+    p_periph_list.add_argument(
+        "--fresh", action="store_true",
+        help="Re-scan devices instead of using the cache",
+    )
+    p_periph.set_defaults(func=_cmd_peripheral)
+
+    # ── help ───────────────────────────────────────────────────────────────
+    p_help = subs.add_parser(
+        "help",
+        help="Show full command reference with descriptions and examples",
+    )
+    p_help.set_defaults(func=_cmd_help)
+
     return parser
 
 
@@ -493,7 +562,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command is None:
-        parser.print_help()
+        # Show the beautiful full help instead of bare argparse usage
+        try:
+            from cli.help_cmd import print_full_help
+            return print_full_help()
+        except Exception:
+            parser.print_help()
         return 0
 
     if not hasattr(args, "func"):
