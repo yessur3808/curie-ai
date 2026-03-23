@@ -126,12 +126,10 @@ class TestHardwareModule:
             (_ for _ in ()).throw(ImportError("no serial")) if name == "serial" else
             __import__(name, *a, **k)
         )):
-            # The scanner should return [] without raising
-            try:
-                devices = hw._scan_serial()
-                assert isinstance(devices, list)
-            except ImportError:
-                pass  # acceptable – just must not crash the caller
+            # The scanner should return [] without raising and an empty list
+            devices = hw._scan_serial()
+            assert isinstance(devices, list)
+            assert devices == []
 
     # ── USB scanners ──────────────────────────────────────────────────────
 
