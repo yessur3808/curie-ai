@@ -443,7 +443,7 @@ class CodingService:
         Returns:
             Task ID
         """
-        task_id = f"{task_type}_{uuid.uuid4().hex[:12]}"
+        task_id = f"{task_type}_{uuid.uuid4().hex}"
         task = {
             "id": task_id,
             "type": task_type,
