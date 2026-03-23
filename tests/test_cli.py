@@ -476,3 +476,63 @@ class TestAgentTreeVisualization:
         args = _build_parser().parse_args(["tasks", "--tree", "--live"])
         assert args.tree is True
         assert args.live is True
+
+
+class TestWebViewFlags:
+    """Tests for --visual and --web CLI flags and web server."""
+
+    def test_tasks_visual_flag(self):
+        from cli.main import _build_parser
+        args = _build_parser().parse_args(["tasks", "--visual"])
+        assert args.visual is True
+
+    def test_tasks_web_flag(self):
+        from cli.main import _build_parser
+        args = _build_parser().parse_args(["tasks", "--web"])
+        assert args.web is True
+
+    def test_tasks_web_all_flags(self):
+        from cli.main import _build_parser
+        args = _build_parser().parse_args(["tasks", "--web", "--all"])
+        assert args.web is True
+        assert args.all is True
+
+    def test_webview_html_contains_curie_svg(self):
+        from cli.agent_webview import _HTML
+        assert "buildCurieSVG" in _HTML
+        assert "buildSubSVG" in _HTML
+        assert "connectSSE" in _HTML
+        assert "Curie AI" in _HTML
+
+    def test_webview_server(self):
+        import tempfile, threading, time, urllib.request, json
+        from pathlib import Path
+        import cli.agent_webview as wv
+        import cli.tasks as tm
+
+        tmp = tempfile.mkdtemp()
+        wv._TASKS_FILE = Path(tmp) / "tasks.json"
+        tm.CURIE_DIR = Path(tmp)
+        tm.TASKS_FILE = wv._TASKS_FILE
+        tm.register_task("wt1", "Web test task", channel="api")
+
+        import socket
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+
+        from http.server import HTTPServer
+        wv._SHUTDOWN_EVENT.clear()
+        server = HTTPServer(("127.0.0.1", port), wv._Handler)
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        time.sleep(0.3)
+
+        try:
+            html = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
+            assert "<title>Curie AI" in html
+            data = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/data").read())
+            assert "wt1" in data["tasks"]
+        finally:
+            wv._SHUTDOWN_EVENT.set()
+            server.shutdown()
