@@ -344,17 +344,9 @@ class ChatWorkflow:
         message_id = str(normalized_input.get("message_id", ""))
         user_text = normalized_input.get("text", "").strip()
 
-        # ── Task tracking ─────────────────────────────────────────────────
+        # task_id is always defined so later _finish_task calls are safe even
+        # when task tracking is disabled or register_task is called later.
         task_id = str(uuid.uuid4())[:8]
-        if _TASK_TRACKING:
-            try:
-                register_task(
-                    task_id,
-                    description=user_text[:80] if user_text else "(empty)",
-                    channel=platform,
-                )
-            except Exception:
-                pass
 
         if not all([external_user_id, external_chat_id, user_text]):
             logger.error(
@@ -446,6 +438,20 @@ class ChatWorkflow:
             }
         # ─────────────────────────────────────────────────────────────────────
 
+        # ── Task tracking ─────────────────────────────────────────────────
+        # Registered here — after input validation, dedupe, and session-command
+        # shortcuts — so no tasks are left in a permanent "running" state for
+        # those fast-exit paths.
+        if _TASK_TRACKING:
+            try:
+                register_task(
+                    task_id,
+                    description=user_text[:80] if user_text else "(empty)",
+                    channel=platform,
+                )
+            except Exception:
+                pass
+
         try:
             # ── System / CLI commands (highest priority – no LLM tokens consumed) ──
             try:
@@ -463,6 +469,11 @@ class ChatWorkflow:
                         platform, str(external_chat_id), message_id, sys_response
                     )
                     processing_time = (time.time() - start_time) * 1000
+                    if _TASK_TRACKING:
+                        try:
+                            _finish_task(task_id)
+                        except Exception:
+                            pass
                     return {
                         "text": sys_response,
                         "timestamp": datetime.utcnow(),

@@ -33,7 +33,8 @@ Simple interval shortcuts (Curie extension):
 
 How it works
 ------------
-The runner starts a background thread that wakes every 60 seconds and:
+The runner starts a background thread that wakes every ``_CHECK_INTERVAL``
+seconds (default: 30, configurable via ``CRON_CHECK_INTERVAL`` env var) and:
 1. Loads the job file.
 2. For each enabled job it calls ``_is_due(job, now)`` which compares the last
    run timestamp against the cron expression to decide whether to fire.
@@ -50,6 +51,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
@@ -150,6 +152,16 @@ def _parse_field(field: str, min_val: int, max_val: int) -> set[int]:
 def cron_matches(schedule: str, dt: datetime) -> bool:
     """Return True if *dt* (minute-granular) matches the *schedule* expression.
 
+    Follows the Vixie/standard cron convention for day-of-month (DOM) and
+    day-of-week (DOW):
+
+    - If *both* fields are unrestricted (``*``): a date must satisfy both
+      (i.e. AND — normal behaviour).
+    - If *at least one* field is restricted (not ``*``): a date must satisfy
+      DOM **or** DOW (OR semantics).  This matches how crontab(5) specifies
+      expressions like ``0 0 1 * 0`` should fire on the 1st of the month
+      *and* on every Sunday.
+
     Raises ``ValueError`` if the schedule cannot be parsed.
     """
     if schedule.strip().lower() == "@reboot":
@@ -167,12 +179,20 @@ def cron_matches(schedule: str, dt: datetime) -> bool:
     # isoweekday: Mon=1…Sun=7; cron: Sun=0…Sat=6
     iso_dow = dt.isoweekday() % 7  # Mon=1→1, Sun=7→0
 
+    # Standard cron OR semantics: when both DOM and DOW are restricted,
+    # the expression fires when EITHER matches.
+    dom_restricted = dom_f != "*"
+    dow_restricted = dow_f != "*"
+    if dom_restricted and dow_restricted:
+        day_match = (dt.day in doms) or (iso_dow in dows)
+    else:
+        day_match = (dt.day in doms) and (iso_dow in dows)
+
     return (
         dt.minute in minutes
         and dt.hour in hours
-        and dt.day in doms
+        and day_match
         and dt.month in months
-        and iso_dow in dows
     )
 
 
@@ -234,12 +254,17 @@ async def _run_job(
     logger.info("Cron: firing job %r  prompt=%r", job_id, prompt[:60])
 
     try:
-        response = await workflow.process_message(
-            user_message=prompt,
-            platform=master_platform,
-            external_user_id=master_external_id or "cron",
-            internal_id=master_internal_id,
-        )
+        normalized_input = {
+            "platform": master_platform,
+            "external_user_id": master_external_id or "cron",
+            "external_chat_id": master_external_id or "cron",
+            "message_id": str(uuid.uuid4()),
+            "text": prompt,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "internal_id": master_internal_id,
+        }
+        result = await workflow.process_message(normalized_input)
+        response = result.get("text", "[no response]") if isinstance(result, dict) else str(result)
     except Exception as e:
         logger.error("Cron: job %r failed during ChatWorkflow: %s", job_id, e, exc_info=True)
         response = f"[Cron job error: {e}]"
@@ -252,7 +277,7 @@ async def _run_job(
             try:
                 send = getattr(connector, "send_message", None)
                 if send:
-                    await send(master_external_id, f"⏰ *Cron job `{job_id}`:*\n{response}")
+                    await send(master_external_id, f"⏰ Cron job {job_id}:\n{response}")
                     delivered = True
             except Exception as e:
                 logger.warning("Cron: could not deliver via %s: %s", master_platform, e)
@@ -319,12 +344,15 @@ class CronRunner:
         # Try to find an external ID for the master user on any connected platform
         try:
             from memory.database import get_pg_conn  # noqa: PLC0415
+            from psycopg2 import sql as _sql  # noqa: PLC0415
             with get_pg_conn() as conn:
                 cur = conn.cursor()
                 for platform in ["telegram", "discord", "api"]:
                     col = f"{platform}_id"
                     cur.execute(
-                        f"SELECT {col} FROM users WHERE internal_id = %s",
+                        _sql.SQL("SELECT {} FROM users WHERE internal_id = %s").format(
+                            _sql.Identifier(col)
+                        ),
                         (master_id,),
                     )
                     row = cur.fetchone()
