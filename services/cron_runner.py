@@ -244,19 +244,18 @@ async def _run_job(
         logger.error("Cron: job %r failed during ChatWorkflow: %s", job_id, e, exc_info=True)
         response = f"[Cron job error: {e}]"
 
-    # Deliver the response through an available connector
+    # Deliver the response through the connector matching master_platform
     delivered = False
-    for platform, connector in connectors.items():
-        if not master_external_id:
-            continue
-        try:
-            send = getattr(connector, "send_message", None)
-            if send:
-                await send(master_external_id, f"⏰ *Cron job `{job_id}`:*\n{response}")
-                delivered = True
-                break
-        except Exception as e:
-            logger.warning("Cron: could not deliver via %s: %s", platform, e)
+    if master_external_id:
+        connector = connectors.get(master_platform)
+        if connector is not None:
+            try:
+                send = getattr(connector, "send_message", None)
+                if send:
+                    await send(master_external_id, f"⏰ *Cron job `{job_id}`:*\n{response}")
+                    delivered = True
+            except Exception as e:
+                logger.warning("Cron: could not deliver via %s: %s", master_platform, e)
 
     if not delivered:
         logger.info("Cron: job %r result (no connector): %s", job_id, str(response)[:200])
