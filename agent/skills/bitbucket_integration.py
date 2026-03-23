@@ -5,6 +5,7 @@ Bitbucket Integration Module - Handle Bitbucket API interactions for code review
 """
 
 import os
+import uuid
 from typing import Dict, List, Optional, Tuple
 import requests
 import git
@@ -262,7 +263,7 @@ def apply_bitbucket_code_change(
     """
     branch_name = (branch_name or "").strip()
     if not branch_name:
-        raise ValueError("branch_name cannot be empty")
+        branch_name = f"curie-change-{uuid.uuid4().hex[:8]}"
 
     from agent.skills.coder import (
         get_code_context,

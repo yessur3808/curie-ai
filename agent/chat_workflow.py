@@ -299,7 +299,7 @@ class ChatWorkflow:
         idle_threshold_minutes: int = 30,
         minimal_sanitization: bool = True,
     ):
-        self.persona = persona or self._load_default_persona()
+        self.persona = normalize_persona(persona) if persona else self._load_default_persona()
         self.max_history = max_history
         self.enable_small_talk = enable_small_talk
         self.idle_threshold_minutes = idle_threshold_minutes

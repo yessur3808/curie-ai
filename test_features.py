@@ -89,41 +89,53 @@ def test_proactive_messaging_control():
     print("TEST 3: Proactive Messaging Control")
     print("=" * 70)
 
-    # Test default behavior (no env var set)
-    os.environ.pop("ENABLE_PROACTIVE_MESSAGING", None)
-    enable_default = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
-    print(f"\n📝 Test Case 1: No env variable (default)")
-    print(f"   ENABLE_PROACTIVE_MESSAGING not set")
-    print(f"   ✅ Defaults to enabled: {enable_default}")
+    _original_value = os.environ.get("ENABLE_PROACTIVE_MESSAGING")
+    try:
+        # Test default behavior (no env var set)
+        os.environ.pop("ENABLE_PROACTIVE_MESSAGING", None)
+        enable_default = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
+        print(f"\n📝 Test Case 1: No env variable (default)")
+        print(f"   ENABLE_PROACTIVE_MESSAGING not set")
+        print(f"   ✅ Defaults to enabled: {enable_default}")
 
-    # Test explicitly enabled
-    os.environ["ENABLE_PROACTIVE_MESSAGING"] = "true"
-    enable_true = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
-    print(f"\n📝 Test Case 2: Explicitly enabled")
-    print(f"   ENABLE_PROACTIVE_MESSAGING=true")
-    print(f"   ✅ Enabled: {enable_true}")
+        # Test explicitly enabled
+        os.environ["ENABLE_PROACTIVE_MESSAGING"] = "true"
+        enable_true = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
+        print(f"\n📝 Test Case 2: Explicitly enabled")
+        print(f"   ENABLE_PROACTIVE_MESSAGING=true")
+        print(f"   ✅ Enabled: {enable_true}")
 
-    # Test explicitly disabled
-    os.environ["ENABLE_PROACTIVE_MESSAGING"] = "false"
-    enable_false = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
-    print(f"\n📝 Test Case 3: Explicitly disabled")
-    print(f"   ENABLE_PROACTIVE_MESSAGING=false")
-    print(f"   ✅ Disabled: {not enable_false}")
+        # Test explicitly disabled
+        os.environ["ENABLE_PROACTIVE_MESSAGING"] = "false"
+        enable_false = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
+        print(f"\n📝 Test Case 3: Explicitly disabled")
+        print(f"   ENABLE_PROACTIVE_MESSAGING=false")
+        print(f"   ✅ Disabled: {not enable_false}")
 
-    # Test case insensitive
-    os.environ["ENABLE_PROACTIVE_MESSAGING"] = "FALSE"
-    enable_upper = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
-    print(f"\n📝 Test Case 4: Case insensitive")
-    print(f"   ENABLE_PROACTIVE_MESSAGING=FALSE")
-    print(f"   ✅ Disabled: {not enable_upper}")
+        # Test case insensitive
+        os.environ["ENABLE_PROACTIVE_MESSAGING"] = "FALSE"
+        enable_upper = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
+        print(f"\n📝 Test Case 4: Case insensitive")
+        print(f"   ENABLE_PROACTIVE_MESSAGING=FALSE")
+        print(f"   ✅ Disabled: {not enable_upper}")
 
-    print("\n✅ All proactive messaging control tests passed!")
-    print("\n📋 Usage in .env file:")
-    print("   # Enable proactive messaging (default: true)")
-    print("   ENABLE_PROACTIVE_MESSAGING=true")
-    print("\n   # Disable proactive messaging")
-    print("   ENABLE_PROACTIVE_MESSAGING=false")
-    print()
+        assert enable_default is True, "Default should be enabled"
+        assert enable_true is True, "Explicit 'true' should be enabled"
+        assert enable_false is False, "Explicit 'false' should be disabled"
+        assert enable_upper is False, "Uppercase 'FALSE' should be disabled"
+
+        print("\n✅ All proactive messaging control tests passed!")
+        print("\n📋 Usage in .env file:")
+        print("   # Enable proactive messaging (default: true)")
+        print("   ENABLE_PROACTIVE_MESSAGING=true")
+        print("\n   # Disable proactive messaging")
+        print("   ENABLE_PROACTIVE_MESSAGING=false")
+        print()
+    finally:
+        if _original_value is None:
+            os.environ.pop("ENABLE_PROACTIVE_MESSAGING", None)
+        else:
+            os.environ["ENABLE_PROACTIVE_MESSAGING"] = _original_value
 
 
 def main():
