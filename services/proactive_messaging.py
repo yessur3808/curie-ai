@@ -129,8 +129,11 @@ class ProactiveMessagingService:
         # Start the cron runner alongside
         try:
             from services.cron_runner import CronRunner  # noqa: PLC0415
+
             workflow = getattr(self.agent, "workflow", self.agent)
-            self._cron_runner = CronRunner(workflow=workflow, connectors=self.connectors)
+            self._cron_runner = CronRunner(
+                workflow=workflow, connectors=self.connectors
+            )
             self._cron_runner.start()
             logger.info("✅ CronRunner started")
         except Exception as e:

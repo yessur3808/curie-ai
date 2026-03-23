@@ -22,7 +22,7 @@ jobs:
           cache: pip
 
       - name: Install lint dependencies
-        run: pip install flake8
+        run: pip install flake8==7.2.0
 
       - name: Run flake8
         # Flake8 settings are read from .flake8 in the repo root.
@@ -82,7 +82,8 @@ jobs:
             httpx \
             gitpython \
             beautifulsoup4 \
-            PyGithub
+            PyGithub \
+            python-multipart
 
       - name: Run tests
         # Exclude test suites that require a live LLM model or GitHub token

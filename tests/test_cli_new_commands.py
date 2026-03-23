@@ -22,6 +22,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 # ─── cli.cron ─────────────────────────────────────────────────────────────────
 
+
 class TestCron:
     """Tests for the cron job registry (no external deps)."""
 
@@ -29,6 +30,7 @@ class TestCron:
         self._tmpdir = tempfile.TemporaryDirectory()
         tmp = Path(self._tmpdir.name)
         import cli.cron as cron_mod
+
         self._mod = cron_mod
         self._orig_curie_dir = cron_mod.CURIE_DIR
         self._orig_cron_file = cron_mod.CRON_FILE
@@ -116,21 +118,27 @@ class TestCron:
 
 # ─── cli.channel ─────────────────────────────────────────────────────────────
 
+
 class TestChannel:
     """Tests for channel management (no real network calls)."""
 
     def test_cmd_channel_list_runs(self):
         from cli.channel import cmd_channel_list
-        with patch.dict(os.environ, {
-            "TELEGRAM_BOT_TOKEN": "fake-token-12345",
-            "RUN_TELEGRAM": "true",
-            "RUN_API": "true",
-        }):
+
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "fake-token-12345",
+                "RUN_TELEGRAM": "true",
+                "RUN_API": "true",
+            },
+        ):
             rc = cmd_channel_list()
         assert rc == 0
 
     def test_channel_status_telegram_configured(self):
         from cli.channel import _channel_status, _CHANNELS
+
         ch = next(c for c in _CHANNELS if c["name"] == "telegram")
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "tok123"}):
             st = _channel_status(ch)
@@ -138,6 +146,7 @@ class TestChannel:
 
     def test_channel_status_telegram_unconfigured(self):
         from cli.channel import _channel_status, _CHANNELS
+
         ch = next(c for c in _CHANNELS if c["name"] == "telegram")
         env = {k: v for k, v in os.environ.items() if k != "TELEGRAM_BOT_TOKEN"}
         with patch.dict(os.environ, env, clear=True):
@@ -146,17 +155,20 @@ class TestChannel:
 
     def test_channel_status_api_always_configured(self):
         from cli.channel import _channel_status, _CHANNELS
+
         ch = next(c for c in _CHANNELS if c["name"] == "api")
         st = _channel_status(ch)
         assert st["configured"] is True
 
     def test_cmd_channel_bind_unknown_platform(self, capsys):
         from cli.channel import cmd_channel_bind
+
         rc = cmd_channel_bind("signal", "some-token")
         assert rc == 1
 
     def test_cmd_channel_bind_telegram(self, tmp_path):
         from cli.channel import cmd_channel_bind
+
         env_file = tmp_path / ".env"
         env_file.write_text("")
         with patch("cli.channel._env_file_path", return_value=env_file):
@@ -168,6 +180,7 @@ class TestChannel:
 
     def test_cmd_channel_doctor_runs(self):
         from cli.channel import cmd_channel_doctor
+
         # Doctor makes network calls; just ensure it runs without raising
         with patch("socket.gethostbyname", side_effect=Exception("no network")):
             rc = cmd_channel_doctor()
@@ -177,40 +190,51 @@ class TestChannel:
 
 # ─── cli.auth ─────────────────────────────────────────────────────────────────
 
+
 class TestAuth:
     """Tests for LLM provider auth management."""
 
     def test_cmd_auth_status_runs(self):
         from cli.auth import cmd_auth_status
+
         with patch.dict(os.environ, {"LLM_PROVIDER_PRIORITY": "llama.cpp"}):
             rc = cmd_auth_status()
         assert rc == 0
 
     def test_cmd_auth_status_shows_configured_provider(self):
         from cli.auth import cmd_auth_status
-        with patch.dict(os.environ, {
-            "LLM_PROVIDER_PRIORITY": "openai,llama.cpp",
-            "OPENAI_API_KEY": "sk-test-key",
-        }):
+
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_PROVIDER_PRIORITY": "openai,llama.cpp",
+                "OPENAI_API_KEY": "sk-test-key",
+            },
+        ):
             rc = cmd_auth_status()
         assert rc == 0
 
     def test_cmd_auth_login_unknown_provider(self):
         from cli.auth import cmd_auth_login
+
         rc = cmd_auth_login("unknown-provider")
         assert rc == 1
 
     def test_cmd_auth_login_local_provider(self):
         from cli.auth import cmd_auth_login
+
         rc = cmd_auth_login("llama.cpp")
         assert rc == 0
 
     def test_cmd_auth_login_stores_key(self, tmp_path):
         from cli.auth import cmd_auth_login
+
         env_file = tmp_path / ".env"
         env_file.write_text("")
-        with patch("cli.auth._env_file_path", return_value=env_file), \
-             patch.dict(os.environ, {"LLM_PROVIDER_PRIORITY": "llama.cpp"}):
+        with (
+            patch("cli.auth._env_file_path", return_value=env_file),
+            patch.dict(os.environ, {"LLM_PROVIDER_PRIORITY": "llama.cpp"}),
+        ):
             rc = cmd_auth_login("openai", api_key="sk-fake-key")
         assert rc == 0
         content = env_file.read_text()
@@ -218,10 +242,13 @@ class TestAuth:
 
     def test_cmd_auth_use_prepends_provider(self, tmp_path):
         from cli.auth import cmd_auth_use
+
         env_file = tmp_path / ".env"
         env_file.write_text("LLM_PROVIDER_PRIORITY=llama.cpp\n")
-        with patch("cli.auth._env_file_path", return_value=env_file), \
-             patch.dict(os.environ, {"LLM_PROVIDER_PRIORITY": "llama.cpp"}):
+        with (
+            patch("cli.auth._env_file_path", return_value=env_file),
+            patch.dict(os.environ, {"LLM_PROVIDER_PRIORITY": "llama.cpp"}),
+        ):
             rc = cmd_auth_use("openai")
         assert rc == 0
         content = env_file.read_text()
@@ -229,17 +256,20 @@ class TestAuth:
 
     def test_cmd_auth_use_unknown_provider_fails(self):
         from cli.auth import cmd_auth_use
+
         rc = cmd_auth_use("unknown-provider-xyz")
         assert rc == 1
 
 
 # ─── cli.completions ─────────────────────────────────────────────────────────
 
+
 class TestCompletions:
     """Tests for shell completion script generation."""
 
     def test_bash_completions_stdout(self, capsys):
         from cli.completions import cmd_completions
+
         rc = cmd_completions("bash")
         assert rc == 0
         out = capsys.readouterr().out
@@ -248,6 +278,7 @@ class TestCompletions:
 
     def test_zsh_completions_stdout(self, capsys):
         from cli.completions import cmd_completions
+
         rc = cmd_completions("zsh")
         assert rc == 0
         out = capsys.readouterr().out
@@ -256,6 +287,7 @@ class TestCompletions:
 
     def test_fish_completions_stdout(self, capsys):
         from cli.completions import cmd_completions
+
         rc = cmd_completions("fish")
         assert rc == 0
         out = capsys.readouterr().out
@@ -263,26 +295,39 @@ class TestCompletions:
 
     def test_unknown_shell_fails(self, capsys):
         from cli.completions import cmd_completions
+
         rc = cmd_completions("powershell")
         assert rc == 1
 
     def test_completions_contain_all_commands(self, capsys):
         from cli.completions import cmd_completions
+
         for shell in ("bash", "zsh", "fish"):
             rc = cmd_completions(shell)
             assert rc == 0
             out = capsys.readouterr().out
-            for cmd in ("start", "stop", "status", "channel", "cron", "memory", "auth", "completions"):
+            for cmd in (
+                "start",
+                "stop",
+                "status",
+                "channel",
+                "cron",
+                "memory",
+                "auth",
+                "completions",
+            ):
                 assert cmd in out, f"'{cmd}' missing from {shell} completions"
 
 
 # ─── cli.main new subcommands ─────────────────────────────────────────────────
+
 
 class TestCLIMainNewCommands:
     """Test that new subcommands are wired into cli.main._build_parser."""
 
     def _parse(self, argv):
         from cli.main import _build_parser
+
         return _build_parser().parse_args(argv)
 
     def test_onboard_command(self):
@@ -389,6 +434,7 @@ class TestCLIMainNewCommands:
 
     def test_completions_via_main(self, capsys):
         from cli.main import main
+
         rc = main(["completions", "bash"])
         assert rc == 0
         out = capsys.readouterr().out
@@ -396,6 +442,7 @@ class TestCLIMainNewCommands:
 
     def test_channel_list_via_main(self):
         from cli.main import main
+
         with patch("cli.channel.cmd_channel_list", return_value=0) as mock_list:
             rc = main(["channel", "list"])
         assert rc == 0
@@ -403,6 +450,7 @@ class TestCLIMainNewCommands:
 
     def test_cron_list_via_main(self):
         from cli.main import main
+
         with patch("cli.cron.cmd_cron_list", return_value=0) as mock_list:
             rc = main(["cron", "list"])
         assert rc == 0
@@ -410,6 +458,7 @@ class TestCLIMainNewCommands:
 
     def test_auth_status_via_main(self):
         from cli.main import main
+
         with patch("cli.auth.cmd_auth_status", return_value=0) as mock_status:
             rc = main(["auth", "status"])
         assert rc == 0
@@ -418,24 +467,30 @@ class TestCLIMainNewCommands:
 
 # ─── cli.onboard helpers ─────────────────────────────────────────────────────
 
+
 class TestOnboard:
     """Tests for onboard helper functions (no interactive prompts)."""
 
     def test_load_env_file_empty(self, tmp_path):
         from cli.onboard import _load_env_file
+
         result = _load_env_file(tmp_path / "nonexistent.env")
         assert result == {}
 
     def test_load_env_file_parses_keys(self, tmp_path):
         from cli.onboard import _load_env_file
+
         env = tmp_path / ".env"
-        env.write_text("POSTGRES_DSN=postgresql://localhost/curie\nMONGODB_URI=mongodb://localhost\n")
+        env.write_text(
+            "POSTGRES_DSN=postgresql://localhost/curie\nMONGODB_URI=mongodb://localhost\n"
+        )
         result = _load_env_file(env)
         assert result["POSTGRES_DSN"] == "postgresql://localhost/curie"
         assert result["MONGODB_URI"] == "mongodb://localhost"
 
     def test_write_env_file_new_key(self, tmp_path):
         from cli.onboard import _write_env_file
+
         env = tmp_path / ".env"
         env.write_text("EXISTING=value\n")
         _write_env_file(env, {"NEW_KEY": "new_value"})
@@ -445,6 +500,7 @@ class TestOnboard:
 
     def test_write_env_file_updates_existing_key(self, tmp_path):
         from cli.onboard import _write_env_file
+
         env = tmp_path / ".env"
         env.write_text("MY_KEY=old_value\nOTHER=keep\n")
         _write_env_file(env, {"MY_KEY": "new_value"})
@@ -455,6 +511,7 @@ class TestOnboard:
 
     def test_write_env_file_creates_if_missing(self, tmp_path):
         from cli.onboard import _write_env_file
+
         env = tmp_path / "new.env"
         _write_env_file(env, {"FOO": "bar"})
         assert "FOO=bar" in env.read_text()
@@ -462,71 +519,92 @@ class TestOnboard:
 
 # ─── system_commands.py new patterns ─────────────────────────────────────────
 
+
 class TestSystemCommandsNewPatterns:
     """Test that new NL patterns are detected correctly."""
 
     def test_slash_channel(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("/channel") == "channel"
 
     def test_slash_cron(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("/cron") == "cron"
 
     def test_slash_memory(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("/memory") == "memory"
 
     def test_slash_auth(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("/auth") == "auth"
 
     def test_nl_list_channels(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("list channels") == "channel"
 
     def test_nl_which_channels_configured(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("which channels are configured?") == "channel"
 
     def test_nl_show_cron_jobs(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("show scheduled jobs") == "cron"
 
     def test_nl_cron_list(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("cron list") == "cron"
 
     def test_nl_show_memory_facts(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("show user memory") == "memory"
 
     def test_nl_stored_facts(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("show stored facts") == "memory"
 
     def test_nl_which_llm_provider(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("which llm provider is active?") == "auth"
 
     def test_nl_auth_status(self):
         from agent.skills.system_commands import detect_system_command
+
         assert detect_system_command("auth status") == "auth"
 
     def test_channel_command_returns_channel_list(self):
         from agent.skills.system_commands import handle_system_command
-        with patch("agent.skills.system_commands._render_channel_list", return_value="chan list"):
+
+        with patch(
+            "agent.skills.system_commands._render_channel_list",
+            return_value="chan list",
+        ):
             result = handle_system_command("/channel", internal_id="u1")
         assert result == "chan list"
 
     def test_cron_command_returns_cron_list(self):
         from agent.skills.system_commands import handle_system_command
-        with patch("agent.skills.system_commands._render_cron_list", return_value="cron list"):
+
+        with patch(
+            "agent.skills.system_commands._render_cron_list", return_value="cron list"
+        ):
             result = handle_system_command("/cron", internal_id="u1")
         assert result == "cron list"
 
     def test_auth_command_blocked_for_non_master(self):
         from agent.skills.system_commands import handle_system_command
+
         with patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}):
             result = handle_system_command("/auth", internal_id="non-master")
         assert result is not None
@@ -534,7 +612,13 @@ class TestSystemCommandsNewPatterns:
 
     def test_auth_command_allowed_for_master(self):
         from agent.skills.system_commands import handle_system_command
-        with patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}), \
-             patch("agent.skills.system_commands._render_auth_status", return_value="auth ok"):
+
+        with (
+            patch.dict(os.environ, {"MASTER_USER_ID": "master-user"}),
+            patch(
+                "agent.skills.system_commands._render_auth_status",
+                return_value="auth ok",
+            ),
+        ):
             result = handle_system_command("/auth", internal_id="master-user")
         assert result == "auth ok"

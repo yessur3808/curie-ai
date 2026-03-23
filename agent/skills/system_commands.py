@@ -35,14 +35,26 @@ logger = logging.getLogger(__name__)
 # Optional CLI module imports – silently skipped if cli package is unavailable.
 # Importing at module level makes names patchable in tests.
 try:
-    from cli.daemon import get_status, start_daemon, stop_daemon, restart_daemon, LOG_FILE
+    from cli.daemon import (
+        get_status,
+        start_daemon,
+        stop_daemon,
+        restart_daemon,
+        LOG_FILE,
+    )
+
     _CLI_DAEMON_AVAILABLE = True
 except Exception:
     _CLI_DAEMON_AVAILABLE = False
     LOG_FILE = None  # type: ignore[assignment]
 
     def get_status() -> dict:  # type: ignore[misc]
-        return {"running": False, "pid": None, "uptime_seconds": None, "log_file": "N/A"}
+        return {
+            "running": False,
+            "pid": None,
+            "uptime_seconds": None,
+            "log_file": "N/A",
+        }
 
     def start_daemon(**_):  # type: ignore[misc]
         return {"success": False, "pid": None, "message": "cli.daemon not available"}
@@ -56,6 +68,7 @@ except Exception:
 
 try:
     from cli.tasks import get_tasks, get_task_summary
+
     _CLI_TASKS_AVAILABLE = True
 except Exception:
     _CLI_TASKS_AVAILABLE = False
@@ -64,11 +77,17 @@ except Exception:
         return []
 
     def get_task_summary() -> dict:  # type: ignore[misc]
-        return {"total_tasks": 0, "running_tasks": 0, "total_sub_agents": 0, "running_sub_agents": 0}
+        return {
+            "total_tasks": 0,
+            "running_tasks": 0,
+            "total_sub_agents": 0,
+            "running_sub_agents": 0,
+        }
 
 
 try:
     import psutil as _psutil
+
     _PSUTIL_AVAILABLE = True
 except ImportError:
     _psutil = None  # type: ignore[assignment]
@@ -157,7 +176,9 @@ _NL_PATTERNS: dict[str, re.Pattern] = {
 _PRIVILEGED_CMDS = {"start", "stop", "restart", "service", "auth"}
 
 # Extract optional integer argument from text (e.g. "show last 50 logs" or "50 log lines")
-_LOG_LINES_RE = re.compile(r"\b(?:last\s+)?(\d+)\s+(?:logs?|log\s+lines?|lines?)\b", re.IGNORECASE)
+_LOG_LINES_RE = re.compile(
+    r"\b(?:last\s+)?(\d+)\s+(?:logs?|log\s+lines?|lines?)\b", re.IGNORECASE
+)
 
 
 # ─── Detection ────────────────────────────────────────────────────────────────
@@ -272,6 +293,7 @@ def _render_metrics() -> str:
     gpu_lines = []
     try:
         import pynvml  # type: ignore  # noqa: PLC0415
+
         pynvml.nvmlInit()
         for i in range(pynvml.nvmlDeviceGetCount()):
             h = pynvml.nvmlDeviceGetHandleByIndex(i)
@@ -326,7 +348,9 @@ def _render_tasks() -> str:
             channel = t.get("channel", "?")
             age = _uptime_str(int(time.time() - t.get("started_at", time.time())))
             sub_agents = t.get("sub_agents", {})
-            running_agents = sum(1 for a in sub_agents.values() if a.get("status") == "running")
+            running_agents = sum(
+                1 for a in sub_agents.values() if a.get("status") == "running"
+            )
             lines.append(
                 f"  \u2022 `{t['id']}` [{channel}] \"{desc}\" \u2013 {age} ago"
                 f"  ({running_agents}/{len(sub_agents)} sub-agents)"
@@ -361,7 +385,16 @@ def _render_doctor() -> str:
     lines.append(f"{'✅' if ok else '❌'} Python {v.major}.{v.minor}.{v.micro}")
 
     # Core deps
-    core = ["fastapi", "uvicorn", "psycopg2", "pymongo", "requests", "httpx", "rich", "psutil"]
+    core = [
+        "fastapi",
+        "uvicorn",
+        "psycopg2",
+        "pymongo",
+        "requests",
+        "httpx",
+        "rich",
+        "psutil",
+    ]
     lines.append("")
     lines.append("*Core dependencies:*")
     for mod in core:
@@ -465,14 +498,20 @@ def _render_cron_list() -> str:
 
     jobs = get_jobs()
     if not jobs:
-        return ("\U0001f551 *No scheduled jobs configured.*\n\n"
-                "Add one with:\n`/cron add '*/5 * * * *' --prompt Check system health`")
+        return (
+            "\U0001f551 *No scheduled jobs configured.*\n\n"
+            "Add one with:\n`/cron add '*/5 * * * *' --prompt Check system health`"
+        )
 
     lines = [f"\U0001f551 *Scheduled Jobs* ({len(jobs)} total)", ""]
     for job in jobs:
         enabled = "\u2705" if job.get("enabled") else "\u26d4"
         last = job.get("last_run") or "never"
-        prompt_preview = (job["prompt"][:50] + "\u2026") if len(job["prompt"]) > 51 else job["prompt"]
+        prompt_preview = (
+            (job["prompt"][:50] + "\u2026")
+            if len(job["prompt"]) > 51
+            else job["prompt"]
+        )
         lines.append(f"{enabled} `{job['id']}` \u2013 `{job['schedule']}`")
         lines.append(f"   \u201c{prompt_preview}\u201d  (last: {last})")
     return "\n".join(lines)
@@ -488,7 +527,12 @@ def _render_auth_status() -> str:
     current_priority = os.getenv(_PRIORITY_ENV, "llama.cpp")
     priority_list = [p.strip() for p in current_priority.split(",") if p.strip()]
 
-    lines = ["\U0001f511 *LLM Provider Status*", "", f"Active priority: `{current_priority}`", ""]
+    lines = [
+        "\U0001f511 *LLM Provider Status*",
+        "",
+        f"Active priority: `{current_priority}`",
+        "",
+    ]
     for name, pdef in _PROVIDERS.items():
         if pdef["key_env"]:
             configured = bool(os.getenv(pdef["key_env"]))
@@ -570,7 +614,9 @@ def handle_system_command(
     if cmd in _PRIVILEGED_CMDS and not _is_master(internal_id):
         return (
             "🔒 The `{}` command is restricted to the master user.\n"
-            "If you are the administrator, ensure `MASTER_USER_ID` matches your user ID.".format(cmd)
+            "If you are the administrator, ensure `MASTER_USER_ID` matches your user ID.".format(
+                cmd
+            )
         )
 
     try:
@@ -625,7 +671,9 @@ def handle_system_command(
             return _render_auth_status()
 
     except Exception as e:
-        logger.error("System command '%s' raised an exception: %s", cmd, e, exc_info=True)
+        logger.error(
+            "System command '%s' raised an exception: %s", cmd, e, exc_info=True
+        )
         return f"\u274c Error executing `{cmd}`: {str(e)[:120]}"
 
     return None

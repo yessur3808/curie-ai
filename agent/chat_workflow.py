@@ -37,7 +37,13 @@ from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
 # Task tracking (optional – import silently ignored if cli package unavailable)
 try:
-    from cli.tasks import register_task, register_sub_agent, update_sub_agent, finish_task as _finish_task
+    from cli.tasks import (
+        register_task,
+        register_sub_agent,
+        update_sub_agent,
+        finish_task as _finish_task,
+    )
+
     _TASK_TRACKING = True
 except Exception:
     _TASK_TRACKING = False
@@ -308,7 +314,9 @@ class ChatWorkflow:
         idle_threshold_minutes: int = 30,
         minimal_sanitization: bool = True,
     ):
-        self.persona = normalize_persona(persona) if persona else self._load_default_persona()
+        self.persona = (
+            normalize_persona(persona) if persona else self._load_default_persona()
+        )
         self.max_history = max_history
         self.enable_small_talk = enable_small_talk
         self.idle_threshold_minutes = idle_threshold_minutes
@@ -461,7 +469,9 @@ class ChatWorkflow:
         try:
             # ── System / CLI commands (highest priority – no LLM tokens consumed) ──
             try:
-                from agent.skills.system_commands import handle_system_command  # noqa: PLC0415
+                from agent.skills.system_commands import (
+                    handle_system_command,
+                )  # noqa: PLC0415
 
                 sys_response = handle_system_command(
                     user_text, internal_id=internal_id, platform=platform
@@ -503,7 +513,9 @@ class ChatWorkflow:
                 if coding_response:
                     if _TASK_TRACKING:
                         try:
-                            update_sub_agent(task_id, _sa_id, "done", result_summary="handled")
+                            update_sub_agent(
+                                task_id, _sa_id, "done", result_summary="handled"
+                            )
                             _finish_task(task_id)
                         except Exception:
                             pass
@@ -523,7 +535,9 @@ class ChatWorkflow:
                     }
                 if _TASK_TRACKING:
                     try:
-                        update_sub_agent(task_id, _sa_id, "done", result_summary="skipped")
+                        update_sub_agent(
+                            task_id, _sa_id, "done", result_summary="skipped"
+                        )
                     except Exception:
                         pass
             except Exception as e:
@@ -543,7 +557,9 @@ class ChatWorkflow:
                 if nav_response:
                     if _TASK_TRACKING:
                         try:
-                            update_sub_agent(task_id, _sa_id, "done", result_summary="handled")
+                            update_sub_agent(
+                                task_id, _sa_id, "done", result_summary="handled"
+                            )
                             _finish_task(task_id)
                         except Exception:
                             pass
@@ -563,7 +579,9 @@ class ChatWorkflow:
                     }
                 if _TASK_TRACKING:
                     try:
-                        update_sub_agent(task_id, _sa_id, "done", result_summary="skipped")
+                        update_sub_agent(
+                            task_id, _sa_id, "done", result_summary="skipped"
+                        )
                     except Exception:
                         pass
             except Exception as e:
@@ -585,7 +603,9 @@ class ChatWorkflow:
                 if reminder_response:
                     if _TASK_TRACKING:
                         try:
-                            update_sub_agent(task_id, _sa_id, "done", result_summary="handled")
+                            update_sub_agent(
+                                task_id, _sa_id, "done", result_summary="handled"
+                            )
                             _finish_task(task_id)
                         except Exception:
                             pass
@@ -607,7 +627,9 @@ class ChatWorkflow:
                     }
                 if _TASK_TRACKING:
                     try:
-                        update_sub_agent(task_id, _sa_id, "done", result_summary="skipped")
+                        update_sub_agent(
+                            task_id, _sa_id, "done", result_summary="skipped"
+                        )
                     except Exception:
                         pass
             except Exception as e:
@@ -629,7 +651,9 @@ class ChatWorkflow:
                 if trip_response:
                     if _TASK_TRACKING:
                         try:
-                            update_sub_agent(task_id, _sa_id, "done", result_summary="handled")
+                            update_sub_agent(
+                                task_id, _sa_id, "done", result_summary="handled"
+                            )
                             _finish_task(task_id)
                         except Exception:
                             pass
@@ -649,7 +673,9 @@ class ChatWorkflow:
                     }
                 if _TASK_TRACKING:
                     try:
-                        update_sub_agent(task_id, _sa_id, "done", result_summary="skipped")
+                        update_sub_agent(
+                            task_id, _sa_id, "done", result_summary="skipped"
+                        )
                     except Exception:
                         pass
             except Exception as e:

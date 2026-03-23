@@ -23,6 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 # ─── cli.tasks ───────────────────────────────────────────────────────────────
 
+
 class TestTaskRegistry:
     """Tests for cli.tasks task/sub-agent registry."""
 
@@ -31,6 +32,7 @@ class TestTaskRegistry:
         self._tmpdir = tempfile.TemporaryDirectory()
         self._orig_curie_dir = None
         import cli.tasks as _tasks_mod
+
         self._tasks_mod = _tasks_mod
         self._orig_curie_dir = _tasks_mod.CURIE_DIR
         self._orig_tasks_file = _tasks_mod.TASKS_FILE
@@ -112,6 +114,7 @@ class TestTaskRegistry:
 
 # ─── cli.daemon ───────────────────────────────────────────────────────────────
 
+
 class TestDaemonHelpers:
     """Tests for PID-file read/write/removal and status helpers."""
 
@@ -120,6 +123,7 @@ class TestDaemonHelpers:
         self._tmp_path = Path(self._tmpdir.name)
 
         import cli.daemon as _daemon_mod
+
         self._daemon_mod = _daemon_mod
         self._orig_curie_dir = _daemon_mod.CURIE_DIR
         self._orig_pid_file = _daemon_mod.PID_FILE
@@ -170,15 +174,18 @@ class TestDaemonHelpers:
 
 # ─── cli.main ─────────────────────────────────────────────────────────────────
 
+
 class TestCLIParser:
     """Test that the argument parser builds and routes commands correctly."""
 
     def _parse(self, argv):
         from cli.main import _build_parser
+
         return _build_parser().parse_args(argv)
 
     def test_no_args_returns_none_command(self):
         from cli.main import _build_parser
+
         args = _build_parser().parse_args([])
         assert args.command is None
 
@@ -253,10 +260,12 @@ class TestCLIParser:
 
     def test_main_returns_0_no_args(self):
         from cli.main import main
+
         assert main([]) == 0
 
     def test_start_delegates_to_daemon(self):
         from cli.main import main
+
         with patch("cli.daemon.start_daemon") as mock_start:
             mock_start.return_value = {"success": True, "pid": 42, "message": "started"}
             rc = main(["start"])
@@ -265,6 +274,7 @@ class TestCLIParser:
 
     def test_stop_delegates_to_daemon(self):
         from cli.main import main
+
         with patch("cli.daemon.stop_daemon") as mock_stop:
             mock_stop.return_value = {"success": True, "message": "stopped"}
             rc = main(["stop"])
@@ -272,6 +282,7 @@ class TestCLIParser:
 
     def test_doctor_runs(self):
         from cli.main import main
+
         with patch("cli.doctor.run_doctor") as mock_doctor:
             mock_doctor.return_value = 0
             rc = main(["doctor"])
@@ -279,6 +290,7 @@ class TestCLIParser:
 
 
 # ─── cli.metrics ──────────────────────────────────────────────────────────────
+
 
 class TestMetrics:
     """Smoke tests for the metrics module."""
@@ -289,6 +301,7 @@ class TestMetrics:
             from rich.table import Table
             from cli.metrics import _build_metrics_table
             import psutil
+
             psutil.cpu_percent(interval=None)
             table = _build_metrics_table()
             assert isinstance(table, Table)
@@ -297,18 +310,21 @@ class TestMetrics:
 
     def test_fmt_bytes(self):
         from cli.metrics import _fmt_bytes
+
         assert "KB" in _fmt_bytes(2048)
         assert "MB" in _fmt_bytes(2 * 1024 * 1024)
-        assert "GB" in _fmt_bytes(2 * 1024 ** 3)
+        assert "GB" in _fmt_bytes(2 * 1024**3)
 
 
 # ─── cli.doctor ───────────────────────────────────────────────────────────────
+
 
 class TestDoctor:
     """Test that run_doctor returns an int and doesn't raise."""
 
     def test_doctor_returns_int(self):
         from cli.doctor import run_doctor
+
         result = run_doctor()
         assert isinstance(result, int)
         assert result in (0, 1)
