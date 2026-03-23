@@ -8,6 +8,7 @@ Handles code review, PR/MR management, and self-updates
 import os
 import sys
 import time
+import uuid
 import logging
 import threading
 import queue
@@ -442,7 +443,7 @@ class CodingService:
         Returns:
             Task ID
         """
-        task_id = f"{task_type}_{int(time.time() * 1000)}"
+        task_id = f"{task_type}_{uuid.uuid4().hex[:12]}"
         task = {
             "id": task_id,
             "type": task_type,

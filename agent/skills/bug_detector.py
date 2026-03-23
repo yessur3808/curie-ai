@@ -73,7 +73,7 @@ class BugDetector:
                 from agent.skills.coder import get_coding_model_name
 
                 self.model_name = get_coding_model_name()
-            except ImportError:
+            except (ImportError, ValueError):
                 self.model_name = None
         # Set repo path for path validation
         self.repo_path = os.getcwd()

@@ -35,7 +35,7 @@ class PerformanceAnalyzer:
                 from agent.skills.coder import get_coding_model_name
 
                 self.model_name = get_coding_model_name()
-            except ImportError:
+            except (ImportError, ValueError):
                 self.model_name = None
 
     def analyze_complexity(self, code: str, language: Optional[str] = None) -> Dict:

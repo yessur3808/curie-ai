@@ -252,13 +252,13 @@ def get_coding_model_name():
                     return selected
                 else:
                     print("Aborted by user.")
-                    exit(1)
+                    raise ValueError("No coding model selected.")
             except EOFError:
                 print("No input available. Aborting.")
-                exit(1)
+                raise ValueError("No coding model available (non-interactive).")
         else:
             print("Error: No models are available in LLM_MODELS. Aborting.")
-            exit(1)
+            raise ValueError("No models are available in LLM_MODELS.")
 
     # Case 3: No coding model is set, but some models are available
     if not coding_model and llm_models:
@@ -273,11 +273,11 @@ def get_coding_model_name():
                 return selected
             else:
                 print("Aborted by user.")
-                exit(1)
+                raise ValueError("No coding model selected.")
         except EOFError:
             print("No input available. Aborting.")
-            exit(1)
+            raise ValueError("No coding model available (non-interactive).")
 
     # Case 4: No models at all
     print("Error: No models defined in .env (LLM_MODELS is empty). Aborting.")
-    exit(1)
+    raise ValueError("No models defined in .env (LLM_MODELS is empty).")

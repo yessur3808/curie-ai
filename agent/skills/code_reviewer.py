@@ -27,9 +27,12 @@ class CodeReviewer:
         """
         self.model_name = model_name or os.getenv("CODING_MODEL_NAME")
         if not self.model_name:
-            from agent.skills.coder import get_coding_model_name
+            try:
+                from agent.skills.coder import get_coding_model_name
 
-            self.model_name = get_coding_model_name()
+                self.model_name = get_coding_model_name()
+            except (ImportError, ValueError):
+                self.model_name = None
 
     def review_code_changes(
         self, diff_content: str, file_path: str = None
