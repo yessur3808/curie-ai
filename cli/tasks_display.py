@@ -271,7 +271,7 @@ def _summary_panel(summary: dict[str, int]) -> "Panel":
 # ---------------------------------------------------------------------------
 
 
-def show_tasks(show_finished: bool = False, live: bool = False, tree: bool = False) -> None:
+def show_tasks(show_finished: bool = False, live: bool = False, tree: bool = False, visual: bool = False) -> None:
     """
     Display task/sub-agent breakdown.
 
@@ -280,12 +280,18 @@ def show_tasks(show_finished: bool = False, live: bool = False, tree: bool = Fal
     show_finished : include finished/failed tasks (default: running only)
     live          : refresh every second until Ctrl-C
     tree          : use Rich Tree view instead of the default table view
+    visual        : use animated character visualization (Curie + sub-agents)
     """
     if not RICH_AVAILABLE:
         print("rich is required: pip install rich")
         return
 
     from cli.tasks import get_tasks, get_task_summary
+
+    if visual:
+        from cli.agent_visual import show_visual
+        show_visual(show_finished=show_finished, live=live)
+        return
 
     if tree:
         show_agent_tree(show_finished=show_finished, live=live)

@@ -176,7 +176,12 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
 
 def _cmd_tasks(args: argparse.Namespace) -> int:
     from cli.tasks_display import show_tasks
-    show_tasks(show_finished=args.all, live=args.live, tree=getattr(args, "tree", False))
+    show_tasks(
+        show_finished=args.all,
+        live=args.live,
+        tree=getattr(args, "tree", False),
+        visual=getattr(args, "visual", False),
+    )
     return 0
 
 
