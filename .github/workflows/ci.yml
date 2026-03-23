@@ -83,7 +83,7 @@ jobs:
             gitpython \
             beautifulsoup4 \
             PyGithub \
-            python-multipart
+            python-multipart==0.0.22
 
       - name: Run tests
         # Exclude test suites that require a live LLM model or GitHub token
