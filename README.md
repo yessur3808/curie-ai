@@ -497,7 +497,7 @@ Simple queries are automatically routed to the local model (cost optimization) u
 - Response caching with TTL to reduce redundant LLM calls
 
 ### Persona System
-- Seven built-in personalities (jarvis, friday, gideon, bagley, curie, andreja, default)
+- Five built-in personalities (jarvis, friday, gideon, bagley, default)
 - Fully customizable via JSON (name, greeting, tone, constraints, voice settings)
 - Multi-persona mode: set `PERSONA_FILE=all` to load all personas
 
