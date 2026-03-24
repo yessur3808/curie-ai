@@ -193,7 +193,7 @@ Simple/short queries are automatically routed to the local model (unless `LLM_CL
 
 ## 📁 Project Structure
 
-[Current Directory Structure](./directory_structure.md)
+[Current Directory Structure](docs/directory_structure.md)
 
 
 ## 🚀 Getting Started
@@ -540,7 +540,7 @@ Curie uses environment variables for configuration. Copy `.env.example` to `.env
 - [docs/FEATURE_COMPARISON_MATRIX.md](docs/FEATURE_COMPARISON_MATRIX.md) - Visual comparison matrix
 
 ## 🤝 Contributing
-Contributions welcome! Please read our [contributing guidelines](CONTRIBUTING.md).
+Contributions welcome! Please read our [contributing guidelines](docs/CONTRIBUTING.md).
 
 ## 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.

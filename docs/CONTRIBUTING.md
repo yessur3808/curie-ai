@@ -25,7 +25,7 @@ This project and everyone participating in it is governed by our [Code of Conduc
 2. Clone your fork:
    ```bash
    git clone https://github.com/yessur3808/curie-ai
-   cd project-name
+   cd curie-ai
 
 3. Create virtual environment:
 ```bash
