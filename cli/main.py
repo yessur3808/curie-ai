@@ -12,6 +12,11 @@ Usage examples:
   curie tasks                 # Show task / sub-agent breakdown
   curie tasks --live          # Live-updating task view
   curie tasks --all           # Include finished tasks
+  curie tasks --tree          # Rich tree visualization
+  curie tasks --tree --live   # Animated tree view
+  curie tasks --visual        # Animated ASCII character view
+  curie tasks --visual --live # Live animated characters
+  curie tasks --web           # Browser-based animated Curie dashboard
   curie agent                 # Interactive chat with Curie
   curie agent -m "hello"      # Single message
   curie doctor                # System diagnostics
@@ -175,8 +180,17 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
 
 
 def _cmd_tasks(args: argparse.Namespace) -> int:
+    if getattr(args, "web", False):
+        from cli.agent_webview import show_web
+        show_web(show_finished=args.all)
+        return 0
     from cli.tasks_display import show_tasks
-    show_tasks(show_finished=args.all, live=args.live)
+    show_tasks(
+        show_finished=args.all,
+        live=args.live,
+        tree=getattr(args, "tree", False),
+        visual=getattr(args, "visual", False),
+    )
     return 0
 
 
@@ -379,6 +393,11 @@ Examples:
   curie metrics --once             One-shot metrics snapshot
   curie tasks                      Show task / sub-agent breakdown
   curie tasks --live               Live task view
+  curie tasks --tree               Tree visualization of agents
+  curie tasks --tree --live        Live animated tree view
+  curie tasks --visual             Animated ASCII character view
+  curie tasks --visual --live      Live animated characters
+  curie tasks --web                Browser-based animated Curie dashboard
   curie agent                      Interactive chat
   curie agent -m "hello"           Single message
   curie doctor                     System diagnostics
@@ -447,6 +466,21 @@ Examples:
     p_tasks = subs.add_parser("tasks", help="Show task and sub-agent breakdown")
     p_tasks.add_argument("--live", action="store_true", help="Live-updating view (refresh every second)")
     p_tasks.add_argument("--all", dest="all", action="store_true", help="Include finished tasks")
+    p_tasks.add_argument(
+        "--tree",
+        action="store_true",
+        help="Show a tree visualization of tasks and sub-agents (combine with --live for animated view)",
+    )
+    p_tasks.add_argument(
+        "--visual",
+        action="store_true",
+        help="Show animated ASCII character visualization (combine with --live for animation)",
+    )
+    p_tasks.add_argument(
+        "--web",
+        action="store_true",
+        help="Open a browser-based animated Curie dashboard with live sub-agent cards",
+    )
     p_tasks.set_defaults(func=_cmd_tasks)
 
     # ── agent ──────────────────────────────────────────────────────────────

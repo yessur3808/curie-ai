@@ -499,187 +499,157 @@ class ChatWorkflow:
             except Exception as e:
                 logger.debug(f"System-commands skill check failed: {e}")
 
-            # Check for coding-related queries first (before LLM)
-            try:
-                from agent.skills.coding_assistant import handle_coding_query
+            # ── Parallel skill dispatch ────────────────────────────────────────
+            # All specialist sub-agents are launched simultaneously via
+            # asyncio.gather().  The first non-None result wins; all others are
+            # marked "skipped".  This cuts total skill-check latency to that of
+            # the single slowest skill instead of the sum of all skill checks.
 
-                _sa_id = "coding_skill"
-                if _TASK_TRACKING:
-                    try:
-                        register_sub_agent(task_id, _sa_id, role="coding_assistant")
-                    except Exception:
-                        pass
-                coding_response = await handle_coding_query(user_text)
-                if coding_response:
-                    if _TASK_TRACKING:
-                        try:
-                            update_sub_agent(
-                                task_id, _sa_id, "done", result_summary="handled"
-                            )
-                            _finish_task(task_id)
-                        except Exception:
-                            pass
-                    logger.info("Coding skill handled the query")
-                    sm = get_session_manager()
-                    sm.add_message(platform, internal_id, "user", user_text)
-                    sm.add_message(platform, internal_id, "assistant", coding_response)
-                    self.dedupe_cache.set(
-                        platform, str(external_chat_id), message_id, coding_response
+            async def _try_skill(coro):
+                """Run a skill coroutine safely; return None on any error."""
+                try:
+                    return await coro
+                except Exception as exc:
+                    logger.debug("Skill error: %s", exc)
+                    return None
+
+            # Collect (sa_id, role, description, coroutine) for every skill.
+            _skill_specs: list = []
+
+            try:
+                from agent.skills.coding_assistant import handle_coding_query  # noqa
+
+                _skill_specs.append(
+                    (
+                        "coding_skill",
+                        "coding_assistant",
+                        "Scanning for coding / programming query",
+                        handle_coding_query(user_text),
                     )
-                    processing_time = (time.time() - start_time) * 1000
-                    return {
-                        "text": coding_response,
-                        "timestamp": datetime.utcnow(),
-                        "model_used": "coding_skill",
-                        "processing_time_ms": round(processing_time, 2),
-                    }
-                if _TASK_TRACKING:
-                    try:
-                        update_sub_agent(
-                            task_id, _sa_id, "done", result_summary="skipped"
-                        )
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.debug(f"Coding skill check failed: {e}")
-
-            # Check for navigation / traffic queries
-            try:
-                from agent.skills.navigation import handle_navigation_query
-
-                _sa_id = "navigation_skill"
-                if _TASK_TRACKING:
-                    try:
-                        register_sub_agent(task_id, _sa_id, role="navigation")
-                    except Exception:
-                        pass
-                nav_response = await handle_navigation_query(user_text)
-                if nav_response:
-                    if _TASK_TRACKING:
-                        try:
-                            update_sub_agent(
-                                task_id, _sa_id, "done", result_summary="handled"
-                            )
-                            _finish_task(task_id)
-                        except Exception:
-                            pass
-                    logger.info("Navigation skill handled the query")
-                    sm = get_session_manager()
-                    sm.add_message(platform, internal_id, "user", user_text)
-                    sm.add_message(platform, internal_id, "assistant", nav_response)
-                    self.dedupe_cache.set(
-                        platform, str(external_chat_id), message_id, nav_response
-                    )
-                    processing_time = (time.time() - start_time) * 1000
-                    return {
-                        "text": nav_response,
-                        "timestamp": datetime.utcnow(),
-                        "model_used": "navigation_skill",
-                        "processing_time_ms": round(processing_time, 2),
-                    }
-                if _TASK_TRACKING:
-                    try:
-                        update_sub_agent(
-                            task_id, _sa_id, "done", result_summary="skipped"
-                        )
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.debug(f"Navigation skill check failed: {e}")
-
-            # Check for reminders / scheduling queries
-            try:
-                from agent.skills.scheduler import handle_reminder_query
-
-                _sa_id = "scheduler_skill"
-                if _TASK_TRACKING:
-                    try:
-                        register_sub_agent(task_id, _sa_id, role="scheduler")
-                    except Exception:
-                        pass
-                reminder_response = await handle_reminder_query(
-                    user_text, internal_id=internal_id, platform=platform
                 )
-                if reminder_response:
-                    if _TASK_TRACKING:
-                        try:
-                            update_sub_agent(
-                                task_id, _sa_id, "done", result_summary="handled"
-                            )
-                            _finish_task(task_id)
-                        except Exception:
-                            pass
-                    logger.info("Scheduler skill handled the query")
-                    sm = get_session_manager()
-                    sm.add_message(platform, internal_id, "user", user_text)
-                    sm.add_message(
-                        platform, internal_id, "assistant", reminder_response
-                    )
-                    self.dedupe_cache.set(
-                        platform, str(external_chat_id), message_id, reminder_response
-                    )
-                    processing_time = (time.time() - start_time) * 1000
-                    return {
-                        "text": reminder_response,
-                        "timestamp": datetime.utcnow(),
-                        "model_used": "scheduler_skill",
-                        "processing_time_ms": round(processing_time, 2),
-                    }
-                if _TASK_TRACKING:
-                    try:
-                        update_sub_agent(
-                            task_id, _sa_id, "done", result_summary="skipped"
-                        )
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.debug(f"Scheduler skill check failed: {e}")
+            except Exception:
+                pass
 
-            # Check for trip / vacation planning queries
             try:
-                from agent.skills.trip_planner import handle_trip_query
+                from agent.skills.navigation import handle_navigation_query  # noqa
 
-                _sa_id = "trip_planner_skill"
-                if _TASK_TRACKING:
-                    try:
-                        register_sub_agent(task_id, _sa_id, role="trip_planner")
-                    except Exception:
-                        pass
-                trip_response = await handle_trip_query(
-                    user_text, internal_id=internal_id
-                )
-                if trip_response:
-                    if _TASK_TRACKING:
-                        try:
-                            update_sub_agent(
-                                task_id, _sa_id, "done", result_summary="handled"
-                            )
-                            _finish_task(task_id)
-                        except Exception:
-                            pass
-                    logger.info("Trip planner skill handled the query")
-                    sm = get_session_manager()
-                    sm.add_message(platform, internal_id, "user", user_text)
-                    sm.add_message(platform, internal_id, "assistant", trip_response)
-                    self.dedupe_cache.set(
-                        platform, str(external_chat_id), message_id, trip_response
+                _skill_specs.append(
+                    (
+                        "navigation_skill",
+                        "navigation",
+                        "Scanning for navigation / traffic query",
+                        handle_navigation_query(user_text),
                     )
-                    processing_time = (time.time() - start_time) * 1000
-                    return {
-                        "text": trip_response,
-                        "timestamp": datetime.utcnow(),
-                        "model_used": "trip_planner_skill",
-                        "processing_time_ms": round(processing_time, 2),
-                    }
-                if _TASK_TRACKING:
+                )
+            except Exception:
+                pass
+
+            try:
+                from agent.skills.scheduler import handle_reminder_query  # noqa
+
+                _skill_specs.append(
+                    (
+                        "scheduler_skill",
+                        "scheduler",
+                        "Scanning for reminder / scheduling query",
+                        handle_reminder_query(
+                            user_text, internal_id=internal_id, platform=platform
+                        ),
+                    )
+                )
+            except Exception:
+                pass
+
+            try:
+                from agent.skills.trip_planner import handle_trip_query  # noqa
+
+                _skill_specs.append(
+                    (
+                        "trip_planner_skill",
+                        "trip_planner",
+                        "Scanning for trip / vacation planning query",
+                        handle_trip_query(user_text, internal_id=internal_id),
+                    )
+                )
+            except Exception:
+                pass
+
+            # Register all skill sub-agents up-front so the visualization
+            # shows every agent as "running" during the parallel check.
+            if _TASK_TRACKING and _skill_specs:
+                for _sid, _srole, _sdesc, _ in _skill_specs:
                     try:
-                        update_sub_agent(
-                            task_id, _sa_id, "done", result_summary="skipped"
+                        register_sub_agent(
+                            task_id, _sid, role=_srole, description=_sdesc
                         )
                     except Exception:
                         pass
-            except Exception as e:
-                logger.debug(f"Trip planner skill check failed: {e}")
+
+            # Run all skill checks concurrently; stop as soon as one returns a
+            # non-None response and cancel the remaining tasks.
+            _skill_response: Optional[str] = None
+            _skill_model: str = "skill"
+            _skill_results: dict = {}  # sid -> result
+            if _skill_specs:
+                _fut_to_spec: dict = {
+                    asyncio.ensure_future(_try_skill(spec[3])): spec
+                    for spec in _skill_specs
+                }
+                _pending = set(_fut_to_spec.keys())
+                while _pending and _skill_response is None:
+                    _done, _pending = await asyncio.wait(
+                        _pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for _fut in _done:
+                        _sid, _srole, _sdesc, _ = _fut_to_spec[_fut]
+                        try:
+                            _result = _fut.result()
+                        except Exception:
+                            _result = None
+                        _skill_results[_sid] = _result
+                        if _result and _skill_response is None:
+                            _skill_response = _result
+                            _skill_model = _sid
+                            logger.info("%s handled the query", _srole)
+                # Cancel any tasks that are still pending (no longer needed).
+                for _fut in _pending:
+                    _fut.cancel()
+                if _pending:
+                    await asyncio.gather(*_pending, return_exceptions=True)
+
+            # Update task-tracking for every skill regardless of outcome.
+            for _sid, _srole, _sdesc, _ in _skill_specs:
+                if _TASK_TRACKING:
+                    try:
+                        _summary = (
+                            "handled"
+                            if _sid == _skill_model and _skill_response
+                            else "skipped"
+                        )
+                        update_sub_agent(task_id, _sid, "done", result_summary=_summary)
+                    except Exception:
+                        pass
+
+            if _skill_response:
+                if _TASK_TRACKING:
+                    try:
+                        _finish_task(task_id)
+                    except Exception:
+                        pass
+                sm = get_session_manager()
+                sm.add_message(platform, internal_id, "user", user_text)
+                sm.add_message(platform, internal_id, "assistant", _skill_response)
+                self.dedupe_cache.set(
+                    platform, str(external_chat_id), message_id, _skill_response
+                )
+                processing_time = (time.time() - start_time) * 1000
+                return {
+                    "text": _skill_response,
+                    "timestamp": datetime.utcnow(),
+                    "model_used": _skill_model,
+                    "processing_time_ms": round(processing_time, 2),
+                }
+            # ──────────────────────────────────────────────────────────────────
 
             # Load user profile and conversation history in parallel
             user_profile, history = await self._batch_load_context(
@@ -705,7 +675,12 @@ class ChatWorkflow:
             _llm_agent_id = "llm_provider"
             if _TASK_TRACKING:
                 try:
-                    register_sub_agent(task_id, _llm_agent_id, role="llm_inference")
+                    register_sub_agent(
+                        task_id,
+                        _llm_agent_id,
+                        role="llm_inference",
+                        description="Running LLM inference (best available provider)",
+                    )
                 except Exception:
                     pass
             try:
