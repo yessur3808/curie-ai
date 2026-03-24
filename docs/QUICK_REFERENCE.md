@@ -246,8 +246,12 @@ MONGODB_DB=assistant_db
 ASSISTANT_NAME=jarvis
 PERSONA_FILE=jarvis.json         # or: friday.json, gideon.json, bagley.json
 
-# Admin
-MASTER_USER_ID=123456789
+# Admin (master account)
+# MASTER_USER_ID is the internal user UUID for the master account (not a Telegram/Discord numeric ID).
+MASTER_USER_ID=00000000-0000-0000-0000-000000000000
+# If bootstrapping via scripts/insert_master.py, also set:
+# MASTER_TELEGRAM_ID=your_telegram_numeric_id
+# MASTER_SECRET_USERNAME=your_secret_link_code
 ```
 
 ---
