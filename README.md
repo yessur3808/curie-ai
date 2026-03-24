@@ -165,8 +165,6 @@ C.U.R.I.E. ships with several pre-built personas in `assets/personality/`:
 | `friday.json` | Friendly, adaptive, proactive |
 | `gideon.json` | Analytical, strategic, context-heavy |
 | `bagley.json` | Witty, efficient, slightly sarcastic |
-| `curie.json` | Curious, warm, science-inspired |
-| `andreja.json` | Calm, thoughtful, diplomatic |
 
 Set the active persona in `.env`:
 
