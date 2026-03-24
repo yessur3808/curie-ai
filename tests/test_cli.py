@@ -511,6 +511,11 @@ class TestWebViewFlags:
         import cli.tasks as tm
 
         tmp = tempfile.mkdtemp()
+        # Save originals so we can restore them after the test
+        orig_wv_tasks_file = wv._TASKS_FILE
+        orig_tm_curie_dir = tm.CURIE_DIR
+        orig_tm_tasks_file = tm.TASKS_FILE
+
         wv._TASKS_FILE = Path(tmp) / "tasks.json"
         tm.CURIE_DIR = Path(tmp)
         tm.TASKS_FILE = wv._TASKS_FILE
@@ -521,9 +526,9 @@ class TestWebViewFlags:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
 
-        from http.server import HTTPServer
+        from http.server import ThreadingHTTPServer
         wv._SHUTDOWN_EVENT.clear()
-        server = HTTPServer(("127.0.0.1", port), wv._Handler)
+        server = ThreadingHTTPServer(("127.0.0.1", port), wv._Handler)
         t = threading.Thread(target=server.serve_forever, daemon=True)
         t.start()
         time.sleep(0.3)
@@ -536,3 +541,8 @@ class TestWebViewFlags:
         finally:
             wv._SHUTDOWN_EVENT.set()
             server.shutdown()
+            server.server_close()
+            # Restore module-level globals
+            wv._TASKS_FILE = orig_wv_tasks_file
+            tm.CURIE_DIR = orig_tm_curie_dir
+            tm.TASKS_FILE = orig_tm_tasks_file

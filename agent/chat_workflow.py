@@ -573,29 +573,40 @@ class ChatWorkflow:
                     except Exception:
                         pass
 
-            # Run all skill checks concurrently.
-            _skill_results: list = []
-            if _skill_specs:
-                _skill_results = list(
-                    await asyncio.gather(
-                        *[_try_skill(spec[3]) for spec in _skill_specs],
-                        return_exceptions=True,
-                    )
-                )
-
-            # Determine the first skill that produced a valid response.
+            # Run all skill checks concurrently; stop as soon as one returns a
+            # non-None response and cancel the remaining tasks.
             _skill_response: Optional[str] = None
             _skill_model: str = "skill"
-            for (_sid, _srole, _sdesc, _), _result in zip(
-                _skill_specs, _skill_results
-            ):
-                if isinstance(_result, Exception):
-                    _result = None
-                if _result and _skill_response is None:
-                    _skill_response = _result
-                    _skill_model = _sid
-                    logger.info("%s handled the query", _srole)
-                # Update task-tracking for every skill regardless of outcome.
+            _skill_results: dict = {}  # sid -> result
+            if _skill_specs:
+                _fut_to_spec: dict = {
+                    asyncio.ensure_future(_try_skill(spec[3])): spec
+                    for spec in _skill_specs
+                }
+                _pending = set(_fut_to_spec.keys())
+                while _pending and _skill_response is None:
+                    _done, _pending = await asyncio.wait(
+                        _pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for _fut in _done:
+                        _sid, _srole, _sdesc, _ = _fut_to_spec[_fut]
+                        try:
+                            _result = _fut.result()
+                        except Exception:
+                            _result = None
+                        _skill_results[_sid] = _result
+                        if _result and _skill_response is None:
+                            _skill_response = _result
+                            _skill_model = _sid
+                            logger.info("%s handled the query", _srole)
+                # Cancel any tasks that are still pending (no longer needed).
+                for _fut in _pending:
+                    _fut.cancel()
+                if _pending:
+                    await asyncio.gather(*_pending, return_exceptions=True)
+
+            # Update task-tracking for every skill regardless of outcome.
+            for _sid, _srole, _sdesc, _ in _skill_specs:
                 if _TASK_TRACKING:
                     try:
                         _summary = (

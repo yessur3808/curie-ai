@@ -180,6 +180,10 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
 
 
 def _cmd_tasks(args: argparse.Namespace) -> int:
+    if getattr(args, "web", False):
+        from cli.agent_webview import show_web
+        show_web(show_finished=args.all)
+        return 0
     from cli.tasks_display import show_tasks
     show_tasks(
         show_finished=args.all,

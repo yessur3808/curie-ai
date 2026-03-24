@@ -32,7 +32,7 @@ import sys
 import threading
 import time
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -792,7 +792,7 @@ def show_web(show_finished: bool = False) -> None:
     port = _find_free_port()
     url = f"http://127.0.0.1:{port}" + ("?all=1" if show_finished else "")
 
-    server = HTTPServer(("127.0.0.1", port), _Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
     _Handler.show_all = show_finished
 
     t = threading.Thread(target=server.serve_forever, daemon=True)
