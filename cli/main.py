@@ -70,13 +70,15 @@ def _cmd_start(args: argparse.Namespace) -> int:
         connector_args.append("--discord")
     if args.api:
         connector_args.append("--api")
+    if getattr(args, "slack", False):
+        connector_args.append("--slack")
     if args.all_connectors:
         connector_args = ["--all"]
 
     # Interactive connector picker if no flags were given AND we have a real TTY
     if not connector_args and sys.stdin.isatty():
-        _connector_opts = ["API (HTTP REST)", "Telegram bot", "Discord bot", "All connectors"]
-        _connector_flags = ["--api", "--telegram", "--discord", "--all"]
+        _connector_opts = ["API (HTTP REST)", "Telegram bot", "Discord bot", "Slack bot", "All connectors"]
+        _connector_flags = ["--api", "--telegram", "--discord", "--slack", "--all"]
         try:
             chosen = ui.multi_select(
                 _connector_opts,
@@ -126,6 +128,8 @@ def _cmd_restart(args: argparse.Namespace) -> int:
         connector_args.append("--discord")
     if args.api:
         connector_args.append("--api")
+    if getattr(args, "slack", False):
+        connector_args.append("--slack")
     if args.all_connectors:
         connector_args = ["--all"]
     with ui.spinner("Restarting Curie daemon…"):
@@ -375,6 +379,11 @@ def _cmd_help(args: argparse.Namespace) -> int:
     return print_full_help()
 
 
+def _cmd_canvas(args: argparse.Namespace) -> int:
+    from cli.canvas import cmd_canvas
+    return cmd_canvas(args)
+
+
 # ─── parser setup ─────────────────────────────────────────────────────────────
 
 
@@ -436,6 +445,7 @@ Examples:
     p_start.add_argument("--api", action="store_true", help="Enable API connector (default if none specified)")
     p_start.add_argument("--telegram", action="store_true", help="Enable Telegram connector")
     p_start.add_argument("--discord", action="store_true", help="Enable Discord connector")
+    p_start.add_argument("--slack", action="store_true", help="Enable Slack connector")
     p_start.add_argument("--all", dest="all_connectors", action="store_true", help="Enable all connectors")
     p_start.set_defaults(func=_cmd_start)
 
@@ -448,6 +458,7 @@ Examples:
     p_restart.add_argument("--api", action="store_true")
     p_restart.add_argument("--telegram", action="store_true")
     p_restart.add_argument("--discord", action="store_true")
+    p_restart.add_argument("--slack", action="store_true")
     p_restart.add_argument("--all", dest="all_connectors", action="store_true")
     p_restart.set_defaults(func=_cmd_restart)
 
@@ -648,6 +659,32 @@ Examples:
         help="Re-scan devices instead of using the cache",
     )
     p_periph.set_defaults(func=_cmd_peripheral)
+
+    # ── canvas ─────────────────────────────────────────────────────────────
+    p_canvas = subs.add_parser("canvas", help="Manage the live agent-driven visual canvas")
+    canvas_subs = p_canvas.add_subparsers(dest="canvas_action", metavar="ACTION")
+
+    canvas_subs.add_parser("list", help="List all canvas nodes")
+
+    p_canvas_add = canvas_subs.add_parser("add", help="Add a node to the canvas")
+    p_canvas_add.add_argument("title", metavar="TITLE", help="Node title")
+    p_canvas_add.add_argument("--content", required=True, metavar="TEXT", help="Node content")
+    p_canvas_add.add_argument(
+        "--type",
+        default="text",
+        choices=["text", "code", "result", "url", "image"],
+        metavar="TYPE",
+        help="Node type (text, code, result, url, image); default: text",
+    )
+
+    p_canvas_rm = canvas_subs.add_parser("remove", help="Remove a canvas node by ID")
+    p_canvas_rm.add_argument("node_id", metavar="ID")
+
+    canvas_subs.add_parser("clear", help="Remove all canvas nodes")
+
+    canvas_subs.add_parser("open", help="Open live canvas in browser")
+
+    p_canvas.set_defaults(func=_cmd_canvas)
 
     # ── help ───────────────────────────────────────────────────────────────
     p_help = subs.add_parser(

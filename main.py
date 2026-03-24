@@ -56,6 +56,19 @@ except ImportError:
     DISCORD_AVAILABLE = False
     logger.warning("Discord connector not available (discord.py not installed)")
 
+# Import Slack connector (optional - may not be installed)
+try:
+    from connectors.slack_bot import (
+        start_slack_bot,
+        set_workflow as set_slack_workflow,
+    )
+
+    SLACK_AVAILABLE = True
+except ImportError:
+    SLACK_AVAILABLE = False
+    logger.warning("Slack connector not available (slack-bolt not installed)")
+
+
 # Import WhatsApp connector (optional - may not be installed)
 try:
     from connectors.whatsapp import (
@@ -67,9 +80,6 @@ try:
 except ImportError:
     WHATSAPP_AVAILABLE = False
     logger.warning("WhatsApp connector not available (whatsapp-web.py not installed)")
-
-
-def configure_logging():
     """
     Configure logging for the application at startup.
 
@@ -165,6 +175,23 @@ def run_discord(workflow: ChatWorkflow):
         asyncio.set_event_loop(loop)
 
     start_discord_bot(workflow)
+
+
+def run_slack(workflow: ChatWorkflow):
+    """Run Slack connector."""
+    if not SLACK_AVAILABLE:
+        logger.error("Slack connector is not available. Install slack-bolt first.")
+        return
+
+    print("Starting Slack connector...")
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    start_slack_bot(workflow)
 
 
 def run_whatsapp(workflow: ChatWorkflow):
@@ -278,6 +305,9 @@ def parse_args():
     )
     parser.add_argument("--discord", action="store_true", help="Run Discord connector")
     parser.add_argument(
+        "--slack", action="store_true", help="Run Slack connector"
+    )
+    parser.add_argument(
         "--whatsapp", action="store_true", help="Run WhatsApp connector"
     )
     parser.add_argument(
@@ -319,6 +349,7 @@ def parse_args():
 def determine_what_to_run(args):
     run_telegram_env = os.getenv("RUN_TELEGRAM", "false").lower() == "true"
     run_discord_env = os.getenv("RUN_DISCORD", "false").lower() == "true"
+    run_slack_env = os.getenv("RUN_SLACK", "false").lower() == "true"
     run_whatsapp_env = os.getenv("RUN_WHATSAPP", "false").lower() == "true"
     run_api_env = os.getenv("RUN_API", "false").lower() == "true"
     run_coder_env = os.getenv("RUN_CODER", "false").lower() == "true"
@@ -326,6 +357,7 @@ def determine_what_to_run(args):
 
     run_telegram_flag = args.all or args.telegram or run_telegram_env
     run_discord_flag = args.all or args.discord or run_discord_env
+    run_slack_flag = args.all or getattr(args, "slack", False) or run_slack_env
     run_whatsapp_flag = args.all or args.whatsapp or run_whatsapp_env
     run_api_flag = args.all or args.api or run_api_env
     run_coder_flag = args.all or args.coder or run_coder_env
@@ -335,6 +367,7 @@ def determine_what_to_run(args):
     if not (
         run_telegram_flag
         or run_discord_flag
+        or run_slack_flag
         or run_whatsapp_flag
         or run_api_flag
         or run_coder_flag
@@ -342,12 +375,13 @@ def determine_what_to_run(args):
         or run_coding_service_flag
     ):
         print(
-            "Nothing to run! Use --telegram, --discord, --whatsapp, --api, --coder, --coder-batch, --coding-service, --all or set RUN_* in .env."
+            "Nothing to run! Use --telegram, --discord, --slack, --whatsapp, --api, --coder, --coder-batch, --coding-service, --all or set RUN_* in .env."
         )
         sys.exit(1)
     return (
         run_telegram_flag,
         run_discord_flag,
+        run_slack_flag,
         run_whatsapp_flag,
         run_api_flag,
         run_coder_flag,
