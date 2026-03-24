@@ -85,8 +85,8 @@ POSTGRES_PASSWORD=your_pg_password
 MONGODB_URI=mongodb://localhost:27017/
 MONGODB_DB=assistant_db
 
-# Your Telegram user ID (grants admin privileges)
-MASTER_USER_ID=123456789
+# Master user UUID used for admin privileges (generate with: python scripts/gen_master_id.py)
+MASTER_USER_ID=550e8400-e29b-41d4-a716-446655440000
 ```
 
 > See [Environment Variables](#-environment-variables) for the full reference.
