@@ -64,8 +64,14 @@ POSTGRES_PASSWORD=your_pg_password
 MONGODB_URI=mongodb://localhost:27017/
 MONGODB_DB=assistant_db
 
-# Your Telegram user ID — grants admin privileges
-MASTER_USER_ID=123456789
+# Internal master user ID (UUID used for authorization checks). Leave blank to let setup scripts handle it.
+MASTER_USER_ID=
+
+# Your personal Telegram user ID (numeric, from a Telegram helper bot such as @userinfobot).
+MASTER_TELEGRAM_ID=123456789
+
+# Secret username for the master user (used by make setup-db / scripts/insert_master.py).
+MASTER_SECRET_USERNAME=your_secret_master_username
 ```
 
 > **Tip:** Run `make verify` after editing `.env` to catch configuration issues early.
