@@ -30,6 +30,8 @@ pip install -r requirements.txt   # or: make install
 # pip install -r requirements-optional.txt   # or: make install-optional
 
 # Verify that everything installed correctly
+# Note: verify_setup.py currently checks MONGO_URI; if you use MONGODB_URI, you can alias it:
+# export MONGO_URI="$MONGODB_URI"
 python scripts/verify_setup.py    # or: make verify
 ```
 
