@@ -1,6 +1,6 @@
 # C.U.R.I.E. — Clever Understanding and Reasoning Intelligent Entity
 
-C.U.R.I.E. is a **local, multi-platform AI assistant** inspired by Jarvis from Iron Man. It runs entirely on your hardware using open GGUF language models — no cloud account required — and integrates with Telegram, Discord, WhatsApp, and a REST/WebSocket API out of the box.
+C.U.R.I.E. is a **local, multi-platform AI assistant** inspired by iconic fictional AIs — **Jarvis & Friday** from Iron Man, **Bagley** from Watch Dogs Legion, and **Gideon** from the DC Universe. It runs entirely on your hardware using open GGUF language models — no cloud account required — and integrates with Telegram, Discord, WhatsApp, and a REST/WebSocket API out of the box.
 
 > **Cloud providers are optional.** Anthropic Claude, OpenAI GPT, and Google Gemini can be layered on top for richer responses while keeping your default conversations local and private.
 
