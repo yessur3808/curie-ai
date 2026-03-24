@@ -837,3 +837,4 @@ def show_web(show_finished: bool = False) -> None:
     finally:
         _SHUTDOWN_EVENT.set()
         server.shutdown()
+        server.server_close()
