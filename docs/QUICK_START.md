@@ -96,8 +96,8 @@ make setup-db
 # Run migrations
 python scripts/apply_migrations.py
 
-# Generate and insert the master user
-python scripts/gen_master_id.py
+# Generate and insert the master user (updates MASTER_USER_ID in .env)
+python scripts/gen_master_id.py --env
 python scripts/insert_master.py
 ```
 
