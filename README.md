@@ -146,7 +146,7 @@ python main.py --all
 
 You should see:
 ```
-✅ ChatWorkflow initialized with persona: Jarvis
+✅ ChatWorkflow initialized with persona: Sentinel
 Starting Telegram connector...
 ```
 
