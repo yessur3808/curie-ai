@@ -1,50 +1,10 @@
-# C.U.R.I.E. - Clever Understanding and Reasoning Intelligent Entity
+# C.U.R.I.E. — Clever Understanding and Reasoning Intelligent Entity
 
-Curie is an AI assistant that runs **locally** and interacts with users via **multiple platforms**.  
-It is inspired by conversational assistants like Jarvis from Iron Man, but runs fully on your hardware using state-of-the-art open local language models (no OpenAI account required).
+C.U.R.I.E. is a **local, multi-platform AI assistant** inspired by iconic fictional AIs — **Jarvis & Friday** from Iron Man, **Bagley** from Watch Dogs Legion, **Gideon** from the DC Universe, **HAL 9000** from 2001: A Space Odyssey, **SAM** from Transcendence, **Cortana** from Halo, **EDI** from Mass Effect, **GLaDOS** from Portal, **SHODAN** from System Shock, **Samantha** from Her, **C-3PO & R2-D2** from Star Wars, and **Data** from Star Trek. It runs entirely on your hardware using open GGUF language models — no cloud account required — and integrates with Telegram, Discord, WhatsApp, and a REST/WebSocket API out of the box.
 
-> **🚀 New to C.U.R.I.E.?** Start with the [Quick Start Guide](docs/QUICK_START.md) to get running in 5 minutes!
+> **Cloud providers are optional.** Anthropic Claude, OpenAI GPT, and Google Gemini can be layered on top for richer responses while keeping your default conversations local and private.
 
-## 🌟 Features
-
-- **Multi-Platform Support**: Telegram, Discord, WhatsApp, and RESTful/WebSocket API — all features work seamlessly across every connector
-- **Voice Interface**: Accent-aware speech recognition and persona-based text-to-speech
-- **Conversational AI** with context, memory, and long-conversation summarisation
-- **Local LLMs**: Runs Meta Llama 3/3.1 or other GGUF models (no cloud needed)
-- **🆕 Multi-Provider LLM**: Optionally use Anthropic Claude, OpenAI GPT, or Google Gemini alongside local models — best provider is chosen automatically
-- **Configurable Persona**: Customizable assistant personality via JSON with voice settings
-- **Memory Management**: Stores conversation history and context; auto-summarises long histories
-- **🆕 Proactive Learning**: Automatically extracts and stores user preferences from conversations to personalise future responses
-- **Database Integration**: PostgreSQL & MongoDB for data persistence
-- **Migration System**: Organised database versioning
-- **Utility Scripts**: Helper scripts for common operations
-- **Docker Support**: Containerised deployment ready
-- **🆕 Reminders & Scheduling**:
-  - Set natural-language reminders: "remind me in 30 minutes to call mom"
-  - List reminders via `/reminders` command or "list my reminders"
-  - Delete individual or all reminders
-  - Proactive delivery via the background messaging service
-- **🆕 Trip & Vacation Planning**:
-  - AI-generated day-by-day itineraries: "plan a 5-day trip to Paris"
-  - Packing lists: "what should I pack for a beach trip?"
-  - Budget estimates (budget / moderate / luxury tier)
-  - Works with local LLMs or cloud providers for richer results
-- **🆕 Enhanced Coding Modules**: 
-  - **Code Review**: Automated code review with AI-powered analysis
-  - **Multi-Platform PR/MR**: Support for GitHub, GitLab, and Bitbucket
-  - **Self-Update**: Safe self-update mechanism with rollback capability
-  - **Standalone Coding Service**: Run code operations independently in parallel
-- **🆕 Advanced Coding Features**:
-  - **Pair Programming**: Real-time collaborative coding sessions with context tracking
-  - **Code Generation**: AI-powered code generation for multiple languages
-  - **Bug Detection**: Static analysis with pattern matching for common bugs and vulnerabilities
-  - **Proactive Bug Finding**: Automated directory scanning and continuous quality monitoring
-  - **Performance Analysis**: Complexity analysis, Big O estimation, and bottleneck detection
-  - **Code Optimization**: Intelligent suggestions for algorithms, data structures, and refactoring
-- **🆕 Currency & Unit Conversions**:
-  - **Currency Conversion**: Real-time exchange rates for 150+ currencies
-  - **Unit Conversion**: Length, mass, volume, temperature, speed, area conversions
-  - **Natural Language**: Understands queries like "convert 100 USD to EUR" or "how many miles in 5 km"
+---
 
 ## 📱 Supported Platforms
 
@@ -56,499 +16,747 @@ It is inspired by conversational assistants like Jarvis from Iron Man, but runs 
 | **REST API** | ✅ | ✅ | Stable |
 | **WebSocket** | ✅ | 🔜 | Stable |
 
-## 🎙️ Voice Features
-
-- **Speech-to-Text**: Powered by OpenAI Whisper with automatic language detection
-- **Text-to-Speech**: Google TTS with multi-accent support
-- **Accent Recognition**: Adapts to American, British, Indian, Australian, and more
-- **Persona-Based Voice**: Configure accent, language, and speaking style per persona
-
-See [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) for detailed voice configuration.
-
-## 💱 Conversion Features
-
-Curie can perform currency and unit conversions using natural language:
-
-**Currency Conversions:**
-```
-User: convert 100 USD to EUR
-Curie: 💱 Currency Conversion:
-       100.00 USD = 85.50 EUR
-       Exchange rate: 1 USD = 0.855000 EUR
-```
-
-**Unit Conversions:**
-```
-User: how many miles in 5 km
-Curie: 📏 Unit Conversion (Length):
-       5.0000 km = 3.1069 miles
-
-User: what is 25 celsius in fahrenheit
-Curie: 🌡️ Unit Conversion (Temperature):
-       25.0000 celsius = 77.0000 fahrenheit
-```
-
-Supported categories:
-- **Currency**: 150+ currency codes (USD, EUR, GBP, JPY, etc.)
-- **Length**: meters, kilometers, feet, miles, inches, yards
-- **Mass**: grams, kilograms, pounds, ounces
-- **Volume**: liters, gallons, cups, pints, quarts
-- **Temperature**: celsius, fahrenheit, kelvin
-- **Speed**: km/h, mph, m/s, knots
-- **Area**: square meters, acres, hectares, square miles
-
-## ⏰ Reminders & Scheduling
-
-Set reminders using plain natural language — works on **all platforms**:
-
-```
-User: remind me in 30 minutes to take my medication
-Curie: ⏰ Got it! I'll remind you to take my medication on Thursday, Mar 19 at 10:05 AM UTC.
-
-User: list my reminders
-Curie: 📋 Your upcoming reminders:
-       1. take my medication — Thu, Mar 19 at 10:05 AM UTC
-
-User: delete reminder 1
-Curie: 🗑️ Deleted reminder: take my medication
-```
-
-**Telegram commands**: `/reminders` — list upcoming reminders  
-**REST API endpoints**: `GET /reminders?user_id=…` · `DELETE /reminders?user_id=…`
-
-Time formats supported:
-- `in N minutes / hours / days / weeks`
-- `at 3pm`, `at 14:30`, `at 9am`
-- `tomorrow`, `tomorrow at 10am`
-- ISO dates: `2026-04-01`
-
-## ✈️ Trip & Vacation Planning
-
-Ask Curie to plan trips with natural language:
-
-```
-User: plan a 5-day budget trip to Barcelona
-Curie: ✈️ Trip Plan: Barcelona
-       Day 1: Arrive, explore Las Ramblas and the Gothic Quarter...
-       ...
-       Daily budget estimate (budget tier): ~$60–80 USD
-
-User: what should I pack for a beach vacation?
-Curie: 🧳 Packing List for your trip
-       Clothing & footwear: ...
-```
-
-Supports budget tiers: **budget**, **moderate**, **luxury**
-
-## 🧠 Multi-Provider LLM
-
-Curie can combine **local GGUF models** with cloud AI providers for the best responses:
-
-| Provider | Env Variable | Default Model |
-|----------|-------------|---------------|
-| llama.cpp (local) | `LLM_MODELS` | Meta-Llama-3.1-8B |
-| Anthropic | `ANTHROPIC_API_KEY` | claude-3-haiku |
-| OpenAI | `OPENAI_API_KEY` | gpt-3.5-turbo |
-| Google Gemini | `GOOGLE_API_KEY` | gemini-1.5-flash |
-
-Configure priority order with `LLM_PROVIDER_PRIORITY=anthropic,openai,gemini,llama.cpp`.  
-Simple/short queries are automatically routed to the local model (unless `LLM_CLOUD_SIMPLE_TASKS=true`) to reduce API costs.
-
-## 📚 Documentation
-
-- **[Quick Start Guide](docs/QUICK_START.md)** - Get up and running in 5 minutes ⚡
-- **[Advanced Coding Features](docs/ADVANCED_CODING_FEATURES.md)** - Pair programming, bug detection, performance analysis ✨
-- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Fix common setup and runtime issues
-- [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) - Platform-specific setup
-- [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) - Advanced coding features
-- [Quick Reference](docs/QUICK_REFERENCE.md) - Common commands and operations
-- [Feature Roadmap](docs/FEATURE_ROADMAP.md) - Official planned features and implementation plans
-- [Feature Enhancement Suggestions](docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md) - Additional feature ideas and enhancements
-- [Feature Suggestions Summary](docs/FEATURE_SUGGESTIONS_SUMMARY.md) - Quick reference for suggested features
-- [Feature Comparison Matrix](docs/FEATURE_COMPARISON_MATRIX.md) - Visual comparison of current, planned, and suggested features
-
-## 🏗️ High-Level Architecture
-
-```
-┌────────────────┐      ┌────────────┐      ┌─────────────┐
-│ Messaging      │─────▶│ Assistant  │─────▶│ Local LLM   │
-│ Platforms      │◀──── │ Back-End   │◀──── │ (.gguf, etc)│
-│ • Telegram     │      │ (Python)   │      └─────┬───────┘
-│ • Discord      │      │             │            │
-│ • WhatsApp     │      └────┬────────┘            │
-│ • API/WS       │           │                     │
-└───────┬────────┘           │                     │
-        │                    ▼                     ▼
-        │              ┌──────────┐          ┌──────────┐
-        │              │ Memory   │          │  Voice   │
-        │              │ (Conv +  │          │Processing│
-        └──────────────│  User    │          │(STT/TTS) │
-                       │ Profile) │          └──────────┘
-                       └──────────┘
-```
-
-
-
 ---
 
-## 📁 Project Structure
+## ⚡ Quick Start
 
-[Current Directory Structure](./directory_structure.md)
-
-
-## 🚀 Getting Started
+Get C.U.R.I.E. running in under 10 minutes.
 
 ### Prerequisites
 
-- Python 3.10 or higher
-- PostgreSQL
-- MongoDB
-- Docker (optional but preferred)
-- `python-telegram-bot` (v20+)
-- `llama-cpp-python`
-- `python-dotenv`
-- At least one GGUF language model (see below)
+| Requirement | Version / Notes |
+|---|---|
+| Python | 3.10 or higher |
+| PostgreSQL | Any recent version (or use Docker) |
+| MongoDB | Any recent version (or use Docker) |
+| GGUF model file | e.g. `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` |
+| (Optional) Telegram token | From [@BotFather](https://t.me/botfather) |
 
 ---
 
-## Setup
+### Step 1 — Clone & install
 
-### 1. **Clone the repository**
-```sh
+```bash
 git clone https://github.com/yessur3808/curie-ai.git
 cd curie-ai
-```
 
-
-### 2. **Install dependencies**
-
-**Option A: Using Make (Recommended)**
-```sh
-# Create and activate virtual environment
+# Create and activate a virtual environment (recommended)
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate          # Windows: venv\Scripts\activate
 
-# Install dependencies
-make install
+# Install core dependencies
+pip install -r requirements.txt   # or: make install
 
-# Optional: Install voice features and extra connectors
-# Note: Skip on Python 3.13+ if openai-whisper fails to build
-# make install-optional
+# Optional: voice (Whisper), Discord, and WhatsApp support
+# pip install -r requirements-optional.txt   # or: make install-optional
 
-# Verify installation
-make verify
+# Verify everything installed correctly
+python scripts/verify_setup.py    # or: make verify
 ```
 
-**Option B: Using pip directly**
-```sh
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+> **Python 3.13+ note:** `openai-whisper` may fail to build on Python 3.13+. Skip `requirements-optional.txt` if you don't need voice features.
 
-# Install dependencies
-pip install -r requirements.txt
+---
 
-# Optional: Install voice features and extra connectors
-# Note: Skip on Python 3.13+ if openai-whisper fails to build
-# pip install -r requirements-optional.txt
+### Step 2 — Configure your environment
 
-# Verify installation
-python scripts/verify_setup.py
+```bash
+cp .env.example .env
+# Edit .env with your preferred editor (nano, vim, VS Code, etc.)
 ```
 
-> **Troubleshooting:** If you encounter any errors like `ModuleNotFoundError`, see [Troubleshooting Guide](docs/TROUBLESHOOTING.md)
-
-
-### 3. **Download a GGUF LLM model**
-
-- Recommended: Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
-- Place the .gguf file in the models/ directory.
-
-
-### 4. **Create a `.env` file in the project root**
-
-See the [Environment Variables](#-environment-variables) section below for a complete list of available configuration options.
-
-Minimal example:
+**Minimum viable `.env` for a Telegram + local-LLM setup:**
 
 ```env
-TELEGRAM_BOT_TOKEN=your_telegram_token
+# Telegram
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+
+# LLM — place the .gguf file inside a models/ directory
 LLM_MODELS=Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
-MASTER_USER_ID=123456789
+
+# PostgreSQL
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DB=assistant_db
 POSTGRES_USER=your_pg_user
 POSTGRES_PASSWORD=your_pg_password
+
+# MongoDB
 MONGODB_URI=mongodb://localhost:27017/
 MONGODB_DB=assistant_db
-```
-You can list multiple GGUF model files (comma-separated) if you want to support switching later.
 
-### 5. Set up databases
-
-**Using Make (Recommended):**
-```sh
-# Start databases and run all setup
-make db-start && make setup-db
+# Master user UUID used for admin privileges (generate with: python scripts/gen_master_id.py)
+MASTER_USER_ID=550e8400-e29b-41d4-a716-446655440000
 ```
 
-**Or manually:**
-```sh
-# Apply database migrations
+> See [Environment Variables](#-environment-variables) for the full reference.
+
+---
+
+### Step 3 — Start databases
+
+**Using Docker (recommended):**
+
+```bash
+docker-compose up -d postgres mongo   # start containers
+make setup-db                         # run migrations + create master user
+```
+
+**Manual (if you have PostgreSQL/MongoDB installed locally):**
+
+```bash
 python scripts/apply_migrations.py
 
-# Generate master ID
-python scripts/gen_master_id.py
+# Required for scripts/insert_master.py:
+export MASTER_TELEGRAM_ID="<your_telegram_user_id>"        # numeric Telegram user ID
+export MASTER_SECRET_USERNAME="<your_secret_username>"     # internal handle for the master user
 
-# Insert master user
+# Generate a master ID and write it into .env
+python scripts/gen_master_id.py --env
+
+# Insert the master user into the database
 python scripts/insert_master.py
 ```
 
-### 6. **Set up your persona (optional)**
+---
 
-Edit assets/persona.json to customize the assistant’s name, greeting, and style.
+### Step 4 — Download a GGUF model
 
+Place any compatible `.gguf` file in a `models/` directory (create it if needed):
 
-## Running the Bot
-
-**Using Make commands (Recommended):**
-```sh
-make run-telegram  # Run Telegram bot
-make run-discord   # Run Discord bot
-make run-api       # Run REST API
-make run-all       # Run all connectors
+```bash
+mkdir -p models
+# Download from HuggingFace, e.g.:
+# https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF
 ```
 
-**Or run directly:**
-```sh
-python main.py --telegram  # Run Telegram bot
-python main.py --discord   # Run Discord bot
-python main.py --api       # Run REST API
-python main.py --all       # Run all connectors
+Set the filename in `.env`:
+
+```env
+LLM_MODELS=Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
 ```
 
-**Run with PM2 (for production):**
-```sh
-pm2 start ecosystem.config.js
-pm2 logs curie-main
+---
+
+### Step 5 — Run C.U.R.I.E.
+
+```bash
+# Using Make shortcuts:
+make run-telegram   # Telegram only
+make run-api        # REST API only (port 8000)
+make run-all        # All connectors
+
+# Or run directly:
+python main.py --telegram
+python main.py --api
+python main.py --all
 ```
 
-**Using Docker:**
-```sh
-docker-compose up
+You should see:
+```
+✅ ChatWorkflow initialized with persona: Sentinel
+Starting Telegram connector...
 ```
 
-**See all available commands:**
-```sh
-make help  # Shows all Make commands with descriptions
+Open Telegram, find your bot, and say hello!
+
+---
+
+### Step 6 — (Optional) Customize your persona
+
+C.U.R.I.E. ships with several pre-built personas in `assets/personality/`:
+
+| File | Personality |
+|---|---|
+| `personality.json` | Default polished assistant |
+| `jarvis.json` | Formal, tactical, high-precision |
+| `friday.json` | Friendly, adaptive, proactive |
+| `gideon.json` | Analytical, strategic, context-heavy |
+| `bagley.json` | Witty, efficient, slightly sarcastic |
+
+Set the active persona in `.env`:
+
+```env
+ASSISTANT_NAME=jarvis
+PERSONA_FILE=jarvis.json
 ```
 
-> **Note:** If you get errors when starting, run `make verify` or `python scripts/verify_setup.py` to diagnose issues.
-> See [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for help with common errors.
+---
+
+## 📋 Usage Guide
+
+### Talking to C.U.R.I.E.
+
+C.U.R.I.E. understands **natural language** — just type normally. No need to memorize commands for most tasks:
+
+```
+You:   Plan a 5-day trip to Tokyo on a moderate budget
+You:   Remind me to take my medication in 30 minutes
+You:   Convert 250 USD to EUR
+You:   Review the function in this code and find any bugs
+You:   What is the weather forecast for London?
+You:   How many miles is 10 km?
+You:   Who was Marie Curie?
+```
+
+### Platform-Specific Bot Commands
+
+Telegram uses `/` prefix; Discord uses the `!` prefix (e.g. `!start`, `!help`).
+
+**Telegram (`/`)**
+
+| Command | Description |
+|---|---|
+| `/start` | Display the assistant's greeting |
+| `/busy` | Pause proactive messages while you focus |
+| `/resume` | Resume normal proactive messaging |
+| `/remember <key> <value>` | Save a personal fact (e.g. `/remember city Paris`) |
+| `/identify <secret_username>` | Link your platform account to an existing profile |
+| `/reset` | Clear your conversation history |
+| `/history` | Show recent conversation history |
+| `/reminders` | List your upcoming reminders |
+| `/clear_memory` | Wipe all stored conversation context (admin) |
+
+**Discord (`!`)**
+
+| Command | Description |
+|---|---|
+| `!start` | Display the assistant's greeting |
+| `!help` | Show available commands |
+| `!busy` | Pause proactive messages while you focus |
+| `!resume` | Resume normal proactive messaging |
+| `!remember <key> <value>` | Save a personal fact (e.g. `!remember city Paris`) |
+| `!identify <secret_username>` | Link your platform account to an existing profile |
+| `!reset` | Clear your conversation history |
+| `!history` | Show recent conversation history |
+| `!clear_memory` | Wipe all stored conversation context (admin) |
+
+### Example Conversations
+
+**Setting a reminder:**
+```
+You:   Remind me in 2 hours to call the dentist
+Bot:   ⏰ Got it! I'll remind you to call the dentist today at 4:30 PM UTC.
+
+You:   List my reminders
+Bot:   📋 Your upcoming reminders:
+       1. call the dentist — Today at 4:30 PM UTC
+
+You:   Delete reminder 1
+Bot:   🗑️ Deleted reminder: call the dentist
+```
+
+**Trip planning:**
+```
+You:   Plan a 3-day luxury trip to Rome
+Bot:   ✈️ Trip Plan: Rome (3 Days, Luxury)
+       Day 1: Arrive at FCO, check in to a 5-star hotel near the Colosseum...
+       ...
+       Daily budget estimate (luxury tier): ~$400–600 USD
+```
+
+**Currency conversion:**
+```
+You:   Convert 500 GBP to JPY
+Bot:   💱 Currency Conversion:
+       500.00 GBP = 96,340.00 JPY
+       Exchange rate: 1 GBP = 192.680000 JPY
+```
+
+**Unit conversion:**
+```
+You:   How many kilograms is 180 pounds?
+Bot:   ⚖️ Unit Conversion (Mass):
+       180.0000 pounds = 81.6466 kilograms
+```
+
+---
+
+## 🤖 AI Assistant Capabilities
+
+### What C.U.R.I.E. Can Do
+
+| Category | Capability |
+|---|---|
+| **Conversation** | Context-aware chat with long-term memory and session history |
+| **Reminders** | Natural-language reminder setting, listing, and deletion |
+| **Trip Planning** | Day-by-day itineraries, packing lists, budget estimates |
+| **Conversions** | Real-time currency exchange (150+ currencies) and unit conversions |
+| **Web Search** | DuckDuckGo-powered information search and summarization |
+| **Navigation** | Route planning and location-based queries |
+| **Coding Assistant** | Code generation, review, bug detection, performance analysis |
+| **PR/MR Management** | Create and review GitHub, GitLab, and Bitbucket pull requests |
+| **Pair Programming** | Interactive collaborative coding sessions |
+| **Voice** | Speech-to-text (Whisper) and text-to-speech (Google TTS) |
+| **Proactive Messaging** | Scheduled background messages and reminder delivery |
+| **Persona** | Fully customizable personality via JSON |
+
+---
+
+### Best Uses
+
+- **Personal productivity**: Reminders, trip planning, quick conversions, Q&A
+- **Developer workflows**: Code review, PR management, pair programming, bug detection across GitHub/GitLab/Bitbucket
+- **Research**: Web search summarization, fact lookup, topic exploration
+- **Privacy-first AI**: Runs fully locally — your conversations never leave your machine
+- **Multi-device access**: Same bot accessible on Telegram, Discord, WhatsApp, and via API from any app or script
+
+---
+
+### Benefits
+
+- **100% local by default** — no data sent to external servers unless you configure cloud providers
+- **Multi-platform** — one backend powers Telegram, Discord, WhatsApp, REST API, and WebSocket simultaneously
+- **Persistent memory** — remembers your preferences, past conversations, and learned facts across sessions
+- **Modular & extensible** — skills are independent Python modules; add new capabilities without touching core logic
+- **Production-ready** — PM2/systemd support, response deduplication, LLM response caching, graceful fallback
+- **Flexible LLM routing** — use local models for simple queries and cloud providers for complex ones to control costs
+
+---
+
+## 📱 Supported Platforms
+
+| Platform | Text | Voice | Status | Notes |
+|---|---|---|---|---|
+| **Telegram** | ✅ | ✅ | Stable | Full command set, Markdown rendering |
+| **Discord** | ✅ | ✅ | Stable | Long messages auto-chunked, full Markdown |
+| **WhatsApp** | ✅ | ✅ | Beta | Markdown stripped for plain-text rendering |
+| **REST API** | ✅ | ✅ | Stable | FastAPI on port 8000, idempotency support |
+| **WebSocket** | ✅ | — | Stable | Real-time bidirectional chat |
+
+---
+
+## 🌐 REST API Reference
+
+The FastAPI server runs on **port 8000** by default.
+
+### `POST /chat`
+
+Send a message and receive a response.
+
+```json
+// Request
+{
+  "user_id": "user123",
+  "message": "What is the capital of France?",
+  "idempotency_key": "optional-uuid-v4",
+  "voice_response": false,
+  "username": "optional_handle"
+}
+
+// Response
+{
+  "text": "The capital of France is Paris.",
+  "timestamp": "2026-03-23T17:00:00.000Z",
+  "model_used": "Meta-Llama-3.1-8B",
+  "processing_time_ms": 420,
+  "voice_url": null
+}
+```
+
+### `GET /health`
+
+Check service status and cache statistics.
+
+```json
+{
+  "status": "healthy",
+  "workflow_initialized": true,
+  "cache_stats": {
+    "prompt_cache": { "hits": 42, "misses": 58, "hit_rate_percent": 42.0 }
+  }
+}
+```
+
+### `GET /reminders?user_id=<id>`
+
+List upcoming reminders for a user.
+
+### `DELETE /reminders?user_id=<id>[&index=<n>]`
+
+Delete one reminder (by 1-based index) or all reminders for a user.
+
+### `POST /transcribe`
+
+Transcribe an audio file to text.
+
+```
+Form fields:
+  file        — audio file (mp3, wav, ogg, m4a, flac, opus; max 25 MB)
+  user_id     — optional user ID
+  language    — language code (default: en)
+  accent      — optional accent hint
+```
+
+### `GET /audio/{filename}`
+
+Stream a previously generated voice response file.
+
+### `POST /clear_memory`
+
+Clear all conversation history for a user (admin only).
+
+```json
+{ "user_id": "user123" }
+```
+
+### `WebSocket /ws/chat`
+
+Real-time bidirectional chat.
+
+```json
+// Client sends:
+{ "user_id": "user123", "message": "Hello!" }
+
+// Server responds:
+{
+  "text": "Hello! How can I help?",
+  "timestamp": "2026-03-23T17:00:00Z",
+  "model_used": "Meta-Llama-3.1-8B",
+  "processing_time_ms": 390
+}
+```
+
+---
+
+## 🔗 Integrations
+
+### Platform Connectors
+
+| Connector | Enable Flag | Required Credential |
+|---|---|---|
+| Telegram | `RUN_TELEGRAM=true` | `TELEGRAM_BOT_TOKEN` |
+| Discord | `RUN_DISCORD=true` | `DISCORD_BOT_TOKEN` |
+| WhatsApp | `RUN_WHATSAPP=true` | `WHATSAPP_SESSION_PATH` |
+| REST/WebSocket API | `RUN_API=true` | *(none)* |
+
+### LLM Providers
+
+| Provider | Priority Key | Required Variable |
+|---|---|---|
+| llama.cpp (local) | `llama.cpp` | `LLM_MODELS` |
+| Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` |
+| OpenAI GPT | `openai` | `OPENAI_API_KEY` |
+| Google Gemini | `gemini` | `GOOGLE_API_KEY` |
+
+Configure routing order with:
+
+```env
+LLM_PROVIDER_PRIORITY=anthropic,openai,gemini,llama.cpp
+```
+
+Simple queries are automatically routed to the local model (cost optimization) unless `LLM_CLOUD_SIMPLE_TASKS=true`.
+
+### Code Repository Integrations
+
+| Platform | Required Variables |
+|---|---|
+| **GitHub** | `GITHUB_TOKEN`, `MAIN_REPO`, `MAIN_REVIEWER`, `TARGET_BRANCH` |
+| **GitLab** | `GITLAB_TOKEN`, `GITLAB_URL` |
+| **Bitbucket** | `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` |
+
+---
+
+## ✅ Current Features
+
+### Conversational AI
+- Context-aware chat with per-user, per-channel session history
+- Long-conversation auto-summarisation (configurable threshold)
+- Proactive learning: automatically extracts and stores user preferences from conversation
+- Persistent user profiles backed by PostgreSQL and MongoDB
+
+### Reminders & Scheduling
+- Natural-language reminder creation: *"remind me in 30 minutes to take my pills"*
+- Flexible time formats: `in N minutes/hours/days`, `at 3pm`, `tomorrow at 10am`, ISO dates
+- Background delivery via the proactive messaging service
+- List and delete via chat or REST API
+
+### Trip & Vacation Planning
+- Full day-by-day itineraries from natural language requests
+- Packing list generation
+- Budget tier estimates (budget / moderate / luxury)
+
+### Currency & Unit Conversions
+- Live currency exchange for 150+ currencies
+- Unit conversions: length, mass, volume, temperature, speed, area
+- Natural-language queries understood on all platforms
+
+### Voice Interface
+- **Speech-to-text**: OpenAI Whisper with automatic language detection
+- **Text-to-speech**: Google TTS with multi-accent support (American, British, Indian, Australian, and more)
+- Persona-based voice settings (accent, language, speed)
+
+### Advanced Coding Suite
+- **Code generation**: Multi-language AI code creation
+- **Code review**: AI-powered review with detailed feedback
+- **Bug detection**: Static-analysis pattern matching for common bugs and security vulnerabilities
+- **Proactive bug scanning**: Continuous directory monitoring
+- **Performance analysis**: Big O estimation, bottleneck detection, optimization suggestions
+- **Pair programming**: Real-time collaborative coding sessions with context tracking
+- **PR/MR management**: Create, review, and manage pull/merge requests on GitHub, GitLab, Bitbucket
+- **Self-update**: Safe auto-update mechanism with rollback capability
+- **Standalone coding service**: Run code operations independently in parallel (`RUN_CODING_SERVICE=true`)
+
+### Web Search & Information
+- DuckDuckGo-powered search and AI summarization
+- Configurable result count and snippet length
+
+### Navigation
+- Route planning and travel time queries
+- Location-based context
+
+### Multi-Provider LLM
+- Local GGUF models via llama.cpp (no internet required)
+- Optional cloud providers: Anthropic, OpenAI, Google Gemini
+- Automatic routing: simple queries → local, complex queries → cloud
+- Response caching with TTL to reduce redundant LLM calls
+
+### Persona System
+- Five built-in personalities (jarvis, friday, gideon, bagley, default)
+- Fully customizable via JSON (name, greeting, tone, constraints, voice settings)
+- Multi-persona mode: set `PERSONA_FILE=all` to load all personas
+
+### Proactive Messaging
+- Background service delivers reminders and scheduled messages
+- Per-user contact channel preferences (platform priority, blocked platforms)
+- Configurable check interval (`PROACTIVE_CHECK_INTERVAL`)
+
+### Deployment Options
+- **Direct**: `python main.py [--telegram] [--discord] [--api] [--all]`
+- **Make shortcuts**: `make run-telegram`, `make run-api`, `make run-all`
+- **PM2**: `pm2 start ecosystem.config.js`
+- **systemd**: service file configurable via `SYSTEMD_SERVICE_NAME`
+- **Docker Compose**: databases provisioned automatically
+
+---
+
+## 🚀 Upcoming Features
+
+See [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) for detailed implementation plans.
+
+### Priority 1 — High Impact, Lower Complexity
+- **Enhanced News Analysis** — aggregation from multiple sources, sentiment analysis, trending topics
+- **Basic Financial Data** — cryptocurrency prices, stock quotes, Forex rates, market status (view-only)
+
+### Priority 2 — Medium Complexity
+- **Email Integration** — send/receive via SMTP or API (SendGrid, Mailgun), scheduling, templates
+- **Nutrition & Wellness** — nutrition database lookup, calorie/macro tracking, health calculators
+
+### Priority 3 — More Complex
+- **Legal & Tax Reference** — US tax brackets, deduction lookup, basic legal definitions *(with disclaimers — not professional advice)*
+- **Advanced Financial Analysis** — technical indicators (RSI, MACD), portfolio tracking, educational backtesting
+
+### Platform & Infrastructure
+- **Web Dashboard / UI** — browser-based chat and management interface
+- **Advanced Memory Management** — cross-session entity tracking and long-term knowledge graph
+- **Enhanced Multi-User Support** — shared spaces, group conversation context
+- **Plugin System** — third-party skill packages
+
+> ⚠️ Features requiring broker partnerships, medical diagnosis, unauthorized legal practice, or tax filing services are **not planned**.
+
+---
 
 ## 🔧 Environment Variables
 
-Curie uses environment variables for configuration. Copy `.env.example` to `.env` and configure the following variables:
+Copy `.env.example` to `.env` and configure these variables.
 
-### Required Variables
+### Core / Required
 
 | Variable | Description | Example |
-|----------|-------------|---------|
-| `TELEGRAM_BOT_TOKEN` | Your Telegram bot token from BotFather | `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11` |
-| `DISCORD_BOT_TOKEN` | Your Discord bot token from Developer Portal | `your_discord_bot_token_here` |
-| `WHATSAPP_SESSION_PATH` | Path to store WhatsApp session data | `./whatsapp_session` |
-| `LLM_MODELS` | Comma-separated list of GGUF model filenames | `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` |
+|---|---|---|
 | `MASTER_USER_ID` | User ID with admin privileges | `123456789` |
-| `POSTGRES_HOST` | PostgreSQL database host | `localhost` |
-| `POSTGRES_PORT` | PostgreSQL database port | `5432` |
+| `POSTGRES_HOST` | PostgreSQL host | `localhost` |
+| `POSTGRES_PORT` | PostgreSQL port | `5432` |
 | `POSTGRES_DB` | PostgreSQL database name | `assistant_db` |
 | `POSTGRES_USER` | PostgreSQL username | `your_pg_user` |
 | `POSTGRES_PASSWORD` | PostgreSQL password | `your_pg_password` |
 | `MONGODB_URI` | MongoDB connection URI | `mongodb://localhost:27017/` |
 | `MONGODB_DB` | MongoDB database name | `assistant_db` |
 
-### Connector Flags
+### Platform Connector Tokens
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `RUN_TELEGRAM` | Enable Telegram connector | `true` |
-| `RUN_DISCORD` | Enable Discord connector | `false` |
-| `RUN_WHATSAPP` | Enable WhatsApp connector | `false` |
-| `RUN_API` | Enable REST API connector | `true` |
+| Variable | Description |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token from [@BotFather](https://t.me/botfather) |
+| `DISCORD_BOT_TOKEN` | Discord bot token from the Developer Portal |
+| `WHATSAPP_SESSION_PATH` | Directory to persist the WhatsApp session |
 
-### Voice Configuration
+### Connector Enable Flags
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `WHISPER_MODEL` | Whisper model size (tiny, base, small, medium, large) | `base` |
+| Variable | Default | Description |
+|---|---|---|
+| `RUN_TELEGRAM` | `true` | Enable Telegram connector |
+| `RUN_DISCORD` | `false` | Enable Discord connector |
+| `RUN_WHATSAPP` | `false` | Enable WhatsApp connector |
+| `RUN_API` | `true` | Enable REST/WebSocket API (port 8000) |
+| `RUN_CODER` | `false` | Enable interactive coder mode |
+| `RUN_CODING_SERVICE` | `false` | Enable standalone coding service |
 
-### Optional Variables
+### LLM Configuration
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `CODING_MODEL_NAME` | GGUF model for coding tasks | None | `codellama-34b-instruct.Q4_K_M.gguf` |
-| `ASSISTANT_NAME` | Display name of your AI assistant (used for speaker tag removal) | None | `jarvis` |
-| `PERSONA_FILE` | Persona configuration filename (set to "all" for multi-persona mode) | None | `personality.json` |
-| `GITHUB_TOKEN` | GitHub personal access token for code operations | None | `ghp_***` |
-| `GITLAB_TOKEN` | GitLab personal access token for code operations | None | `glpat_***` |
-| `GITLAB_URL` | GitLab instance URL (for self-hosted) | `https://gitlab.com` | `https://gitlab.company.com` |
-| `BITBUCKET_USERNAME` | Bitbucket username for code operations | None | `username` |
-| `BITBUCKET_APP_PASSWORD` | Bitbucket app password for code operations | None | `app_password` |
-| `MAIN_REPO` | Main repository URL for code operations | None | `https://github.com/user/repo` |
-| `MAIN_REVIEWER` | Default code reviewer username | None | `MainCoder` |
-| `TARGET_BRANCH` | Default target branch for PRs/MRs | `main` | `develop` |
-| `SYSTEMD_SERVICE_NAME` | Systemd service name for automated restarts | None | `curie-ai` |
-| `RUN_TELEGRAM` | Enable/disable Telegram bot | `true` | `true` or `false` |
-| `RUN_API` | Enable/disable API server | `true` | `true` or `false` |
-| `RUN_CODER` | Enable/disable coding agent | `false` | `true` or `false` |
-| `RUN_CODING_SERVICE` | Enable/disable standalone coding service | `false` | `true` or `false` |
-| `PROJECTS_ROOT` | Root directory for projects | None | `/var/projects` |
+| Variable | Default | Description |
+|---|---|---|
+| `LLM_MODELS` | *(required)* | Comma-separated GGUF filenames in `models/` |
+| `CODING_MODEL_NAME` | *(none)* | Dedicated GGUF model for coding tasks |
+| `LLM_PROVIDER_PRIORITY` | `llama.cpp` | Provider order, e.g. `anthropic,openai,llama.cpp` |
+| `LLM_CLOUD_SIMPLE_TASKS` | `false` | Route simple queries to cloud (increases cost) |
+| `LLM_CONTEXT_SIZE` | `2048` | Context window size in tokens |
+| `LLM_DEFAULT_MAX_TOKENS` | `256` | Default max tokens per response |
+| `OPENAI_API_KEY` | *(none)* | OpenAI API key (optional) |
+| `OPENAI_MODEL` | `gpt-3.5-turbo` | OpenAI model name |
+| `ANTHROPIC_API_KEY` | *(none)* | Anthropic API key (optional) |
+| `ANTHROPIC_MODEL` | `claude-3-haiku-20240307` | Anthropic model name |
+| `GOOGLE_API_KEY` | *(none)* | Google Gemini API key (optional) |
+| `GEMINI_MODEL` | `gemini-1.5-flash` | Gemini model name |
 
-### LLM Context Window Configuration (Advanced)
+### Persona & Behavior
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `LLM_CONTEXT_SIZE` | Total context window size | `2048` |
-| `LLM_CONTEXT_BUFFER` | Buffer reserved for system tokens | `16` |
-| `LLM_MIN_TOKENS` | Minimum tokens required for a response | `64` |
-| `LLM_FALLBACK_MAX_TOKENS` | Fallback max_tokens if tokenization fails | `512` |
-| `LLM_DEFAULT_MAX_TOKENS` | Default max_tokens for ask_llm() | `128` |
+| Variable | Default | Description |
+|---|---|---|
+| `ASSISTANT_NAME` | `jarvis` | Display name (used for speaker-tag removal) |
+| `PERSONA_FILE` | `personality.json` | Persona JSON filename, or `all` for multi-persona |
+| `MINIMAL_SANITIZATION` | `true` | Natural chat output; set `false` for aggressive filtering |
+| `ENABLE_PROACTIVE_MESSAGING` | `true` | Enable background reminder/message delivery |
+| `PROACTIVE_CHECK_INTERVAL` | `3600` | Background check frequency in seconds |
+| `ENABLE_LEARNING` | `true` | Auto-extract user preferences from conversations |
+| `LEARNING_MAX_FACTS` | `50` | Max stored facts per user |
 
-### Info Search Task Configuration (Advanced)
+### Code Repository Integrations
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `INFO_SEARCH_TEMPERATURE` | Temperature for info search LLM calls (lower = more deterministic) | `0.2` |
-| `INFO_SEARCH_MAX_TOKENS` | Maximum tokens for info search responses | `512` |
-| `INFO_SEARCH_MAX_SOURCES` | Maximum number of sources to process (prevents context overflow) | `3` |
-| `INFO_SEARCH_MAX_SNIPPET_CHARS` | Maximum characters per snippet (~100 tokens) | `400` |
+| Variable | Description |
+|---|---|
+| `GITHUB_TOKEN` | GitHub personal access token |
+| `MAIN_REPO` | Default repository URL |
+| `MAIN_REVIEWER` | Default reviewer username |
+| `TARGET_BRANCH` | Default target branch (e.g. `main`) |
+| `GITLAB_TOKEN` | GitLab personal access token |
+| `GITLAB_URL` | GitLab instance URL (default: `https://gitlab.com`) |
+| `BITBUCKET_USERNAME` | Bitbucket username |
+| `BITBUCKET_APP_PASSWORD` | Bitbucket app password |
 
-## 🛠️ Development Phases
-### Phase 1: Core Functionality ✅
-- [x] Telegram integration
-- [x] Local LLM support
-- [x] Basic conversation handling
+### Advanced / Optional
 
-
-### Phase 2: Memory & Storage ✅
-- [x] PostgreSQL integration
-- [x] MongoDB for conversation history
-- [x] Migration system
-
-
-### Phase 3: Enhanced Features 🚧
-- [ ] Multi-platform support
-- [ ] Advanced context management
-- [ ] Web interface
-
-
-
-## 📝 Notes
-- All LLM inference runs locally
-- Recommended: 8GB+ RAM for optimal performance
-- Supports multiple GGUF models
-- Database backups recommended
-
-
-## 🗺️ Roadmap
-
-### Completed Features
-- [x] Voice interface integration (✅ Completed)
-- [x] WhatsApp connector (✅ Completed)
-- [x] Discord connector (✅ Completed)
-- [x] Multi-platform support (✅ Completed)
-- [x] Enhanced coding modules (✅ Completed)
-  - [x] Multi-platform PR/MR (GitHub, GitLab, Bitbucket)
-  - [x] Automated code review
-  - [x] Self-update system
-  - [x] Standalone coding service
-- [x] Real-time date/time access (✅ Completed)
-- [x] Proactive messaging service (✅ Completed)
-
-### Core Platform Improvements
-- [ ] Web dashboard / UI
-- [ ] Advanced memory management
-- [ ] Enhanced multi-user support
-- [ ] Plugin system
-
-### Feature Enhancements (See [FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md))
-
-#### Priority 1: High Impact, Low Complexity
-- [ ] **Currency & Unit Conversions**
-  - Live currency exchange rates
-  - Comprehensive unit conversions (length, mass, volume, temperature, speed, area, energy, power, pressure, force, angles, time, fuel)
-  - Cooking and measurement conversions
-
-- [ ] **Enhanced News Analysis**
-  - News aggregation from multiple sources
-  - Sentiment analysis
-  - Topic extraction and trending topics
-  - Category-specific news (business, tech, science, health, sports)
-
-- [ ] **Basic Financial Data** (View-only)
-  - Cryptocurrency prices and market data
-  - Stock market quotes and indices
-  - Forex exchange rates
-  - Market status and trends
-
-#### Priority 2: Medium Complexity
-- [ ] **Navigation & Traffic**
-  - Real-time traffic information
-  - Route planning and directions
-  - Multi-modal routing (walk, bike, transit, drive)
-  - Travel time estimates with traffic
-  - Alternative route suggestions
-
-- [ ] **Email Integration**
-  - Send emails via SMTP or API (SendGrid, Mailgun)
-  - Template management
-  - Scheduled email sending
-  - Attachment support
-  - Contact management
-
-- [ ] **Nutrition & Wellness Information**
-  - Nutrition database lookup
-  - Calorie and macro tracking
-  - BMI and health calculators
-  - General wellness tips
-  - Exercise recommendations
-
-#### Priority 3: Complex Features
-- [ ] **Legal & Tax Information** (Educational only)
-  - US tax code reference
-  - Tax brackets and deduction information
-  - Basic legal definitions
-  - ⚠️ With strong disclaimers - not professional advice
-
-- [ ] **Advanced Financial Analysis** (Educational only)
-  - Technical indicators (RSI, MACD, Moving Averages)
-  - Portfolio tracking (paper/virtual)
-  - Strategy backtesting (educational)
-  - Market trend analysis
-
-#### Future Considerations (Require Legal Framework)
-- ⚠️ Real trading execution (requires broker partnership & licensing)
-- ⚠️ Medical diagnosis/treatment advice (liability concerns - not planned)
-- ⚠️ Specific legal advice (unauthorized practice - not planned)
-- ⚠️ Tax filing services (requires professional review)
-
-**Note**: For detailed implementation plans, API requirements, and enhancement ideas, see:
-- [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) - Official planned features
-- [docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md](docs/FEATURE_ENHANCEMENTS_SUGGESTIONS.md) - Additional feature suggestions and enhancements
-- [docs/FEATURE_SUGGESTIONS_SUMMARY.md](docs/FEATURE_SUGGESTIONS_SUMMARY.md) - Quick reference summary
-- [docs/FEATURE_COMPARISON_MATRIX.md](docs/FEATURE_COMPARISON_MATRIX.md) - Visual comparison matrix
-
-## 🤝 Contributing
-Contributions welcome! Please read our [contributing guidelines](CONTRIBUTING.md).
-
-## 📄 License
-This project is licensed under the MIT License - see the LICENSE file for details.
-
+| Variable | Default | Description |
+|---|---|---|
+| `DEFAULT_TIMEZONE` | `UTC` | Fallback timezone for date/time queries |
+| `DEFAULT_LOCATION` | *(none)* | Fallback location for location-based queries |
+| `WHISPER_MODEL` | `base` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large` |
+| `SESSION_SCOPE` | `per_channel_user` | Session isolation: `single`, `per_user`, `per_channel_user` |
+| `SESSION_MAX_HISTORY` | `50` | Max messages retained per session |
+| `HISTORY_SUMMARISE_THRESHOLD` | `20` | Compress history after this many turns |
+| `HISTORY_KEEP_RECENT` | `6` | Verbatim recent turns to keep after summarisation |
+| `PROJECTS_ROOT` | *(none)* | Root directory for project management |
+| `SYSTEMD_SERVICE_NAME` | *(none)* | Systemd service name for self-update restarts |
 
 ---
 
-**Curie: Your Personal AI Assistant, Running Locally!**
+## 🏗️ Architecture Overview
 
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     MESSAGING PLATFORMS                      │
+│   Telegram   │   Discord   │   WhatsApp   │   REST/WS API   │
+└──────────────┴─────────────┴──────────────┴─────────────────┘
+                              │
+                    ┌─────────▼──────────┐
+                    │   ChatWorkflow     │  ← central message router
+                    │  (chat_workflow.py)│
+                    └────────┬───────────┘
+           ┌─────────────────┼──────────────────────┐
+           ▼                 ▼                      ▼
+   ┌───────────────┐  ┌─────────────┐      ┌────────────────┐
+   │  Agent Skills │  │   Memory    │      │  LLM Providers │
+   │  • scheduler  │  │ PostgreSQL  │      │  • llama.cpp   │
+   │  • trip_plan  │  │  MongoDB    │      │  • Anthropic   │
+   │  • coding     │  │  Sessions   │      │  • OpenAI      │
+   │  • navigator  │  │  Learning   │      │  • Gemini      │
+   │  • find_info  │  └─────────────┘      └────────────────┘
+   │  • convert    │
+   └───────────────┘
+           │
+   ┌───────▼────────┐
+   │  Proactive Svc │  ← background: reminders, scheduled msgs
+   └────────────────┘
+```
 
+---
 
+## 📁 Project Structure
+
+See [directory_structure.md](./directory_structure.md) for a full file listing.
+
+```
+curie-ai/
+├── agent/                  # Core agent logic
+│   ├── chat_workflow.py    # Unified message processing pipeline
+│   ├── core.py             # Agent class, conversation handling
+│   └── skills/             # Skill modules (scheduler, coding, trips, etc.)
+├── connectors/             # Platform integrations
+│   ├── telegram.py
+│   ├── discord_bot.py
+│   ├── whatsapp.py
+│   └── api.py              # FastAPI REST + WebSocket server
+├── llm/                    # LLM management
+│   ├── manager.py          # Model loading, caching
+│   └── providers.py        # Multi-provider abstraction
+├── memory/                 # Data persistence
+│   ├── database.py         # PostgreSQL connection & migrations
+│   ├── users.py            # User management
+│   ├── session_manager.py  # Session handling
+│   └── learning.py         # Proactive preference extraction
+├── services/               # Background services
+│   ├── proactive_messaging.py
+│   └── cron_runner.py
+├── utils/                  # Utility modules (voice, formatting, time, etc.)
+├── assets/personality/     # Persona JSON files
+├── migrations/             # Database schema versioning
+├── scripts/                # Setup and utility scripts
+├── docs/                   # Extended documentation
+├── main.py                 # Entry point
+├── .env.example            # Environment variable reference
+├── docker-compose.yml      # PostgreSQL + MongoDB containers
+└── ecosystem.config.js     # PM2 process configuration
+```
+
+---
+
+## 📚 Documentation
+
+| Guide | Description |
+|---|---|
+| [Quick Start](docs/QUICK_START.md) | Detailed ~10-minute setup walkthrough |
+| [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) | Platform-specific setup and voice configuration |
+| [Advanced Coding Features](docs/ADVANCED_CODING_FEATURES.md) | Pair programming, bug detection, performance analysis |
+| [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) | Code review, PR management, self-update |
+| [Troubleshooting Guide](docs/TROUBLESHOOTING.md) | Common errors and fixes |
+| [Quick Reference](docs/QUICK_REFERENCE.md) | Commands, API usage, and developer integration |
+| [Feature Roadmap](docs/FEATURE_ROADMAP.md) | Planned features with implementation details |
+| [PM2 Setup](docs/PM2_SETUP.md) | Production process management |
+| [Migration Guide](docs/MIGRATION_GUIDE.md) | Upgrading between versions |
+
+---
+
+## 🛠️ Development
+
+```bash
+make test          # Run all tests
+make lint          # Lint with flake8
+make format        # Format with black
+make check         # Lint + format check (non-destructive)
+make check-ports   # Verify required ports are available
+make clean         # Remove Python cache files
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
+
+## 📄 License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+**C.U.R.I.E. — Your Personal AI Assistant, Running Locally.**
