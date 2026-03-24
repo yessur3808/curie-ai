@@ -106,7 +106,15 @@ make setup-db                         # run migrations + create master user
 
 ```bash
 python scripts/apply_migrations.py
-python scripts/gen_master_id.py
+
+# Required for scripts/insert_master.py:
+export MASTER_TELEGRAM_ID="<your_telegram_user_id>"        # numeric Telegram user ID
+export MASTER_SECRET_USERNAME="<your_secret_username>"     # internal handle for the master user
+
+# Generate a master ID and write it into .env
+python scripts/gen_master_id.py --env
+
+# Insert the master user into the database
 python scripts/insert_master.py
 ```
 
