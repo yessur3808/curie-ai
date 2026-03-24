@@ -244,7 +244,7 @@ MONGODB_DB=assistant_db
 
 # Persona
 ASSISTANT_NAME=jarvis
-PERSONA_FILE=jarvis.json         # or: friday.json, gideon.json, bagley.json, curie.json
+PERSONA_FILE=jarvis.json         # or: friday.json, gideon.json, bagley.json
 
 # Admin
 MASTER_USER_ID=123456789
