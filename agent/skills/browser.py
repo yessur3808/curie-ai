@@ -30,7 +30,6 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -398,7 +397,7 @@ async def handle_browser_query(
             return f"⚠️ Could not extract links: {result['error']}"
         if not result["links"]:
             return f"🔗 No links found on {result['url']}"
-        link_lines = [f"• [{l['text'][:60]}]({l['url']})" for l in result["links"][:15]]
+        link_lines = [f"• [{lnk['text'][:60]}]({lnk['url']})" for lnk in result["links"][:15]]
         return f"🔗 **Links on {result['url']}**\n\n" + "\n".join(link_lines)
 
     if any(w in lower for w in ["screenshot", "snapshot", "structure"]):

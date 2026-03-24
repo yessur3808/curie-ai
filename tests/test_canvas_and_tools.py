@@ -23,6 +23,40 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+# ---------------------------------------------------------------------------
+# Stub heavyweight dependencies before any application module is imported.
+# Mirrors the pattern used by test_connectors.py / test_chat_workflow.py.
+# ---------------------------------------------------------------------------
+for _mod in (
+    "psycopg2",
+    "psycopg2.extras",
+    "psycopg2.extensions",
+    "pymongo",
+    "pymongo.collection",
+    "pymongo.errors",
+    "llm",
+    "llm.manager",
+    "dotenv",
+    "telegram",
+    "telegram.ext",
+):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
+
+for _mod in (
+    "memory",
+    "memory.session_store",
+    "memory.database",
+    "memory.users",
+    "memory.conversations",
+    "memory.scraper_patterns",
+):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
+
+if "utils.persona" not in sys.modules:
+    sys.modules["utils.persona"] = MagicMock()
+
 
 # ─── cli.canvas_webview ───────────────────────────────────────────────────────
 
@@ -298,10 +332,8 @@ class TestBrowserSkill:
         mock_response.text = sample_html
         mock_response.is_redirect = False
 
-        async def mock_get(url, **kwargs):
-            return mock_response
-
-        with patch("agent.skills.find_info.is_safe_url", new=AsyncMock(return_value=True)):
+        # Patch is_safe_url where it is looked up in browser.py's namespace
+        with patch("agent.skills.browser.is_safe_url", new=AsyncMock(return_value=True)):
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -336,7 +368,7 @@ class TestBrowserSkill:
         mock_response.text = sample_html
         mock_response.is_redirect = False
 
-        with patch("agent.skills.find_info.is_safe_url", new=AsyncMock(return_value=True)):
+        with patch("agent.skills.browser.is_safe_url", new=AsyncMock(return_value=True)):
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
