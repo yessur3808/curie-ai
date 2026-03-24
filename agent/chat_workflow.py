@@ -518,47 +518,59 @@ class ChatWorkflow:
 
             try:
                 from agent.skills.coding_assistant import handle_coding_query  # noqa
-                _skill_specs.append((
-                    "coding_skill",
-                    "coding_assistant",
-                    "Scanning for coding / programming query",
-                    handle_coding_query(user_text),
-                ))
+
+                _skill_specs.append(
+                    (
+                        "coding_skill",
+                        "coding_assistant",
+                        "Scanning for coding / programming query",
+                        handle_coding_query(user_text),
+                    )
+                )
             except Exception:
                 pass
 
             try:
                 from agent.skills.navigation import handle_navigation_query  # noqa
-                _skill_specs.append((
-                    "navigation_skill",
-                    "navigation",
-                    "Scanning for navigation / traffic query",
-                    handle_navigation_query(user_text),
-                ))
+
+                _skill_specs.append(
+                    (
+                        "navigation_skill",
+                        "navigation",
+                        "Scanning for navigation / traffic query",
+                        handle_navigation_query(user_text),
+                    )
+                )
             except Exception:
                 pass
 
             try:
                 from agent.skills.scheduler import handle_reminder_query  # noqa
-                _skill_specs.append((
-                    "scheduler_skill",
-                    "scheduler",
-                    "Scanning for reminder / scheduling query",
-                    handle_reminder_query(
-                        user_text, internal_id=internal_id, platform=platform
-                    ),
-                ))
+
+                _skill_specs.append(
+                    (
+                        "scheduler_skill",
+                        "scheduler",
+                        "Scanning for reminder / scheduling query",
+                        handle_reminder_query(
+                            user_text, internal_id=internal_id, platform=platform
+                        ),
+                    )
+                )
             except Exception:
                 pass
 
             try:
                 from agent.skills.trip_planner import handle_trip_query  # noqa
-                _skill_specs.append((
-                    "trip_planner_skill",
-                    "trip_planner",
-                    "Scanning for trip / vacation planning query",
-                    handle_trip_query(user_text, internal_id=internal_id),
-                ))
+
+                _skill_specs.append(
+                    (
+                        "trip_planner_skill",
+                        "trip_planner",
+                        "Scanning for trip / vacation planning query",
+                        handle_trip_query(user_text, internal_id=internal_id),
+                    )
+                )
             except Exception:
                 pass
 

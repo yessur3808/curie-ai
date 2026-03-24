@@ -339,6 +339,7 @@ class TestTaskRegistryDescription:
     def setup_method(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         import cli.tasks as _tasks_mod
+
         self._tasks_mod = _tasks_mod
         self._orig_curie_dir = _tasks_mod.CURIE_DIR
         self._orig_tasks_file = _tasks_mod.TASKS_FILE
@@ -354,8 +355,9 @@ class TestTaskRegistryDescription:
     def test_register_sub_agent_with_description(self):
         t = self._tasks_mod
         t.register_task("d1", "task with description")
-        t.register_sub_agent("d1", "s1", role="coding_assistant",
-                             description="Scanning for coding query")
+        t.register_sub_agent(
+            "d1", "s1", role="coding_assistant", description="Scanning for coding query"
+        )
         tasks = t.get_tasks()
         agent = tasks[0]["sub_agents"]["s1"]
         assert agent["description"] == "Scanning for coding query"
@@ -371,8 +373,9 @@ class TestTaskRegistryDescription:
     def test_update_sub_agent_description(self):
         t = self._tasks_mod
         t.register_task("d3", "task update desc")
-        t.register_sub_agent("d3", "s3", role="llm_inference",
-                             description="Initial description")
+        t.register_sub_agent(
+            "d3", "s3", role="llm_inference", description="Initial description"
+        )
         t.update_sub_agent_description("d3", "s3", "Running LLM inference")
         tasks = t.get_tasks()
         agent = tasks[0]["sub_agents"]["s3"]
@@ -398,6 +401,7 @@ class TestAgentTreeVisualization:
     def setup_method(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         import cli.tasks as _tasks_mod
+
         self._tasks_mod = _tasks_mod
         self._orig_curie_dir = _tasks_mod.CURIE_DIR
         self._orig_tasks_file = _tasks_mod.TASKS_FILE
@@ -413,10 +417,18 @@ class TestAgentTreeVisualization:
     def _seed_tasks(self):
         t = self._tasks_mod
         t.register_task("tr1", "Weather in Tokyo", channel="telegram")
-        t.register_sub_agent("tr1", "coding_skill", role="coding_assistant",
-                              description="Scanning for coding / programming query")
-        t.register_sub_agent("tr1", "llm_provider", role="llm_inference",
-                              description="Running LLM inference")
+        t.register_sub_agent(
+            "tr1",
+            "coding_skill",
+            role="coding_assistant",
+            description="Scanning for coding / programming query",
+        )
+        t.register_sub_agent(
+            "tr1",
+            "llm_provider",
+            role="llm_inference",
+            description="Running LLM inference",
+        )
         t.update_sub_agent("tr1", "coding_skill", "done", result_summary="skipped")
 
     def test_build_agent_tree_empty(self):
@@ -441,25 +453,30 @@ class TestAgentTreeVisualization:
 
     def test_dur_helper(self):
         from cli.tasks_display import _dur
+
         assert _dur(None, None) == "—"
         now = time.time()
         assert "s" in _dur(now - 5, now)
 
     def test_friendly_role_known(self):
         from cli.tasks_display import _friendly_role
+
         label = _friendly_role("llm_inference")
         assert "LLM" in label
 
     def test_friendly_role_unknown(self):
         from cli.tasks_display import _friendly_role
+
         label = _friendly_role("custom_agent")
         assert "custom_agent" in label
 
     def test_show_tasks_tree_flag_calls_show_agent_tree(self):
         """show_tasks(tree=True) should delegate to show_agent_tree."""
         try:
-            from cli.tasks_display import show_tasks
+            from cli.tasks_display import show_tasks, RICH_AVAILABLE
         except ImportError:
+            pytest.skip("rich not installed")
+        if not RICH_AVAILABLE:
             pytest.skip("rich not installed")
         with patch("cli.tasks_display.show_agent_tree") as mock_tree:
             show_tasks(show_finished=False, live=False, tree=True)
@@ -468,11 +485,13 @@ class TestAgentTreeVisualization:
     def test_tasks_tree_cli_flag(self):
         """curie tasks --tree should parse correctly."""
         from cli.main import _build_parser
+
         args = _build_parser().parse_args(["tasks", "--tree"])
         assert args.tree is True
 
     def test_tasks_tree_live_cli_flags(self):
         from cli.main import _build_parser
+
         args = _build_parser().parse_args(["tasks", "--tree", "--live"])
         assert args.tree is True
         assert args.live is True
@@ -483,30 +502,35 @@ class TestWebViewFlags:
 
     def test_tasks_visual_flag(self):
         from cli.main import _build_parser
+
         args = _build_parser().parse_args(["tasks", "--visual"])
         assert args.visual is True
 
     def test_tasks_web_flag(self):
         from cli.main import _build_parser
+
         args = _build_parser().parse_args(["tasks", "--web"])
         assert args.web is True
 
     def test_tasks_web_all_flags(self):
         from cli.main import _build_parser
+
         args = _build_parser().parse_args(["tasks", "--web", "--all"])
         assert args.web is True
         assert args.all is True
 
     def test_webview_html_contains_curie_svg(self):
         from cli.agent_webview import _HTML
+
         assert "buildCurieSVG" in _HTML
         assert "buildSubSVG" in _HTML
         assert "connectSSE" in _HTML
         assert "Curie AI" in _HTML
 
     def test_webview_server(self):
-        import tempfile, threading, time, urllib.request, json
-        from pathlib import Path
+        import threading
+        import urllib.request
+        import socket
         import cli.agent_webview as wv
         import cli.tasks as tm
 
@@ -521,12 +545,12 @@ class TestWebViewFlags:
         tm.TASKS_FILE = wv._TASKS_FILE
         tm.register_task("wt1", "Web test task", channel="api")
 
-        import socket
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
 
         from http.server import ThreadingHTTPServer
+
         wv._SHUTDOWN_EVENT.clear()
         server = ThreadingHTTPServer(("127.0.0.1", port), wv._Handler)
         t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -536,7 +560,9 @@ class TestWebViewFlags:
         try:
             html = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
             assert "<title>Curie AI" in html
-            data = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/data").read())
+            data = json.loads(
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/data").read()
+            )
             assert "wt1" in data["tasks"]
         finally:
             wv._SHUTDOWN_EVENT.set()
