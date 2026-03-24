@@ -6,6 +6,18 @@ C.U.R.I.E. is a **local, multi-platform AI assistant** inspired by iconic fictio
 
 ---
 
+## 📱 Supported Platforms
+
+| Platform | Text | Voice | Status |
+|----------|------|-------|--------|
+| **Telegram** | ✅ | ✅ | Stable |
+| **Discord** | ✅ | ✅ | Stable |
+| **WhatsApp** | ✅ | ✅ | Beta |
+| **REST API** | ✅ | ✅ | Stable |
+| **WebSocket** | ✅ | 🔜 | Stable |
+
+---
+
 ## ⚡ Quick Start
 
 Get C.U.R.I.E. running in under 10 minutes.
