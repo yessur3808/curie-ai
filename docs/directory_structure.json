@@ -1,0 +1,731 @@
+{
+  "type": "directory",
+  "name": "",
+  "contents": [
+    {
+      "type": "directory",
+      "name": ".github",
+      "contents": [
+        {
+          "type": "directory",
+          "name": "workflows",
+          "contents": [
+            {
+              "type": "file",
+              "name": "ci.yml"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "agent",
+      "contents": [
+        {
+          "type": "directory",
+          "name": "skills",
+          "contents": [
+            {
+              "type": "file",
+              "name": "__init__.py"
+            },
+            {
+              "type": "file",
+              "name": "bitbucket_integration.py"
+            },
+            {
+              "type": "file",
+              "name": "bug_detector.py"
+            },
+            {
+              "type": "file",
+              "name": "code_reviewer.py"
+            },
+            {
+              "type": "file",
+              "name": "coder.py"
+            },
+            {
+              "type": "file",
+              "name": "coding_assistant.py"
+            },
+            {
+              "type": "file",
+              "name": "conversions.py"
+            },
+            {
+              "type": "file",
+              "name": "find_info.py"
+            },
+            {
+              "type": "file",
+              "name": "github_integration.py"
+            },
+            {
+              "type": "file",
+              "name": "gitlab_integration.py"
+            },
+            {
+              "type": "file",
+              "name": "navigation.py"
+            },
+            {
+              "type": "file",
+              "name": "pair_programming.py"
+            },
+            {
+              "type": "file",
+              "name": "performance_analyzer.py"
+            },
+            {
+              "type": "file",
+              "name": "scheduler.py"
+            },
+            {
+              "type": "file",
+              "name": "self_updater.py"
+            },
+            {
+              "type": "file",
+              "name": "system_commands.py"
+            },
+            {
+              "type": "file",
+              "name": "trip_planner.py"
+            }
+          ]
+        },
+        {
+          "type": "file",
+          "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "chat_workflow.py"
+        },
+        {
+          "type": "file",
+          "name": "core.py"
+        },
+        {
+          "type": "file",
+          "name": "personality_adapter.py"
+        },
+        {
+          "type": "file",
+          "name": "personality_context.py"
+        },
+        {
+          "type": "file",
+          "name": "personality_speech.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "assets",
+      "contents": [
+        {
+          "type": "directory",
+          "name": "personality",
+          "contents": [
+            {
+              "type": "file",
+              "name": "bagley.json"
+            },
+            {
+              "type": "file",
+              "name": "friday.json"
+            },
+            {
+              "type": "file",
+              "name": "gideon.json"
+            },
+            {
+              "type": "file",
+              "name": "jarvis.json"
+            },
+            {
+              "type": "file",
+              "name": "personality.json"
+            }
+          ]
+        },
+        {
+          "type": "file",
+          "name": "coder_job.json"
+        },
+        {
+          "type": "file",
+          "name": "example_persona.json"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "cli",
+      "contents": [
+        {
+          "type": "file",
+          "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "agent_cmd.py"
+        },
+        {
+          "type": "file",
+          "name": "agent_visual.py"
+        },
+        {
+          "type": "file",
+          "name": "agent_webview.py"
+        },
+        {
+          "type": "file",
+          "name": "auth.py"
+        },
+        {
+          "type": "file",
+          "name": "channel.py"
+        },
+        {
+          "type": "file",
+          "name": "completions.py"
+        },
+        {
+          "type": "file",
+          "name": "cron.py"
+        },
+        {
+          "type": "file",
+          "name": "daemon.py"
+        },
+        {
+          "type": "file",
+          "name": "doctor.py"
+        },
+        {
+          "type": "file",
+          "name": "hardware.py"
+        },
+        {
+          "type": "file",
+          "name": "help_cmd.py"
+        },
+        {
+          "type": "file",
+          "name": "main.py"
+        },
+        {
+          "type": "file",
+          "name": "memory_cmd.py"
+        },
+        {
+          "type": "file",
+          "name": "metrics.py"
+        },
+        {
+          "type": "file",
+          "name": "onboard.py"
+        },
+        {
+          "type": "file",
+          "name": "service.py"
+        },
+        {
+          "type": "file",
+          "name": "tasks.py"
+        },
+        {
+          "type": "file",
+          "name": "tasks_display.py"
+        },
+        {
+          "type": "file",
+          "name": "ui.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "connectors",
+      "contents": [
+        {
+          "type": "file",
+          "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "api.py"
+        },
+        {
+          "type": "file",
+          "name": "discord_bot.py"
+        },
+        {
+          "type": "file",
+          "name": "telegram.py"
+        },
+        {
+          "type": "file",
+          "name": "whatsapp.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "docs",
+      "contents": [
+        {
+          "type": "file",
+          "name": "ADVANCED_CODING_FEATURES.md"
+        },
+        {
+          "type": "file",
+          "name": "CODE_OF_CONDUCT.md"
+        },
+        {
+          "type": "file",
+          "name": "CODING_MODULES_GUIDE.md"
+        },
+        {
+          "type": "file",
+          "name": "CONTRIBUTING.md"
+        },
+        {
+          "type": "file",
+          "name": "CONTRIBUTORS.md"
+        },
+        {
+          "type": "file",
+          "name": "directory_structure.json"
+        },
+        {
+          "type": "file",
+          "name": "directory_structure.md"
+        },
+        {
+          "type": "file",
+          "name": "ENV_SYNC.md"
+        },
+        {
+          "type": "file",
+          "name": "FEATURE_ENHANCEMENTS_SUGGESTIONS.md"
+        },
+        {
+          "type": "file",
+          "name": "FEATURE_ROADMAP.md"
+        },
+        {
+          "type": "file",
+          "name": "MIGRATION_GUIDE.md"
+        },
+        {
+          "type": "file",
+          "name": "MULTI_PLATFORM_GUIDE.md"
+        },
+        {
+          "type": "file",
+          "name": "PM2_COMMANDS.md"
+        },
+        {
+          "type": "file",
+          "name": "PM2_SETUP.md"
+        },
+        {
+          "type": "file",
+          "name": "QUICK_REFERENCE.md"
+        },
+        {
+          "type": "file",
+          "name": "QUICK_START.md"
+        },
+        {
+          "type": "file",
+          "name": "TROUBLESHOOTING.md"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "examples",
+      "contents": [
+        {
+          "type": "file",
+          "name": "coding_modules_demo.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "llm",
+      "contents": [
+        {
+          "type": "file",
+          "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "manager.py"
+        },
+        {
+          "type": "file",
+          "name": "providers.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "memory",
+      "contents": [
+        {
+          "type": "file",
+          "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "config.py"
+        },
+        {
+          "type": "file",
+          "name": "conversations.py"
+        },
+        {
+          "type": "file",
+          "name": "database.py"
+        },
+        {
+          "type": "file",
+          "name": "init.py"
+        },
+        {
+          "type": "file",
+          "name": "learning.py"
+        },
+        {
+          "type": "file",
+          "name": "research.py"
+        },
+        {
+          "type": "file",
+          "name": "scraper_patterns.py"
+        },
+        {
+          "type": "file",
+          "name": "session_manager.py"
+        },
+        {
+          "type": "file",
+          "name": "session_mixin.py"
+        },
+        {
+          "type": "file",
+          "name": "session_store.py"
+        },
+        {
+          "type": "file",
+          "name": "users.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "migrations",
+      "contents": []
+    },
+    {
+      "type": "directory",
+      "name": "scripts",
+      "contents": [
+        {
+          "type": "file",
+          "name": "apply_migrations.py"
+        },
+        {
+          "type": "file",
+          "name": "check_ports.py"
+        },
+        {
+          "type": "file",
+          "name": "dir_structure.py"
+        },
+        {
+          "type": "file",
+          "name": "down_migrations.py"
+        },
+        {
+          "type": "file",
+          "name": "gen_master_id.py"
+        },
+        {
+          "type": "file",
+          "name": "insert_master.py"
+        },
+        {
+          "type": "file",
+          "name": "insert_new_user.py"
+        },
+        {
+          "type": "file",
+          "name": "sync_env.py"
+        },
+        {
+          "type": "file",
+          "name": "test_import.py"
+        },
+        {
+          "type": "file",
+          "name": "test_model_loading.py"
+        },
+        {
+          "type": "file",
+          "name": "verify_setup.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "services",
+      "contents": [
+        {
+          "type": "file",
+          "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "coding_service.py"
+        },
+        {
+          "type": "file",
+          "name": "cron_runner.py"
+        },
+        {
+          "type": "file",
+          "name": "proactive_messaging.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "tests",
+      "contents": [
+        {
+          "type": "file",
+          "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "test_advanced_coding_skills.py"
+        },
+        {
+          "type": "file",
+          "name": "test_chat_workflow.py"
+        },
+        {
+          "type": "file",
+          "name": "test_cli.py"
+        },
+        {
+          "type": "file",
+          "name": "test_cli_new_commands.py"
+        },
+        {
+          "type": "file",
+          "name": "test_code_reviewer.py"
+        },
+        {
+          "type": "file",
+          "name": "test_coding_service.py"
+        },
+        {
+          "type": "file",
+          "name": "test_connectors.py"
+        },
+        {
+          "type": "file",
+          "name": "test_context_injection.py"
+        },
+        {
+          "type": "file",
+          "name": "test_conversions.py"
+        },
+        {
+          "type": "file",
+          "name": "test_datetime_info.py"
+        },
+        {
+          "type": "file",
+          "name": "test_dedupe.py"
+        },
+        {
+          "type": "file",
+          "name": "test_find_info.py"
+        },
+        {
+          "type": "file",
+          "name": "test_formatting.py"
+        },
+        {
+          "type": "file",
+          "name": "test_hardware_and_help.py"
+        },
+        {
+          "type": "file",
+          "name": "test_navigation.py"
+        },
+        {
+          "type": "file",
+          "name": "test_providers.py"
+        },
+        {
+          "type": "file",
+          "name": "test_scheduler.py"
+        },
+        {
+          "type": "file",
+          "name": "test_scraper_patterns.py"
+        },
+        {
+          "type": "file",
+          "name": "test_self_updater.py"
+        },
+        {
+          "type": "file",
+          "name": "test_system_commands.py"
+        },
+        {
+          "type": "file",
+          "name": "test_system_time.py"
+        },
+        {
+          "type": "file",
+          "name": "test_telegram_dedupe.py"
+        },
+        {
+          "type": "file",
+          "name": "test_trip_planner.py"
+        },
+        {
+          "type": "file",
+          "name": "test_url_validation.py"
+        }
+      ]
+    },
+    {
+      "type": "directory",
+      "name": "utils",
+      "contents": [
+        {
+          "type": "file",
+          "name": "__init__.py"
+        },
+        {
+          "type": "file",
+          "name": "brevity.py"
+        },
+        {
+          "type": "file",
+          "name": "busy.py"
+        },
+        {
+          "type": "file",
+          "name": "conversions.py"
+        },
+        {
+          "type": "file",
+          "name": "datetime_info.py"
+        },
+        {
+          "type": "file",
+          "name": "db.py"
+        },
+        {
+          "type": "file",
+          "name": "dedupe.py"
+        },
+        {
+          "type": "file",
+          "name": "formatting.py"
+        },
+        {
+          "type": "file",
+          "name": "navigation.py"
+        },
+        {
+          "type": "file",
+          "name": "persona.py"
+        },
+        {
+          "type": "file",
+          "name": "project_indexer.py"
+        },
+        {
+          "type": "file",
+          "name": "search.py"
+        },
+        {
+          "type": "file",
+          "name": "session.py"
+        },
+        {
+          "type": "file",
+          "name": "system_time.py"
+        },
+        {
+          "type": "file",
+          "name": "units.py"
+        },
+        {
+          "type": "file",
+          "name": "users.py"
+        },
+        {
+          "type": "file",
+          "name": "voice.py"
+        },
+        {
+          "type": "file",
+          "name": "weather.py"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": ".pre-commit-config.yaml"
+    },
+    {
+      "type": "file",
+      "name": "docker-compose.yml"
+    },
+    {
+      "type": "file",
+      "name": "download_gguf.py"
+    },
+    {
+      "type": "file",
+      "name": "main.py"
+    },
+    {
+      "type": "file",
+      "name": "pyproject.toml"
+    },
+    {
+      "type": "file",
+      "name": "README.md"
+    },
+    {
+      "type": "file",
+      "name": "requirements-optional.txt"
+    },
+    {
+      "type": "file",
+      "name": "requirements.txt"
+    },
+    {
+      "type": "file",
+      "name": "test_features.py"
+    }
+  ]
+}

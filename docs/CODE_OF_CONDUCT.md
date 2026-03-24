@@ -46,8 +46,9 @@ an individual is officially representing the community in public spaces.
 ## Enforcement 📋
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-[INSERT CONTACT METHOD].
+reported to the community leaders responsible for enforcement by opening a
+[GitHub Issue](https://github.com/yessur3808/curie-ai/issues) or contacting
+[@yessur3808](https://github.com/yessur3808) directly via GitHub.
 
 All complaints will be reviewed and investigated promptly and fairly.
 
@@ -97,7 +98,7 @@ For answers to common questions about this code of conduct, see the FAQ at
 
 ## Contact 📧
 
-[INSERT YOUR CONTACT INFORMATION OR REPORTING METHODS HERE]
+Report violations by opening a [GitHub Issue](https://github.com/yessur3808/curie-ai/issues) or contacting [@yessur3808](https://github.com/yessur3808) directly.
 
 ---
 

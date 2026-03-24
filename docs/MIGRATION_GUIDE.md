@@ -456,9 +456,8 @@ Time: 0.8-1.2 seconds ✅
 ## Questions?
 
 See the comprehensive guides:
-- **QUICK_REFERENCE.md** - Developer API reference
-- **OPTIMIZATION_COMPLETE.md** - Technical architecture
-- **IMPLEMENTATION_SUMMARY.md** - Feature overview
+- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Developer API reference
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and fixes
 
 ---
 

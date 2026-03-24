@@ -529,4 +529,4 @@ For issues or questions about these features:
 
 ## Contributing
 
-We welcome contributions to improve these features! See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.
+We welcome contributions to improve these features! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

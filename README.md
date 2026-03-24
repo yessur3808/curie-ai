@@ -683,7 +683,7 @@ Copy `.env.example` to `.env` and configure these variables.
 
 ## 📁 Project Structure
 
-See [directory_structure.md](./directory_structure.md) for a full file listing.
+See [directory_structure.md](docs/directory_structure.md) for a full file listing.
 
 ```
 curie-ai/
@@ -751,7 +751,7 @@ make clean         # Remove Python cache files
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
+Contributions are welcome! Please read [CONTRIBUTING.md](docs/CONTRIBUTING.md) before submitting a pull request.
 
 ## 📄 License
 
