@@ -1,0 +1,153 @@
+# connectors/slack.py
+"""
+Slack connector – transport-only concerns.
+
+Receives Slack events via Socket Mode (no public URL required), normalises
+them to the standard ChatWorkflow format, and returns responses.
+
+Requirements
+------------
+Install the optional Slack dependencies::
+
+    pip install slack-bolt
+
+Environment variables
+---------------------
+SLACK_BOT_TOKEN   – Bot OAuth token  (xoxb-...)
+SLACK_APP_TOKEN   – App-level token  (xapp-...)  [required for Socket Mode]
+
+Both tokens are created in the Slack app dashboard at https://api.slack.com/apps.
+"""
+
+import datetime
+import logging
+import os
+import uuid
+from typing import Optional
+
+from dotenv import load_dotenv
+
+try:
+    from slack_bolt import App as SlackApp
+    from slack_bolt.adapter.socket_mode import SocketModeHandler
+
+    SLACK_BOLT_AVAILABLE = True
+except ImportError:
+    SLACK_BOLT_AVAILABLE = False
+
+from agent.chat_workflow import ChatWorkflow
+from memory import UserManager
+
+load_dotenv()
+logger = logging.getLogger(__name__)
+
+# Shared ChatWorkflow instance (set by main.py)
+_workflow: Optional[ChatWorkflow] = None
+
+
+def set_workflow(workflow: ChatWorkflow) -> None:
+    """Set the shared ChatWorkflow instance (called from main.py)."""
+    global _workflow
+    _workflow = workflow
+
+
+def _get_internal_id(slack_user_id: str) -> str:
+    return UserManager.get_or_create_user_internal_id(
+        channel="slack",
+        external_id=slack_user_id,
+        secret_username=f"slack_{slack_user_id}",
+        updated_by="slack_bot",
+    )
+
+
+def start_slack_bot(workflow: ChatWorkflow) -> None:
+    """Start the Slack bot using Socket Mode with the shared ChatWorkflow."""
+    global _workflow
+    _workflow = workflow
+
+    if not SLACK_BOLT_AVAILABLE:
+        raise RuntimeError(
+            "slack-bolt is not installed. Install it with: pip install slack-bolt"
+        )
+
+    bot_token = os.getenv("SLACK_BOT_TOKEN")
+    app_token = os.getenv("SLACK_APP_TOKEN")
+
+    if not bot_token:
+        raise RuntimeError(
+            "SLACK_BOT_TOKEN is not set. Add it to your .env file."
+        )
+    if not app_token:
+        raise RuntimeError(
+            "SLACK_APP_TOKEN is not set (required for Socket Mode). "
+            "Add it to your .env file."
+        )
+
+    slack_app = SlackApp(token=bot_token)
+
+    # ── Message handler ──────────────────────────────────────────────────────
+
+    @slack_app.event("message")
+    def handle_message(event, say, ack):
+        """Handle incoming Slack messages."""
+        ack()
+
+        if not _workflow:
+            say("❌ System not initialized.")
+            return
+
+        # Ignore messages from bots (including self) to prevent loops
+        if event.get("bot_id"):
+            return
+
+        slack_user_id = event.get("user", "unknown")
+        channel_id = event.get("channel", slack_user_id)
+        ts = event.get("ts", "")
+        text = event.get("text", "")
+
+        if not text:
+            return
+
+        internal_id = _get_internal_id(slack_user_id)
+        normalized_input = {
+            "platform": "slack",
+            "external_user_id": slack_user_id,
+            "external_chat_id": channel_id,
+            "message_id": ts or str(uuid.uuid4()),
+            "text": text,
+            "timestamp": datetime.datetime.utcnow(),
+            "internal_id": internal_id,
+        }
+
+        import asyncio
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(
+                        asyncio.run, _workflow.process_message(normalized_input)
+                    )
+                    result = future.result()
+            else:
+                result = loop.run_until_complete(
+                    _workflow.process_message(normalized_input)
+                )
+        except RuntimeError:
+            result = asyncio.run(_workflow.process_message(normalized_input))
+
+        say(result.get("text", "[Error: No response]"))
+
+    # ── App mention handler (@Curie …) ───────────────────────────────────────
+
+    @slack_app.event("app_mention")
+    def handle_mention(event, say, ack):
+        """Handle @-mentions of the bot."""
+        ack()
+        handle_message(event, say, lambda: None)
+
+    print("🤖 Slack bot is running (Socket Mode)…")
+    handler = SocketModeHandler(slack_app, app_token)
+    handler.start()
