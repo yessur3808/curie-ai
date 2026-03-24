@@ -180,6 +180,10 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
 
 
 def _cmd_tasks(args: argparse.Namespace) -> int:
+    if getattr(args, "canvas", False):
+        from cli.canvas_webview import show_canvas
+        show_canvas(show_finished=args.all)
+        return 0
     if getattr(args, "web", False):
         from cli.agent_webview import show_web
         show_web(show_finished=args.all)
@@ -191,6 +195,165 @@ def _cmd_tasks(args: argparse.Namespace) -> int:
         tree=getattr(args, "tree", False),
         visual=getattr(args, "visual", False),
     )
+    return 0
+
+
+def _cmd_canvas(args: argparse.Namespace) -> int:
+    from cli.canvas_webview import show_canvas
+    show_canvas(show_finished=getattr(args, "all", False))
+    return 0
+
+
+def _cmd_sessions(args: argparse.Namespace) -> int:
+    """Manage and inspect conversation sessions."""
+    from cli import ui
+    sub = args.sessions_action
+
+    try:
+        from memory.session_store import get_session_manager
+        sm = get_session_manager()
+    except Exception as exc:
+        ui.error(f"Could not connect to session store: {exc}")
+        return 1
+
+    if sub == "list":
+        channel = getattr(args, "channel", None)
+        try:
+            sessions = sm.list_sessions(channel=channel)
+        except Exception as exc:
+            ui.error(f"Failed to list sessions: {exc}")
+            return 1
+        if not sessions:
+            ui.warn("No sessions found.")
+            return 0
+        try:
+            from rich.console import Console
+            from rich.table import Table
+            from rich import box
+            console = Console()
+            table = Table(box=box.SIMPLE_HEAVY, show_header=True)
+            table.add_column("Session key", style="cyan")
+            table.add_column("Channel", style="dim")
+            table.add_column("User ID", style="dim")
+            table.add_column("Messages", justify="right")
+            table.add_column("Updated")
+            for s in sessions:
+                table.add_row(
+                    str(s.get("_id", "")),
+                    s.get("channel", ""),
+                    s.get("user_id", ""),
+                    str(len(s.get("messages", []))),
+                    str(s.get("updated_at", "")[:19] if s.get("updated_at") else ""),
+                )
+            console.print(table)
+        except ImportError:
+            for s in sessions:
+                print(s.get("_id", ""), s.get("channel", ""), s.get("user_id", ""))
+        return 0
+
+    if sub == "clear":
+        user_id = getattr(args, "user_id", None)
+        channel = getattr(args, "channel", None)
+        if not user_id:
+            ui.error("Provide --user-id to identify the session to clear.")
+            return 1
+        try:
+            if channel:
+                sm.reset_session(channel, user_id)
+                ui.success(f"Cleared session for {channel}:{user_id}")
+            else:
+                sm.reset_user_all_channels(user_id)
+                ui.success(f"Cleared all sessions for user {user_id}")
+        except Exception as exc:
+            ui.error(f"Failed to clear session: {exc}")
+            return 1
+        return 0
+
+    if sub == "stats":
+        try:
+            all_sessions = sm.list_sessions()
+        except Exception as exc:
+            ui.error(f"Failed to fetch sessions: {exc}")
+            return 1
+        total = len(all_sessions)
+        total_msgs = sum(len(s.get("messages", [])) for s in all_sessions)
+        channels: dict = {}
+        for s in all_sessions:
+            ch = s.get("channel", "unknown")
+            channels[ch] = channels.get(ch, 0) + 1
+        try:
+            from rich.console import Console
+            from rich.table import Table
+            from rich import box
+            console = Console()
+            console.print(f"\n[bold cyan]Session Statistics[/bold cyan]")
+            console.print(f"  Total sessions : [bold]{total}[/bold]")
+            console.print(f"  Total messages : [bold]{total_msgs}[/bold]")
+            console.print(f"  By channel:")
+            for ch, cnt in sorted(channels.items()):
+                console.print(f"    {ch}: {cnt}")
+            console.print()
+        except ImportError:
+            print(f"Total sessions: {total}, messages: {total_msgs}")
+        return 0
+
+    ui.error(f"Unknown sessions action: {sub!r}")
+    return 1
+
+
+def _cmd_tools(args: argparse.Namespace) -> int:
+    """List and inspect available first-class tools."""
+    from cli import ui
+
+    category = getattr(args, "category", None)
+    tag = getattr(args, "tag", None)
+    available_only = getattr(args, "available_only", False)
+
+    try:
+        from agent.tools import list_tools
+        tools = list_tools(available_only=available_only, category=category, tag=tag)
+    except Exception as exc:
+        ui.error(f"Could not load tools registry: {exc}")
+        return 1
+
+    if not tools:
+        ui.warn("No tools found matching the given filters.")
+        return 0
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        from rich import box
+        console = Console()
+        table = Table(
+            box=box.SIMPLE_HEAVY,
+            show_header=True,
+            title="[bold cyan]Curie AI — First-class Tools[/bold cyan]",
+        )
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Display Name")
+        table.add_column("Category", style="dim")
+        table.add_column("Status", justify="center")
+        table.add_column("Description")
+        for t in tools:
+            status = "[green]✓[/green]" if t.available else "[red]✗[/red]"
+            table.add_row(
+                t.name,
+                t.display_name,
+                t.category,
+                status,
+                t.description[:60] + ("…" if len(t.description) > 60 else ""),
+            )
+        console.print(table)
+        avail = sum(1 for t in tools if t.available)
+        console.print(
+            f"  [dim]{avail}/{len(tools)} available "
+            f"({'--available' if not available_only else 'all'} filter)[/dim]\n"
+        )
+    except ImportError:
+        for t in tools:
+            mark = "✓" if t.available else "✗"
+            print(f"[{mark}] {t.name:<24} ({t.category}) — {t.description[:60]}")
     return 0
 
 
@@ -481,6 +644,11 @@ Examples:
         action="store_true",
         help="Open a browser-based animated Curie dashboard with live sub-agent cards",
     )
+    p_tasks.add_argument(
+        "--canvas",
+        action="store_true",
+        help="Open the Live Canvas node-graph workspace in the browser",
+    )
     p_tasks.set_defaults(func=_cmd_tasks)
 
     # ── agent ──────────────────────────────────────────────────────────────
@@ -655,6 +823,78 @@ Examples:
         help="Show full command reference with descriptions and examples",
     )
     p_help.set_defaults(func=_cmd_help)
+
+    # ── canvas ─────────────────────────────────────────────────────────────
+    p_canvas = subs.add_parser(
+        "canvas",
+        help="Open the Live Canvas node-graph workspace in the browser",
+        description=(
+            "Live Canvas — agent-driven visual workspace.\n\n"
+            "Shows all running tasks as interactive nodes with animated edges.\n"
+            "Drag nodes, scroll to zoom, hover for details."
+        ),
+    )
+    p_canvas.add_argument(
+        "--all",
+        dest="all",
+        action="store_true",
+        help="Include finished tasks",
+    )
+    p_canvas.set_defaults(func=_cmd_canvas)
+
+    # ── sessions ───────────────────────────────────────────────────────────
+    p_sessions = subs.add_parser(
+        "sessions",
+        help="Inspect and manage conversation sessions",
+    )
+    sess_subs = p_sessions.add_subparsers(dest="sessions_action", metavar="ACTION")
+
+    p_sess_list = sess_subs.add_parser("list", help="List active sessions")
+    p_sess_list.add_argument(
+        "--channel",
+        default=None,
+        metavar="CHANNEL",
+        help="Filter by channel (telegram, discord, slack, api, …)",
+    )
+
+    p_sess_clear = sess_subs.add_parser("clear", help="Clear session memory for a user")
+    p_sess_clear.add_argument("--user-id", dest="user_id", required=True, metavar="ID")
+    p_sess_clear.add_argument(
+        "--channel",
+        default=None,
+        metavar="CHANNEL",
+        help="Clear only the session for this channel (default: all channels)",
+    )
+
+    sess_subs.add_parser("stats", help="Session statistics (counts, message totals)")
+
+    p_sessions.set_defaults(func=_cmd_sessions)
+
+    # ── tools ──────────────────────────────────────────────────────────────
+    p_tools = subs.add_parser(
+        "tools",
+        help="List and inspect available first-class tools / skills",
+    )
+    p_tools.add_argument(
+        "--category",
+        default=None,
+        choices=["skill", "connector", "service", "canvas"],
+        metavar="CATEGORY",
+        help="Filter by category: skill | connector | service | canvas",
+    )
+    p_tools.add_argument(
+        "--tag",
+        default=None,
+        metavar="TAG",
+        help="Filter by tag (e.g. web, coding, messaging)",
+    )
+    p_tools.add_argument(
+        "--available",
+        dest="available_only",
+        action="store_true",
+        help="Show only tools whose dependencies are satisfied",
+    )
+    p_tools.set_defaults(func=_cmd_tools)
 
     return parser
 

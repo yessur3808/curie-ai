@@ -10,3 +10,7 @@ openai-whisper==20240930
 # Multi-platform connectors (optional)
 discord.py==2.4.0
 whatsapp-web.py==0.1.0
+
+# Slack connector (optional)
+# Provides Slack bot via Socket Mode or HTTP
+slack-bolt>=1.18.0
