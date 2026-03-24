@@ -6,20 +6,35 @@ A compact cheat-sheet for common commands, API calls, and configuration.
 
 ## Bot Commands
 
-These slash commands are available on **Telegram** and **Discord**.
+Telegram uses `/` prefix for commands; Discord uses the `!` prefix (e.g. `!start`).
+
+### Telegram Commands (`/`)
 
 | Command | Description |
 |---|---|
 | `/start` | Display the assistant's greeting |
-| `/help` | Show available commands (Discord) |
 | `/busy` | Pause proactive messages while you focus |
 | `/resume` | Resume normal proactive messaging |
 | `/remember <key> <value>` | Save a personal fact — e.g. `/remember city Paris` |
 | `/identify <secret_username>` | Link your platform account to an existing internal profile |
 | `/reset` | Clear your conversation history |
 | `/history` | Show recent conversation history |
-| `/reminders` | List your upcoming reminders (Telegram) |
+| `/reminders` | List your upcoming reminders |
 | `/clear_memory` | Wipe all stored conversation context (admin only) |
+
+### Discord Commands (`!`)
+
+| Command | Description |
+|---|---|
+| `!start` | Display the assistant's greeting |
+| `!help` | Show available commands |
+| `!busy` | Pause proactive messages while you focus |
+| `!resume` | Resume normal proactive messaging |
+| `!remember <key> <value>` | Save a personal fact — e.g. `!remember city Paris` |
+| `!identify <secret_username>` | Link your platform account to an existing internal profile |
+| `!reset` | Clear your conversation history |
+| `!history` | Show recent conversation history |
+| `!clear_memory` | Wipe all stored conversation context (admin only) |
 
 ---
 
