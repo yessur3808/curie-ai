@@ -709,7 +709,7 @@ curie-ai/
 
 | Guide | Description |
 |---|---|
-| [Quick Start](docs/QUICK_START.md) | Detailed 5-minute setup walkthrough |
+| [Quick Start](docs/QUICK_START.md) | Detailed ~10-minute setup walkthrough |
 | [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) | Platform-specific setup and voice configuration |
 | [Advanced Coding Features](docs/ADVANCED_CODING_FEATURES.md) | Pair programming, bug detection, performance analysis |
 | [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) | Code review, PR management, self-update |
