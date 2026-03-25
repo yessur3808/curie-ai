@@ -362,9 +362,16 @@ class ToolRegistry:
             except ImportError as exc:
                 available = False
                 error = f"Import error: {exc}"
-            except Exception:
-                # Don't crash the registry for unrelated runtime errors
-                pass
+            except Exception as exc:
+                # Don't crash the registry for unrelated runtime errors,
+                # but do mark the tool as unavailable and record the error.
+                available = False
+                error = f"Runtime error during import: {exc}"
+                logger.exception(
+                    "Error importing tool module '%s' for tool '%s'",
+                    spec.get("module_path"),
+                    spec.get("name"),
+                )
 
         return ToolInfo(
             name=spec["name"],
