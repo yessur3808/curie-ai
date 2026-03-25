@@ -160,8 +160,20 @@ async def _fetch_raw(url: str) -> Tuple[Optional[str], Optional[str], Optional[s
                 return None, None, f"HTTP {response.status_code} from {current_url}"
 
             content_type = response.headers.get("content-type", "")
-            if "text" not in content_type and "html" not in content_type:
-                return None, None, f"Non-text content-type: {content_type}"
+            ct_lower = content_type.lower()
+            # Allow traditional text/html types, plus common XML-based HTML
+            # and other human-readable XML variants (e.g. application/xhtml+xml,
+            # application/xml, and application/*+xml). If the content-type header
+            # is missing, fall back to attempting to parse it as text.
+            if ct_lower:
+                if (
+                    ("text" not in ct_lower)
+                    and ("html" not in ct_lower)
+                    and (not ct_lower.startswith("application/xhtml+xml"))
+                    and (not ct_lower.startswith("application/xml"))
+                    and (not ct_lower.endswith("+xml"))
+                ):
+                    return None, None, f"Non-text content-type: {content_type}"
 
             return response.text, current_url, None
 
