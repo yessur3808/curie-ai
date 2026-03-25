@@ -206,12 +206,6 @@ def run_slack(workflow: ChatWorkflow):
 
     print("Starting Slack connector...")
 
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
     start_slack_bot(workflow)
 
 
