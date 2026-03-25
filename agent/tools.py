@@ -369,7 +369,9 @@ class ToolRegistry:
             one_of = spec.get("requires_one_of_env", [])
             if one_of and not any(os.getenv(e) for e in one_of):
                 available = False
-                error = f"At least one of these env vars must be set: {', '.join(one_of)}"
+                error = (
+                    f"At least one of these env vars must be set: {', '.join(one_of)}"
+                )
 
         # 3. Try importing the module (only if env checks passed)
         if available:

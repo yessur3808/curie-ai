@@ -333,7 +333,9 @@ class TestBrowserSkill:
         mock_response.is_redirect = False
 
         # Patch is_safe_url where it is looked up in browser.py's namespace
-        with patch("agent.skills.browser.is_safe_url", new=AsyncMock(return_value=True)):
+        with patch(
+            "agent.skills.browser.is_safe_url", new=AsyncMock(return_value=True)
+        ):
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -368,7 +370,9 @@ class TestBrowserSkill:
         mock_response.text = sample_html
         mock_response.is_redirect = False
 
-        with patch("agent.skills.browser.is_safe_url", new=AsyncMock(return_value=True)):
+        with patch(
+            "agent.skills.browser.is_safe_url", new=AsyncMock(return_value=True)
+        ):
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)

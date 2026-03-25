@@ -135,7 +135,11 @@ def _build_slack_app(workflow: ChatWorkflow) -> "App":
             return
 
         # Ignore bot messages to avoid loops
-        if message.get("subtype") in ("bot_message", "message_changed", "message_deleted"):
+        if message.get("subtype") in (
+            "bot_message",
+            "message_changed",
+            "message_deleted",
+        ):
             return
         if message.get("bot_id"):
             return
@@ -154,9 +158,7 @@ def _build_slack_app(workflow: ChatWorkflow) -> "App":
             info = client.users_info(user=user_id)
             profile = info.get("user", {}).get("profile", {})
             slack_username = (
-                profile.get("display_name")
-                or profile.get("real_name")
-                or user_id
+                profile.get("display_name") or profile.get("real_name") or user_id
             )
         except Exception:
             pass
@@ -177,7 +179,9 @@ def _build_slack_app(workflow: ChatWorkflow) -> "App":
             import asyncio
 
             loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(_workflow.process_message(normalized_input))
+            result = loop.run_until_complete(
+                _workflow.process_message(normalized_input)
+            )
             loop.close()
         except Exception as exc:
             logger.error("Error processing Slack message: %s", exc)
@@ -190,7 +194,9 @@ def _build_slack_app(workflow: ChatWorkflow) -> "App":
         if len(response_text) <= 4000:
             say(response_text)
         else:
-            chunks = [response_text[i : i + 4000] for i in range(0, len(response_text), 4000)]
+            chunks = [
+                response_text[i : i + 4000] for i in range(0, len(response_text), 4000)
+            ]
             for chunk in chunks:
                 say(chunk)
 
@@ -227,7 +233,9 @@ def _build_slack_app(workflow: ChatWorkflow) -> "App":
             import asyncio
 
             loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(_workflow.process_message(normalized_input))
+            result = loop.run_until_complete(
+                _workflow.process_message(normalized_input)
+            )
             loop.close()
         except Exception as exc:
             logger.error("Error handling /curie command: %s", exc)
@@ -290,7 +298,9 @@ def start_slack_bot(workflow: Optional[ChatWorkflow] = None) -> None:
         set_workflow(workflow)
 
     if _workflow is None:
-        logger.error("No ChatWorkflow set — call set_workflow() before start_slack_bot()")
+        logger.error(
+            "No ChatWorkflow set — call set_workflow() before start_slack_bot()"
+        )
         return
 
     app_token = os.getenv("SLACK_APP_TOKEN")

@@ -97,7 +97,9 @@ def _extract_readable_text(soup: BeautifulSoup) -> str:
     return combined[:MAX_CONTENT_CHARS]
 
 
-def _extract_links_from_soup(soup: BeautifulSoup, base_url: str) -> List[Dict[str, str]]:
+def _extract_links_from_soup(
+    soup: BeautifulSoup, base_url: str
+) -> List[Dict[str, str]]:
     """Return a list of {url, text} dicts for all anchor tags."""
     seen: set = set()
     links: List[Dict[str, str]] = []
@@ -349,7 +351,12 @@ async def submit_form(
     except httpx.TimeoutException:
         return {"url": url, "title": "", "content": "", "error": "Request timed out"}
     except httpx.RequestError as exc:
-        return {"url": url, "title": "", "content": "", "error": f"Network error: {exc}"}
+        return {
+            "url": url,
+            "title": "",
+            "content": "",
+            "error": f"Network error: {exc}",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +416,9 @@ async def handle_browser_query(
             return f"⚠️ Could not extract links: {result['error']}"
         if not result["links"]:
             return f"🔗 No links found on {result['url']}"
-        link_lines = [f"• [{lnk['text'][:60]}]({lnk['url']})" for lnk in result["links"][:15]]
+        link_lines = [
+            f"• [{lnk['text'][:60]}]({lnk['url']})" for lnk in result["links"][:15]
+        ]
         return f"🔗 **Links on {result['url']}**\n\n" + "\n".join(link_lines)
 
     if any(w in lower for w in ["screenshot", "snapshot", "structure"]):
@@ -418,7 +427,10 @@ async def handle_browser_query(
             return f"⚠️ Could not snapshot page: {result['error']}"
         parts = [f"📸 **{result['title'] or result['url']}**"]
         if result["headings"]:
-            parts.append("\n**Headings:**\n" + "\n".join(f"• {h}" for h in result["headings"][:6]))
+            parts.append(
+                "\n**Headings:**\n"
+                + "\n".join(f"• {h}" for h in result["headings"][:6])
+            )
         if result["summary"]:
             parts.append("\n**Content:**\n" + result["summary"][:1500])
         return "\n".join(parts)
