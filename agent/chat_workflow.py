@@ -574,6 +574,54 @@ class ChatWorkflow:
             except Exception:
                 pass
 
+            try:
+                from agent.skills.network_analyzer import (  # noqa
+                    handle_network_analyzer_query,
+                )
+
+                _skill_specs.append(
+                    (
+                        "network_analyzer_skill",
+                        "network_analyzer",
+                        "Scanning for network traffic / protocol analysis query",
+                        handle_network_analyzer_query(user_text),
+                    )
+                )
+            except Exception:
+                pass
+
+            try:
+                from agent.skills.network_scanner import (  # noqa
+                    handle_network_scanner_query,
+                )
+
+                _skill_specs.append(
+                    (
+                        "network_scanner_skill",
+                        "network_scanner",
+                        "Scanning for network reconnaissance / port scan query",
+                        handle_network_scanner_query(user_text),
+                    )
+                )
+            except Exception:
+                pass
+
+            try:
+                from agent.skills.http_interceptor import (  # noqa
+                    handle_http_interceptor_query,
+                )
+
+                _skill_specs.append(
+                    (
+                        "http_interceptor_skill",
+                        "http_interceptor",
+                        "Scanning for HTTP/S interception / web vulnerability query",
+                        handle_http_interceptor_query(user_text),
+                    )
+                )
+            except Exception:
+                pass
+
             # Register all skill sub-agents up-front so the visualization
             # shows every agent as "running" during the parallel check.
             if _TASK_TRACKING and _skill_specs:
