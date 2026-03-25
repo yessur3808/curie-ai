@@ -574,6 +574,24 @@ class ChatWorkflow:
             except Exception:
                 pass
 
+            try:
+                from agent.skills.browser import (  # noqa
+                    is_browser_intent,
+                    handle_browser_query,
+                )
+
+                if is_browser_intent(user_text):
+                    _skill_specs.append(
+                        (
+                            "browser_skill",
+                            "browser",
+                            "Fetching web page",
+                            handle_browser_query(user_text),
+                        )
+                    )
+            except Exception:
+                pass
+
             # Register all skill sub-agents up-front so the visualization
             # shows every agent as "running" during the parallel check.
             if _TASK_TRACKING and _skill_specs:

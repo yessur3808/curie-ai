@@ -27,7 +27,7 @@ from __future__ import annotations
 import datetime
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -50,12 +50,7 @@ logger = logging.getLogger(__name__)
 # Shared workflow instance (set by main.py / set_workflow)
 _workflow: Optional[ChatWorkflow] = None
 # Bolt App instance (set during start_slack_bot)
-_slack_app: Optional[Any] = None  # type: ignore[name-defined]
-
-# ---------------------------------------------------------------------------
-# Module-level type ignore helper
-# ---------------------------------------------------------------------------
-from typing import Any  # noqa: E402  (needed after conditional import)
+_slack_app: Optional[Any] = None
 
 
 def set_workflow(workflow: ChatWorkflow) -> None:

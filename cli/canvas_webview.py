@@ -24,7 +24,6 @@ The canvas is self-contained (no CDN dependencies) and uses:
 from __future__ import annotations
 
 import json
-import os
 import socket
 import threading
 import time
@@ -42,11 +41,22 @@ _TASKS_FILE = _CURIE_DIR / "tasks.json"
 _SHUTDOWN_EVENT = threading.Event()
 
 
+_SHOW_FINISHED: bool = False
+
+
 def _load_tasks() -> dict:
     try:
-        return json.loads(_TASKS_FILE.read_text())
+        raw = json.loads(_TASKS_FILE.read_text())
     except Exception:
         return {"tasks": {}}
+
+    if not _SHOW_FINISHED:
+        raw["tasks"] = {
+            tid: t
+            for tid, t in raw.get("tasks", {}).items()
+            if t.get("status") != "done"
+        }
+    return raw
 
 
 def _find_free_port() -> int:
@@ -615,12 +625,18 @@ class _Handler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 
-def show_canvas(show_finished: bool = False) -> None:  # noqa: ARG001
+def show_canvas(show_finished: bool = False) -> None:
     """
     Start the Live Canvas HTTP server and open it in the default browser.
 
+    Args:
+        show_finished: When *True*, finished (done) tasks are shown alongside
+                       running ones.  Defaults to *False* (active tasks only).
+
     Blocks until the user presses Ctrl-C.
     """
+    global _SHOW_FINISHED
+    _SHOW_FINISHED = show_finished
     _SHUTDOWN_EVENT.clear()
     port = _find_free_port()
     server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
