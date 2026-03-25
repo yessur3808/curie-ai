@@ -20,6 +20,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -57,7 +58,10 @@ class ToolInfo:
     """Free-form tags for filtering/search."""
 
     requires_env: List[str] = field(default_factory=list)
-    """Environment variables that must be set for the tool to function."""
+    """Environment variables that must ALL be set for the tool to function."""
+
+    requires_one_of_env: List[str] = field(default_factory=list)
+    """At least one of these environment variables must be set."""
 
     available: bool = True
     """False when the underlying module or an env var dependency is missing."""
@@ -78,6 +82,7 @@ class ToolInfo:
             "entry_point": self.entry_point,
             "tags": self.tags,
             "requires_env": self.requires_env,
+            "requires_one_of_env": self.requires_one_of_env,
             "available": self.available,
             "error": self.error,
             "extra": self.extra,
@@ -267,7 +272,10 @@ _TOOL_SPECS: List[Dict[str, Any]] = [
         "category": "connector",
         "module_path": "connectors.slack_bot",
         "tags": ["messaging", "slack"],
-        "requires_env": ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
+        # SLACK_BOT_TOKEN is always required.  The second token depends on mode:
+        # Socket Mode (default): SLACK_APP_TOKEN; HTTP Mode: SLACK_SIGNING_SECRET.
+        "requires_env": ["SLACK_BOT_TOKEN"],
+        "requires_one_of_env": ["SLACK_APP_TOKEN", "SLACK_SIGNING_SECRET"],
     },
     {
         "name": "whatsapp",
@@ -334,6 +342,7 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: Dict[str, ToolInfo] = {}
         self._loaded = False
+        self._lock = threading.Lock()
 
     def _load(self) -> None:
         if self._loaded:
@@ -349,13 +358,20 @@ class ToolRegistry:
         available = True
         error: Optional[str] = None
 
-        # 1. Check required env vars
+        # 1. Check required env vars (ALL must be present)
         missing_env = [e for e in spec.get("requires_env", []) if not os.getenv(e)]
         if missing_env:
             available = False
             error = f"Missing env vars: {', '.join(missing_env)}"
 
-        # 2. Try importing the module (only if env check passed)
+        # 2. Check conditional env vars (AT LEAST ONE must be present)
+        if available:
+            one_of = spec.get("requires_one_of_env", [])
+            if one_of and not any(os.getenv(e) for e in one_of):
+                available = False
+                error = f"At least one of these env vars must be set: {', '.join(one_of)}"
+
+        # 3. Try importing the module (only if env checks passed)
         if available:
             try:
                 importlib.import_module(spec["module_path"])
@@ -382,6 +398,7 @@ class ToolRegistry:
             entry_point=spec.get("entry_point"),
             tags=spec.get("tags", []),
             requires_env=spec.get("requires_env", []),
+            requires_one_of_env=spec.get("requires_one_of_env", []),
             available=available,
             error=error,
             extra=spec.get("extra", {}),
@@ -391,13 +408,15 @@ class ToolRegistry:
 
     def get(self, name: str) -> Optional[ToolInfo]:
         """Return the :class:`ToolInfo` for *name*, or ``None``."""
-        self._load()
-        return self._tools.get(name)
+        with self._lock:
+            self._load()
+            return self._tools.get(name)
 
     def all(self) -> List[ToolInfo]:
         """Return all registered tools, sorted by category then name."""
-        self._load()
-        return sorted(self._tools.values(), key=lambda t: (t.category, t.name))
+        with self._lock:
+            self._load()
+            return sorted(self._tools.values(), key=lambda t: (t.category, t.name))
 
     def available_tools(self) -> List[ToolInfo]:
         """Return only tools whose dependencies are satisfied."""
@@ -426,9 +445,10 @@ class ToolRegistry:
 
     def reload(self) -> None:
         """Force a fresh probe of all tools (useful after installing deps)."""
-        self._loaded = False
-        self._tools.clear()
-        self._load()
+        with self._lock:
+            self._loaded = False
+            self._tools.clear()
+            self._load()
 
 
 # Module-level singleton

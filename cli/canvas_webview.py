@@ -195,6 +195,9 @@ const COLOR = {
 // ─── State ───────────────────────────────────────────────────────────────────
 let tasks = {};
 let nodes = [];       // {id, x, y, w, h, task, subId, status, label, desc, isRoot}
+// Persistent position map: id -> {x, y}
+// Populated on drag and used by buildNodes() to restore positions across SSE updates.
+const _nodePositions = {};
 let panX = 0, panY = 0, zoom = 1;
 let dragging = null, dragOffX = 0, dragOffY = 0;
 let showLabels = true;
@@ -216,18 +219,19 @@ resize();
 
 // ─── Layout helpers ──────────────────────────────────────────────────────────
 function buildNodes() {
-  nodes = [];
+  const newNodes = [];
   const taskArr = Object.values(tasks).sort((a,b) => (a.started_at||0) - (b.started_at||0));
   let col = 0, row = 0, colHeights = new Array(COLS).fill(0);
 
   taskArr.forEach(task => {
-    const x = col * (NODE_W + PAD_X) + PAD_X;
-    const y = colHeights[col] + PAD_Y;
-    const existing = nodes.find(n => n.id === task.id && n.isRoot);
-    const nx = existing ? existing.x : x;
-    const ny = existing ? existing.y : y;
+    const autoX = col * (NODE_W + PAD_X) + PAD_X;
+    const autoY = colHeights[col] + PAD_Y;
+    // Restore manually dragged position if available, otherwise use auto-layout.
+    const saved = _nodePositions[task.id];
+    const nx = saved ? saved.x : autoX;
+    const ny = saved ? saved.y : autoY;
 
-    nodes.push({
+    newNodes.push({
       id: task.id, isRoot: true,
       x: nx, y: ny, w: NODE_W, h: NODE_H,
       task, subId: null,
@@ -241,10 +245,10 @@ function buildNodes() {
     const agents = Object.values(task.sub_agents || {});
     agents.forEach(agent => {
       const cid = task.id + '::' + agent.id;
-      const cExisting = nodes.find(n => n.id === cid);
-      const cx = cExisting ? cExisting.x : nx + (NODE_W - CHILD_W) / 2;
-      const cy = cExisting ? cExisting.y : childY;
-      nodes.push({
+      const cSaved = _nodePositions[cid];
+      const cx = cSaved ? cSaved.x : nx + (NODE_W - CHILD_W) / 2;
+      const cy = cSaved ? cSaved.y : childY;
+      newNodes.push({
         id: cid, isRoot: false,
         x: cx, y: cy, w: CHILD_W, h: CHILD_H,
         task, subId: agent.id,
@@ -262,6 +266,7 @@ function buildNodes() {
     col = (col + 1) % COLS;
     if (col === 0) row++;
   });
+  nodes = newNodes;
 }
 
 function truncate(s, n) {
@@ -458,6 +463,8 @@ cvs.addEventListener('mousemove', e => {
   if (dragging) {
     dragging.x = p.x - dragOffX;
     dragging.y = p.y - dragOffY;
+    // Persist the dragged position so it survives SSE updates.
+    _nodePositions[dragging.id] = { x: dragging.x, y: dragging.y };
   } else if (isPanning) {
     panX = e.clientX - panStartX;
     panY = e.clientY - panStartY;
@@ -488,7 +495,8 @@ cvs.addEventListener('wheel', e => {
 // ─── Controls ────────────────────────────────────────────────────────────────
 document.getElementById('btn-fit').addEventListener('click', fitView);
 document.getElementById('btn-reset').addEventListener('click', () => {
-  // Redo auto-layout (discard manual drag positions)
+  // Discard manual drag positions and redo auto-layout.
+  Object.keys(_nodePositions).forEach(k => delete _nodePositions[k]);
   buildNodes();
   fitView();
 });

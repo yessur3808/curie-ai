@@ -35,7 +35,7 @@ try:
     from slack_bolt import App
     from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-    SLACK_AVAILABLE = True
+    SLACK_AVAILABLE = bool(App) and bool(SocketModeHandler)
 except ImportError:
     App = None
     SocketModeHandler = None
@@ -313,6 +313,13 @@ def start_slack_bot(workflow: Optional[ChatWorkflow] = None) -> None:
         handler = SocketModeHandler(_slack_app, app_token)
         handler.start()
     else:
+        signing_secret = os.getenv("SLACK_SIGNING_SECRET")
+        if not signing_secret:
+            logger.error(
+                "SLACK_SIGNING_SECRET is required for HTTP mode. "
+                "Set SLACK_SOCKET_MODE=true to use Socket Mode instead."
+            )
+            return
         port = int(os.getenv("SLACK_PORT", "3000"))
         logger.info("🌐 Starting Slack bot in HTTP mode on port %d…", port)
         _slack_app.start(port=port)
