@@ -90,8 +90,11 @@ async def send_message(external_user_id: str, message: str) -> bool:
         logger.warning("Slack app not initialised; cannot send proactive message")
         return False
     try:
+        # Open (or retrieve) a DM channel with the user, then send the message
+        dm_response = _slack_app.client.conversations_open(users=external_user_id)
+        channel_id = dm_response["channel"]["id"]
         _slack_app.client.chat_postMessage(
-            channel=external_user_id,  # Slack DMs: channel = user ID
+            channel=channel_id,
             text=message,
         )
         return True
