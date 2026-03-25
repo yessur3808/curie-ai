@@ -12,10 +12,10 @@ import pytest
 import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # NetworkAnalyzer tests
 # ---------------------------------------------------------------------------
+
 
 class TestNetworkAnalyzer:
     """Tests for agent/skills/network_analyzer.py"""
@@ -23,6 +23,7 @@ class TestNetworkAnalyzer:
     @pytest.fixture
     def analyzer(self):
         from agent.skills.network_analyzer import NetworkAnalyzer
+
         return NetworkAnalyzer()
 
     # -- get_active_connections ------------------------------------------------
@@ -35,7 +36,10 @@ class TestNetworkAnalyzer:
 
     def test_get_active_connections_with_psutil(self, analyzer):
         """Returns expected keys when psutil is present."""
-        import psutil
+        try:
+            import psutil
+        except ImportError:
+            pytest.skip("psutil not installed")
 
         # Use a mock connection object
         FakeAddr = type("Addr", (), {"ip": "127.0.0.1", "port": 80})
@@ -61,7 +65,10 @@ class TestNetworkAnalyzer:
 
     def test_get_active_connections_permission_denied(self, analyzer):
         """Returns error dict on PermissionError."""
-        import psutil
+        try:
+            import psutil
+        except ImportError:
+            pytest.skip("psutil not installed")
 
         with patch("psutil.net_connections", side_effect=psutil.AccessDenied(0)):
             result = analyzer.get_active_connections()
@@ -176,6 +183,7 @@ class TestNetworkAnalyzer:
 
     def test_is_network_analyzer_query_positive(self):
         from agent.skills.network_analyzer import is_network_analyzer_query
+
         assert is_network_analyzer_query("show me network connections")
         assert is_network_analyzer_query("capture packets on eth0")
         assert is_network_analyzer_query("analyze network traffic")
@@ -191,12 +199,14 @@ class TestNetworkAnalyzer:
 
     def test_is_network_analyzer_query_negative(self):
         from agent.skills.network_analyzer import is_network_analyzer_query
+
         assert not is_network_analyzer_query("what is the weather today?")
         assert not is_network_analyzer_query("remind me to call Alice at 5pm")
 
     def test_handle_network_analyzer_query_not_matching(self):
         from agent.skills.network_analyzer import handle_network_analyzer_query
-        result = asyncio.get_event_loop().run_until_complete(
+
+        result = asyncio.run(
             handle_network_analyzer_query("what is the weather today?")
         )
         assert result is None
@@ -206,7 +216,7 @@ class TestNetworkAnalyzer:
 
         with patch("psutil.net_connections", return_value=[]):
             with patch("psutil.process_iter", return_value=[]):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     handle_network_analyzer_query("show network connections")
                 )
         assert result is not None
@@ -216,12 +226,18 @@ class TestNetworkAnalyzer:
         from agent.skills.network_analyzer import handle_network_analyzer_query
 
         FakeCounter = MagicMock(
-            bytes_sent=0, bytes_recv=0, packets_sent=0, packets_recv=0,
-            errin=0, errout=0, dropin=0, dropout=0,
+            bytes_sent=0,
+            bytes_recv=0,
+            packets_sent=0,
+            packets_recv=0,
+            errin=0,
+            errout=0,
+            dropin=0,
+            dropout=0,
         )
         with patch("psutil.net_io_counters", return_value={"lo": FakeCounter}):
             with patch("psutil.net_if_addrs", return_value={}):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     handle_network_analyzer_query("show network interface stats")
                 )
         assert result is not None
@@ -231,33 +247,39 @@ class TestNetworkAnalyzer:
 # NetworkScanner tests
 # ---------------------------------------------------------------------------
 
+
 class TestNetworkScanner:
     """Tests for agent/skills/network_scanner.py"""
 
     @pytest.fixture
     def scanner(self):
         from agent.skills.network_scanner import NetworkScanner
+
         return NetworkScanner(connect_timeout=0.1)
 
     # -- _parse_target ---------------------------------------------------------
 
     def test_parse_target_single_ip(self):
         from agent.skills.network_scanner import _parse_target
+
         ips = _parse_target("127.0.0.1")
         assert ips == ["127.0.0.1"]
 
     def test_parse_target_cidr(self):
         from agent.skills.network_scanner import _parse_target
+
         ips = _parse_target("192.168.1.0/30")
         assert len(ips) == 2  # /30 has 2 usable hosts
 
     def test_parse_target_cidr_too_large(self):
         from agent.skills.network_scanner import _parse_target
+
         with pytest.raises(ValueError):
             _parse_target("10.0.0.0/8")
 
     def test_parse_target_invalid(self):
         from agent.skills.network_scanner import _parse_target
+
         with pytest.raises(ValueError):
             _parse_target("not_a_host_!@#$")
 
@@ -265,25 +287,30 @@ class TestNetworkScanner:
 
     def test_parse_port_range_single(self):
         from agent.skills.network_scanner import _parse_port_range
+
         assert _parse_port_range("80") == [80]
 
     def test_parse_port_range_range(self):
         from agent.skills.network_scanner import _parse_port_range
+
         ports = _parse_port_range("80-82")
         assert ports == [80, 81, 82]
 
     def test_parse_port_range_csv(self):
         from agent.skills.network_scanner import _parse_port_range
+
         ports = _parse_port_range("22,80,443")
         assert sorted(ports) == [22, 80, 443]
 
     def test_parse_port_range_top100(self):
         from agent.skills.network_scanner import _parse_port_range, _TOP_100_PORTS
+
         ports = _parse_port_range("top100")
         assert ports == list(_TOP_100_PORTS)
 
     def test_parse_port_range_invalid(self):
         from agent.skills.network_scanner import _parse_port_range
+
         with pytest.raises(ValueError):
             _parse_port_range("0")
         with pytest.raises(ValueError):
@@ -293,6 +320,7 @@ class TestNetworkScanner:
 
     def test_scan_host_closed_ports(self, scanner):
         """Scanning a host where all ports refuse connections returns 0 open ports."""
+
         async def _run():
             # All connections refused
             with patch(
@@ -301,22 +329,25 @@ class TestNetworkScanner:
             ):
                 return await scanner.scan_host("127.0.0.1", port_spec="80,443")
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         assert result["open_count"] == 0
         assert result["ports_scanned"] == 2
 
     def test_scan_host_open_port(self, scanner):
         """Scanning a host with one open port reports it correctly."""
+
         async def _run():
             async def fake_tcp(host, port, timeout=1.0):
                 if port == 80:
                     return True, "HTTP/1.1 200 OK"
                 return False, None
 
-            with patch("agent.skills.network_scanner._tcp_connect", side_effect=fake_tcp):
+            with patch(
+                "agent.skills.network_scanner._tcp_connect", side_effect=fake_tcp
+            ):
                 return await scanner.scan_host("127.0.0.1", port_spec="80,443")
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         assert result["open_count"] == 1
         assert result["open_ports"][0]["port"] == 80
         assert result["open_ports"][0]["service"] == "HTTP"
@@ -325,14 +356,14 @@ class TestNetworkScanner:
         async def _run():
             return await scanner.scan_host("not_a_host_!@#$%")
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         assert "error" in result
 
     def test_scan_host_port_range_too_large(self, scanner):
         async def _run():
             return await scanner.scan_host("127.0.0.1", port_spec="1-65535")
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         # 65535 ports > 10000 limit
         assert "error" in result
 
@@ -387,6 +418,7 @@ class TestNetworkScanner:
 
     def test_is_network_scanner_query_positive(self):
         from agent.skills.network_scanner import is_network_scanner_query
+
         assert is_network_scanner_query("scan ports on 192.168.1.1")
         assert is_network_scanner_query("find open ports on example.com")
         assert is_network_scanner_query("nmap 10.0.0.1")
@@ -402,6 +434,7 @@ class TestNetworkScanner:
 
     def test_is_network_scanner_query_negative(self):
         from agent.skills.network_scanner import is_network_scanner_query
+
         assert not is_network_scanner_query("convert 100 usd to eur")
         assert not is_network_scanner_query("remind me to water the plants")
         # "security scan" alone no longer triggers the scanner (needs network context)
@@ -409,17 +442,15 @@ class TestNetworkScanner:
 
     def test_handle_network_scanner_query_no_target(self):
         from agent.skills.network_scanner import handle_network_scanner_query
-        result = asyncio.get_event_loop().run_until_complete(
-            handle_network_scanner_query("scan ports please")
-        )
+
+        result = asyncio.run(handle_network_scanner_query("scan ports please"))
         assert result is not None
         assert "target" in result.lower() or "example" in result.lower()
 
     def test_handle_network_scanner_query_not_matching(self):
         from agent.skills.network_scanner import handle_network_scanner_query
-        result = asyncio.get_event_loop().run_until_complete(
-            handle_network_scanner_query("what's the weather?")
-        )
+
+        result = asyncio.run(handle_network_scanner_query("what's the weather?"))
         assert result is None
 
     def test_handle_network_scanner_query_with_target(self, scanner):
@@ -434,32 +465,37 @@ class TestNetworkScanner:
                     "scan ports on 127.0.0.1 ports 80,443"
                 )
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         assert result is not None
         assert isinstance(result, str)
 
     def test_extract_target_ip(self):
         from agent.skills.network_scanner import _extract_target
+
         assert _extract_target("scan 192.168.1.1") == "192.168.1.1"
 
     def test_extract_target_cidr(self):
         from agent.skills.network_scanner import _extract_target
+
         assert _extract_target("scan 10.0.0.0/24") == "10.0.0.0/24"
 
     def test_extract_target_hostname(self):
         from agent.skills.network_scanner import _extract_target
+
         result = _extract_target("scan example.com")
         assert result is not None
         assert "example.com" in result
 
     def test_extract_target_none(self):
         from agent.skills.network_scanner import _extract_target
+
         assert _extract_target("just a generic query with no host") is None
 
     # -- Hardware-aware concurrency ------------------------------------------
 
     def test_get_hardware_concurrency_scales_with_cpu(self):
         from agent.skills.network_scanner import _get_hardware_concurrency
+
         with patch("os.cpu_count", return_value=8):
             result = _get_hardware_concurrency()
         assert result >= 256  # minimum floor
@@ -467,24 +503,31 @@ class TestNetworkScanner:
 
     def test_get_hardware_concurrency_min_floor(self):
         from agent.skills.network_scanner import _get_hardware_concurrency
+
         with patch("os.cpu_count", return_value=1):
             result = _get_hardware_concurrency()
         assert result == 256  # floor is 256
 
     def test_get_hardware_concurrency_max_cap(self):
         from agent.skills.network_scanner import _get_hardware_concurrency
+
         with patch("os.cpu_count", return_value=32):
             result = _get_hardware_concurrency()
         assert result == 1024  # cap is 1024
 
     def test_get_hardware_concurrency_null_cpu(self):
         from agent.skills.network_scanner import _get_hardware_concurrency
+
         with patch("os.cpu_count", return_value=None):
             result = _get_hardware_concurrency()
         assert result >= 256
 
     def test_get_network_scanner_uses_hardware_concurrency(self):
-        from agent.skills.network_scanner import get_network_scanner, _get_hardware_concurrency
+        from agent.skills.network_scanner import (
+            get_network_scanner,
+            _get_hardware_concurrency,
+        )
+
         sc = get_network_scanner()
         assert sc.max_concurrent == _get_hardware_concurrency()
 
@@ -492,6 +535,7 @@ class TestNetworkScanner:
 
     def test_get_local_networks_without_psutil(self):
         from agent.skills.network_scanner import _get_local_networks
+
         with patch("agent.skills.network_scanner._psutil_available", False):
             result = _get_local_networks()
         assert result == []
@@ -499,6 +543,7 @@ class TestNetworkScanner:
     def test_get_local_networks_with_psutil(self):
         from agent.skills.network_scanner import _get_local_networks
         import socket as _socket
+
         FakeAddr = MagicMock()
         FakeAddr.family.value = _socket.AF_INET
         FakeAddr.address = "192.168.1.100"
@@ -513,6 +558,7 @@ class TestNetworkScanner:
     def test_get_local_networks_skips_loopback(self):
         from agent.skills.network_scanner import _get_local_networks
         import socket as _socket
+
         FakeAddr = MagicMock()
         FakeAddr.family.value = _socket.AF_INET
         FakeAddr.address = "127.0.0.1"
@@ -528,6 +574,7 @@ class TestNetworkScanner:
         """Networks wider than /16 are narrowed to /24 of the host IP."""
         from agent.skills.network_scanner import _get_local_networks
         import socket as _socket
+
         FakeAddr = MagicMock()
         FakeAddr.family.value = _socket.AF_INET
         FakeAddr.address = "10.0.0.50"
@@ -550,6 +597,7 @@ class TestNetworkScanner:
             a.address = ip
             a.netmask = "255.255.255.0"
             return a
+
         fake_psutil = MagicMock()
         fake_psutil.net_if_addrs.return_value = {
             "eth0": [_addr("192.168.1.10")],
@@ -568,7 +616,7 @@ class TestNetworkScanner:
             with patch("agent.skills.network_scanner._psutil_available", False):
                 return await scanner.scan_local_networks()
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         assert "error" in result
 
     def test_scan_local_networks_with_results(self, scanner):
@@ -587,7 +635,9 @@ class TestNetworkScanner:
                         "ports_scanned": 47,
                         "elapsed_seconds": 0.5,
                         "open_count": 1,
-                        "open_ports": [{"port": 80, "state": "open", "service": "HTTP"}],
+                        "open_ports": [
+                            {"port": 80, "state": "open", "service": "HTTP"}
+                        ],
                     }
                 ],
             }
@@ -595,10 +645,12 @@ class TestNetworkScanner:
                 "agent.skills.network_scanner._get_local_networks",
                 return_value=fake_networks,
             ):
-                with patch.object(scanner, "scan_network", return_value=mock_net_report):
+                with patch.object(
+                    scanner, "scan_network", return_value=mock_net_report
+                ):
                     return await scanner.scan_local_networks()
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         assert "error" not in result
         assert result["networks_scanned"] == 1
         assert result["total_live_hosts"] == 3
@@ -671,6 +723,7 @@ class TestNetworkScanner:
 
     def test_handle_network_scanner_query_local_trigger(self):
         from agent.skills.network_scanner import handle_network_scanner_query
+
         fake_local_report = {
             "timestamp": "2024-01-01T00:00:00Z",
             "auto_detected_networks": ["192.168.1.0/24"],
@@ -689,7 +742,7 @@ class TestNetworkScanner:
             ):
                 return await handle_network_scanner_query("scan my local network")
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         assert result is not None
         assert isinstance(result, str)
         # Should use the local network report format
@@ -700,28 +753,33 @@ class TestNetworkScanner:
 # HttpInterceptor tests
 # ---------------------------------------------------------------------------
 
+
 class TestHttpInterceptor:
     """Tests for agent/skills/http_interceptor.py"""
 
     @pytest.fixture
     def interceptor(self):
         from agent.skills.http_interceptor import HttpInterceptor
+
         return HttpInterceptor(timeout=5.0)
 
     # -- _validate_url ---------------------------------------------------------
 
     def test_validate_url_adds_scheme(self):
         from agent.skills.http_interceptor import _validate_url
+
         url = _validate_url("example.com")
         assert url.startswith("https://")
 
     def test_validate_url_rejects_non_http(self):
         from agent.skills.http_interceptor import _validate_url
+
         with pytest.raises(ValueError):
             _validate_url("ftp://example.com")
 
     def test_validate_url_rejects_no_host(self):
         from agent.skills.http_interceptor import _validate_url
+
         with pytest.raises(ValueError):
             _validate_url("https://")
 
@@ -771,9 +829,7 @@ class TestHttpInterceptor:
 
     def test_check_cookies_secure(self, interceptor):
         headers = {
-            "set-cookie": (
-                "session=abc123; Path=/; HttpOnly; Secure; SameSite=Strict"
-            )
+            "set-cookie": ("session=abc123; Path=/; HttpOnly; Secure; SameSite=Strict")
         }
         issues = interceptor._check_cookies(headers)
         assert issues == []
@@ -812,36 +868,29 @@ class TestHttpInterceptor:
 
     def test_inspect_url_without_httpx(self, interceptor):
         with patch("agent.skills.http_interceptor._httpx_available", False):
-            result = asyncio.get_event_loop().run_until_complete(
-                interceptor.inspect_url("https://example.com")
-            )
+            result = asyncio.run(interceptor.inspect_url("https://example.com"))
         assert "error" in result
 
     def test_inspect_url_invalid_url(self, interceptor):
-        result = asyncio.get_event_loop().run_until_complete(
-            interceptor.inspect_url("ftp://bad.scheme")
-        )
+        result = asyncio.run(interceptor.inspect_url("ftp://bad.scheme"))
         assert "error" in result
 
     def test_inspect_url_timeout(self, interceptor):
         import httpx
+
         with patch("httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(
-                side_effect=httpx.TimeoutException("timeout")
-            )
-            result = asyncio.get_event_loop().run_until_complete(
-                interceptor.inspect_url("https://example.com")
-            )
+            mock_client.get = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+            result = asyncio.run(interceptor.inspect_url("https://example.com"))
         assert "error" in result
 
     # -- scan_vulnerabilities --------------------------------------------------
 
     def test_scan_vulnerabilities_without_httpx(self, interceptor):
         with patch("agent.skills.http_interceptor._httpx_available", False):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 interceptor.scan_vulnerabilities("https://example.com")
             )
         assert "error" in result
@@ -863,7 +912,7 @@ class TestHttpInterceptor:
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_resp)
 
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 interceptor.scan_vulnerabilities(
                     "https://example.com",
                     check_sensitive_paths=False,
@@ -879,9 +928,7 @@ class TestHttpInterceptor:
 
     def test_crawl_without_httpx(self, interceptor):
         with patch("agent.skills.http_interceptor._httpx_available", False):
-            result = asyncio.get_event_loop().run_until_complete(
-                interceptor.crawl("https://example.com")
-            )
+            result = asyncio.run(interceptor.crawl("https://example.com"))
         assert "error" in result
 
     def test_crawl_single_page(self, interceptor):
@@ -901,9 +948,7 @@ class TestHttpInterceptor:
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_resp)
 
-            result = asyncio.get_event_loop().run_until_complete(
-                interceptor.crawl("https://example.com", max_pages=1)
-            )
+            result = asyncio.run(interceptor.crawl("https://example.com", max_pages=1))
 
         assert result["pages_visited"] >= 1
 
@@ -983,10 +1028,24 @@ class TestHttpInterceptor:
             "pages_visited": 2,
             "total_forms": 1,
             "pages": [
-                {"url": "https://example.com", "status": 200, "title": "Home", "forms": 1, "links": 3},
-                {"url": "https://example.com/about", "status": 200, "title": "About", "forms": 0, "links": 1},
+                {
+                    "url": "https://example.com",
+                    "status": 200,
+                    "title": "Home",
+                    "forms": 1,
+                    "links": 3,
+                },
+                {
+                    "url": "https://example.com/about",
+                    "status": 200,
+                    "title": "About",
+                    "forms": 0,
+                    "links": 1,
+                },
             ],
-            "forms": [{"action": "https://example.com/login", "method": "post", "inputs": []}],
+            "forms": [
+                {"action": "https://example.com/login", "method": "post", "inputs": []}
+            ],
         }
         text = interceptor.format_crawl_report(report)
         assert "example.com" in text
@@ -996,8 +1055,11 @@ class TestHttpInterceptor:
 
     def test_is_http_interceptor_query_positive(self):
         from agent.skills.http_interceptor import is_http_interceptor_query
+
         assert is_http_interceptor_query("scan website example.com for vulnerabilities")
-        assert is_http_interceptor_query("check security headers on https://example.com")
+        assert is_http_interceptor_query(
+            "check security headers on https://example.com"
+        )
         assert is_http_interceptor_query("test for xss on example.com")
         assert is_http_interceptor_query("burp suite equivalent check")
         assert is_http_interceptor_query("inspect http traffic on example.com")
@@ -1006,6 +1068,7 @@ class TestHttpInterceptor:
 
     def test_is_http_interceptor_query_negative(self):
         from agent.skills.http_interceptor import is_http_interceptor_query
+
         assert not is_http_interceptor_query("what is the capital of France?")
         assert not is_http_interceptor_query("scan ports on 192.168.1.1")
         # "security scan" alone (without web context) should NOT match
@@ -1013,7 +1076,8 @@ class TestHttpInterceptor:
 
     def test_handle_http_interceptor_query_no_url(self):
         from agent.skills.http_interceptor import handle_http_interceptor_query
-        result = asyncio.get_event_loop().run_until_complete(
+
+        result = asyncio.run(
             handle_http_interceptor_query("scan website for vulnerabilities")
         )
         assert result is not None
@@ -1021,24 +1085,26 @@ class TestHttpInterceptor:
 
     def test_handle_http_interceptor_query_not_matching(self):
         from agent.skills.http_interceptor import handle_http_interceptor_query
-        result = asyncio.get_event_loop().run_until_complete(
-            handle_http_interceptor_query("what is the weather?")
-        )
+
+        result = asyncio.run(handle_http_interceptor_query("what is the weather?"))
         assert result is None
 
     def test_extract_url_from_message_https(self):
         from agent.skills.http_interceptor import _extract_url_from_message
+
         url = _extract_url_from_message("inspect https://example.com/path")
         assert url == "https://example.com/path"
 
     def test_extract_url_from_message_domain(self):
         from agent.skills.http_interceptor import _extract_url_from_message
+
         url = _extract_url_from_message("check security headers on example.com")
         assert url is not None
         assert "example.com" in url
 
     def test_extract_url_from_message_none(self):
         from agent.skills.http_interceptor import _extract_url_from_message
+
         url = _extract_url_from_message("scan something")
         assert url is None
 
@@ -1046,6 +1112,7 @@ class TestHttpInterceptor:
 
     def test_extract_links_same_origin(self):
         from agent.skills.http_interceptor import _extract_links
+
         html = """
         <html><body>
         <a href="/page1">P1</a>
@@ -1065,6 +1132,7 @@ class TestHttpInterceptor:
 
     def test_extract_forms(self):
         from agent.skills.http_interceptor import _extract_forms
+
         html = """
         <form action="/login" method="post">
           <input name="username" type="text"/>

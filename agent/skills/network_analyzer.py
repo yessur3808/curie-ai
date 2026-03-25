@@ -72,18 +72,18 @@ _WELL_KNOWN_PORTS: Dict[int, str] = {
 
 # Ports commonly associated with malicious activity or unusual usage
 _SUSPICIOUS_PORTS = {
-    4444,   # Metasploit default
-    1337,   # Hacker slang / malware
+    4444,  # Metasploit default
+    1337,  # Hacker slang / malware
     31337,  # Elite / back-orifice
     12345,  # NetBus
     54321,  # Back-orifice 2000
-    6667,   # IRC (often C2)
-    6666,   # IRC (often C2)
-    7777,   # Common RAT
-    8888,   # Common RAT / proxy
-    9001,   # Tor
-    9050,   # Tor SOCKS
-    1194,   # OpenVPN (can be tunnelled for C2)
+    6667,  # IRC (often C2)
+    6666,  # IRC (often C2)
+    7777,  # Common RAT
+    8888,  # Common RAT / proxy
+    9001,  # Tor
+    9050,  # Tor SOCKS
+    1194,  # OpenVPN (can be tunnelled for C2)
 }
 
 
@@ -169,8 +169,18 @@ class NetworkAnalyzer:
             status = conn.status or "NONE"
             status_counts[status] = status_counts.get(status, 0) + 1
 
+            import socket as _socket
+
+            _PROTO_MAP = {
+                _socket.SOCK_STREAM: "TCP",
+                _socket.SOCK_DGRAM: "UDP",
+            }
+            proto = _PROTO_MAP.get(
+                getattr(conn.type, "value", conn.type),
+                conn.type.name if hasattr(conn.type, "name") else str(conn.type),
+            )
             entry: Dict[str, Any] = {
-                "protocol": conn.type.name if hasattr(conn.type, "name") else str(conn.type),
+                "protocol": proto,
                 "local_address": laddr,
                 "remote_address": raddr,
                 "status": status,
@@ -241,7 +251,11 @@ class NetworkAnalyzer:
                     stats["interfaces"][iface] = {}
                 stats["interfaces"][iface]["addresses"] = [
                     {
-                        "family": a.family.name if hasattr(a.family, "name") else str(a.family),
+                        "family": (
+                            a.family.name
+                            if hasattr(a.family, "name")
+                            else str(a.family)
+                        ),
                         "address": a.address,
                         "netmask": a.netmask,
                     }
@@ -289,11 +303,11 @@ class NetworkAnalyzer:
         timeout = max(1, min(timeout, 60))
 
         # Validate iface name (alphanumerics, underscores, hyphens only — no dots/slashes)
-        if iface and not re.match(r'^[a-zA-Z0-9_\-]{1,20}$', iface):
+        if iface and not re.match(r"^[a-zA-Z0-9_\-]{1,20}$", iface):
             return {"error": f"Invalid interface name: {iface!r}"}
 
         # BPF filter basic sanity — reject shell metacharacters
-        if bpf_filter and re.search(r'[;&|`$<>]', bpf_filter):
+        if bpf_filter and re.search(r"[;&|`$<>]", bpf_filter):
             return {"error": "Invalid characters in BPF filter."}
 
         try:
@@ -362,9 +376,7 @@ class NetworkAnalyzer:
 
         breakdown = report.get("status_breakdown", {})
         if breakdown:
-            status_str = ", ".join(
-                f"{s}: {n}" for s, n in sorted(breakdown.items())
-            )
+            status_str = ", ".join(f"{s}: {n}" for s, n in sorted(breakdown.items()))
             lines.append(f"Status breakdown: {status_str}")
 
         suspicious = report.get("suspicious_connections", [])
@@ -408,8 +420,12 @@ class NetworkAnalyzer:
         for iface, data in report.get("interfaces", {}).items():
             lines.append(f"\n**{iface}**")
             if "bytes_sent" in data:
-                lines.append(f"  ↑ Sent:     {data['bytes_sent']:,} B  ({data['packets_sent']:,} pkts)")
-                lines.append(f"  ↓ Received: {data['bytes_recv']:,} B  ({data['packets_recv']:,} pkts)")
+                lines.append(
+                    f"  ↑ Sent:     {data['bytes_sent']:,} B  ({data['packets_sent']:,} pkts)"
+                )
+                lines.append(
+                    f"  ↓ Received: {data['bytes_recv']:,} B  ({data['packets_recv']:,} pkts)"
+                )
                 if data.get("errors_in") or data.get("errors_out"):
                     lines.append(
                         f"  Errors: in={data['errors_in']} out={data['errors_out']}  "
@@ -519,18 +535,21 @@ async def handle_network_analyzer_query(message: str) -> Optional[str]:
     # Packet capture request
     if any(kw in msg for kw in ["capture", "sniff", "tcpdump", "wireshark"]):
         count = 20
-        m = re.search(r'(\d+)\s*packets?', msg)
+        m = re.search(r"(\d+)\s*packets?", msg)
         if m:
             count = min(int(m.group(1)), 200)
         bpf = ""
-        m2 = re.search(r'filter[:\s]+([a-z0-9 .]+)', msg)
+        m2 = re.search(r"filter[:\s]+([a-z0-9 .]+)", msg)
         if m2:
             bpf = m2.group(1).strip()
         report = analyzer.capture_packets(count=count, bpf_filter=bpf)
         return analyzer.format_packet_report(report)
 
     # Interface stats request
-    if any(kw in msg for kw in ["interface", "stats", "io counter", "bytes sent", "bytes received"]):
+    if any(
+        kw in msg
+        for kw in ["interface", "stats", "io counter", "bytes sent", "bytes received"]
+    ):
         report = analyzer.get_interface_stats()
         return analyzer.format_interface_report(report)
 

@@ -85,13 +85,81 @@ _SERVICE_MAP: Dict[int, str] = {
 }
 
 _TOP_100_PORTS: List[int] = [
-    21, 22, 23, 25, 53, 67, 80, 110, 111, 119, 135, 139, 143, 161,
-    389, 443, 445, 465, 514, 587, 631, 636, 993, 995, 1080, 1194,
-    1433, 1521, 2049, 2181, 3306, 3389, 4443, 5432, 5601, 5672,
-    5900, 6379, 6443, 8080, 8443, 8888, 9000, 9200, 9300, 10250, 27017,
+    21,
+    22,
+    23,
+    25,
+    53,
+    67,
+    80,
+    110,
+    111,
+    119,
+    135,
+    139,
+    143,
+    161,
+    389,
+    443,
+    445,
+    465,
+    514,
+    587,
+    631,
+    636,
+    993,
+    995,
+    1080,
+    1194,
+    1433,
+    1521,
+    2049,
+    2181,
+    3306,
+    3389,
+    4443,
+    5432,
+    5601,
+    5672,
+    5900,
+    6379,
+    6443,
+    8080,
+    8443,
+    8888,
+    9000,
+    9200,
+    9300,
+    10250,
+    27017,
     # Additional common ports
-    8, 20, 30, 79, 88, 102, 194, 220, 264, 318, 383, 406, 407, 416, 417,
-    425, 500, 515, 530, 540, 548, 554, 556, 600, 666, 989, 990,
+    8,
+    20,
+    30,
+    79,
+    88,
+    102,
+    194,
+    220,
+    264,
+    318,
+    383,
+    406,
+    407,
+    416,
+    417,
+    425,
+    500,
+    515,
+    530,
+    540,
+    548,
+    554,
+    556,
+    600,
+    666,
+    989,
+    990,
 ]
 
 _TOP_100_PORTS = sorted(set(_TOP_100_PORTS))
@@ -100,6 +168,7 @@ _TOP_100_PORTS = sorted(set(_TOP_100_PORTS))
 # ---------------------------------------------------------------------------
 # Hardware-aware concurrency
 # ---------------------------------------------------------------------------
+
 
 def _get_hardware_concurrency() -> int:
     """
@@ -116,6 +185,7 @@ def _get_hardware_concurrency() -> int:
 # ---------------------------------------------------------------------------
 # Local network auto-detection
 # ---------------------------------------------------------------------------
+
 
 def _get_local_networks() -> List[str]:
     """
@@ -146,9 +216,7 @@ def _get_local_networks() -> List[str]:
                 if not ip_str or not netmask_str:
                     continue
                 try:
-                    net = ipaddress.IPv4Network(
-                        f"{ip_str}/{netmask_str}", strict=False
-                    )
+                    net = ipaddress.IPv4Network(f"{ip_str}/{netmask_str}", strict=False)
                     if net.is_loopback or net.is_link_local:
                         continue
                     # Limit to at most a /16; narrow wider nets to /24
@@ -169,6 +237,7 @@ def _get_local_networks() -> List[str]:
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_target(target: str) -> List[str]:
     """
@@ -192,7 +261,7 @@ def _parse_target(target: str) -> List[str]:
             raise ValueError(f"Invalid CIDR notation: {target}") from exc
         if net.prefixlen < 16:
             raise ValueError(
-                "CIDR prefix must be /16 or smaller to limit scan scope."
+                "CIDR prefix must be /16 or larger (e.g. /16–/32) to limit scan scope."
             )
         return [str(h) for h in net.hosts()]
 
@@ -258,6 +327,7 @@ def _validate_target(target: str) -> str:
 # Low-level probes
 # ---------------------------------------------------------------------------
 
+
 async def _tcp_connect(
     host: str, port: int, timeout: float = 1.0
 ) -> Tuple[bool, Optional[str]]:
@@ -288,8 +358,8 @@ async def _tcp_connect(
 
 async def _host_is_up(host: str, timeout: float = 1.0) -> bool:
     """
-    Check whether a host is reachable by trying TCP port 80 and 443.
-    Falls back to a raw socket echo attempt on port 7.
+    Check whether a host is reachable by trying TCP ports 80, 443, and 22.
+    Returns True as soon as any probe connects successfully.
     """
     for port in (80, 443, 22):
         open_, _ = await _tcp_connect(host, port, timeout=timeout)
@@ -301,6 +371,7 @@ async def _host_is_up(host: str, timeout: float = 1.0) -> bool:
 # ---------------------------------------------------------------------------
 # NetworkScanner class
 # ---------------------------------------------------------------------------
+
 
 class NetworkScanner:
     """
@@ -405,15 +476,22 @@ class NetworkScanner:
         Returns:
             Dict with per-host scan results
         """
+        # Validate CIDR size *before* materialising the host list to avoid
+        # allocating ~65 k entries for a /16 that we'll immediately reject.
+        try:
+            network = ipaddress.ip_network(cidr, strict=False)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+        if network.num_addresses > 256:
+            return {
+                "error": "Network scan limited to /24 (256 hosts) to avoid overload."
+            }
+
         try:
             hosts = _parse_target(cidr)
         except ValueError as exc:
             return {"error": str(exc)}
-
-        if len(hosts) > 256:
-            return {
-                "error": "Network scan limited to /24 (256 hosts) to avoid overload."
-            }
 
         start_time = time.monotonic()
 
@@ -429,17 +507,23 @@ class NetworkScanner:
         up_results = await asyncio.gather(*up_tasks, return_exceptions=True)
 
         live_hosts = [
-            h for item in up_results
+            h
+            for item in up_results
             if not isinstance(item, Exception)
             for h, up in [item]
             if up
         ]
 
-        # Scan open ports on live hosts (concurrently, capped)
-        scan_tasks = [
-            asyncio.create_task(self.scan_host(h, port_spec, grab_banners=False))
-            for h in live_hosts
-        ]
+        # Scan open ports on live hosts with a host-level semaphore to cap
+        # total concurrent probes and avoid unbounded socket fan-out.
+        host_scan_limit = getattr(self, "max_concurrent", 64)
+        host_scan_sem = asyncio.Semaphore(host_scan_limit)
+
+        async def _scan_host_limited(h: str):
+            async with host_scan_sem:
+                return await self.scan_host(h, port_spec, grab_banners=False)
+
+        scan_tasks = [asyncio.create_task(_scan_host_limited(h)) for h in live_hosts]
         scan_results = await asyncio.gather(*scan_tasks, return_exceptions=True)
 
         hosts_report = []
@@ -527,9 +611,7 @@ class NetworkScanner:
     # Local network auto-scan
     # ------------------------------------------------------------------
 
-    async def scan_local_networks(
-        self, port_spec: str = "top100"
-    ) -> Dict[str, Any]:
+    async def scan_local_networks(self, port_spec: str = "top100") -> Dict[str, Any]:
         """
         Auto-detect local network interfaces and scan all connected subnets.
 
@@ -555,9 +637,7 @@ class NetworkScanner:
             }
 
         scan_tasks = [
-            asyncio.create_task(
-                self.scan_network(cidr, port_spec=port_spec)
-            )
+            asyncio.create_task(self.scan_network(cidr, port_spec=port_spec))
             for cidr in networks
         ]
         results = await asyncio.gather(*scan_tasks, return_exceptions=True)
@@ -616,9 +696,7 @@ class NetworkScanner:
                 for p in host_result.get("open_ports", [])[:8]:
                     lines.append(f"      • {p['port']}/tcp  {p['service']}")
                 if host_result["open_count"] > 8:
-                    lines.append(
-                        f"      … and {host_result['open_count'] - 8} more"
-                    )
+                    lines.append(f"      … and {host_result['open_count'] - 8} more")
 
         if report["total_live_hosts"] == 0:
             lines.append("\n✅ No live hosts with open ports found.")
@@ -705,21 +783,18 @@ def _extract_target(message: str) -> Optional[str]:
     Returns None if nothing identifiable is found.
     """
     # CIDR
-    m = re.search(
-        r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2})\b', message
-    )
+    m = re.search(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2})\b", message)
     if m:
         return m.group(1)
 
     # IPv4
-    m = re.search(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', message)
+    m = re.search(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b", message)
     if m:
         return m.group(1)
 
     # Hostname (simple heuristic: word.word or word.word.word pattern)
     m = re.search(
-        r'\b([a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?'
-        r'(?:\.[a-zA-Z]{2,})+)\b',
+        r"\b([a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?" r"(?:\.[a-zA-Z]{2,})+)\b",
         message,
     )
     if m:
@@ -736,17 +811,17 @@ def _extract_port_spec(message: str) -> str:
     msg = message.lower()
 
     # Range like 1-1024 or 1-65535
-    m = re.search(r'(\d{1,5})\s*-\s*(\d{1,5})', msg)
+    m = re.search(r"(\d{1,5})\s*-\s*(\d{1,5})", msg)
     if m:
         return f"{m.group(1)}-{m.group(2)}"
 
     # CSV ports
-    m = re.search(r'ports?\s+([\d,\s]+)', msg)
+    m = re.search(r"ports?\s+([\d,\s]+)", msg)
     if m:
         return m.group(1).replace(" ", "").strip(",")
 
     # Single port
-    m = re.search(r'port\s+(\d{1,5})', msg)
+    m = re.search(r"port\s+(\d{1,5})", msg)
     if m:
         return m.group(1)
 
@@ -796,7 +871,15 @@ async def handle_network_scanner_query(message: str) -> Optional[str]:
     # Network-wide scan (CIDR or "network"/"subnet" keywords)
     if "/" in target or any(kw in msg for kw in ("network", "subnet", "cidr", "range")):
         if "/" not in target:
-            target += "/24"
+            # Only auto-append /24 when the target looks like an IPv4 address;
+            # hostnames such as "example.com" should be treated as single hosts.
+            try:
+                ipaddress.ip_address(target)
+                target += "/24"
+            except ValueError:
+                # Not a bare IP — fall through to single-host scan below
+                report = await scanner.scan_host(target, port_spec=port_spec)
+                return scanner.format_host_scan_report(report)
         report = await scanner.scan_network(target, port_spec=port_spec)
         return scanner.format_network_scan_report(report)
 

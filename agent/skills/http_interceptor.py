@@ -42,12 +42,8 @@ _SECURITY_HEADERS: Dict[str, str] = {
     "Strict-Transport-Security": (
         "Missing HSTS — browsers may allow insecure HTTP connections."
     ),
-    "Content-Security-Policy": (
-        "Missing CSP — increases XSS attack surface."
-    ),
-    "X-Frame-Options": (
-        "Missing X-Frame-Options — clickjacking may be possible."
-    ),
+    "Content-Security-Policy": ("Missing CSP — increases XSS attack surface."),
+    "X-Frame-Options": ("Missing X-Frame-Options — clickjacking may be possible."),
     "X-Content-Type-Options": (
         "Missing X-Content-Type-Options — MIME-sniffing attacks possible."
     ),
@@ -132,6 +128,7 @@ _MAX_VULN_REQUESTS = 30
 # Helper functions
 # ---------------------------------------------------------------------------
 
+
 def _validate_url(url: str) -> str:
     """
     Validate and normalise a URL.  Raises ValueError for invalid URLs
@@ -152,6 +149,9 @@ def _validate_url(url: str) -> str:
         raise ValueError(f"Invalid URL (no hostname): {url}")
     # Reject private/loopback addresses for safety
     # (allow localhost for local testing)
+    # Note: this function only enforces http/https scheme and hostname presence.
+    # The caller is responsible for any additional SSRF or access-control
+    # restrictions appropriate for the deployment context.
     return url
 
 
@@ -221,6 +221,7 @@ def _extract_forms(base_url: str, html: str) -> List[Dict[str, Any]]:
 # HttpInterceptor class
 # ---------------------------------------------------------------------------
 
+
 class HttpInterceptor:
     """
     HTTP/S Interceptor & Web Application Security Analyzer
@@ -270,7 +271,9 @@ class HttpInterceptor:
             Inspection result dict
         """
         if not _httpx_available:
-            return {"error": "httpx is not installed. Install it with: pip install httpx"}
+            return {
+                "error": "httpx is not installed. Install it with: pip install httpx"
+            }
 
         try:
             url = _validate_url(url)
@@ -299,7 +302,9 @@ class HttpInterceptor:
                 result["cookie_issues"] = self._check_cookies(resp.headers)
 
                 # Information disclosure
-                result["info_disclosure"] = self._check_info_disclosure(resp.headers, body)
+                result["info_disclosure"] = self._check_info_disclosure(
+                    resp.headers, body
+                )
 
                 # Sensitive path exposure (only if base path was returned)
                 result["exposed_info"] = self._extract_exposed_info(body, url)
@@ -350,7 +355,9 @@ class HttpInterceptor:
     def _check_cookies(self, headers) -> List[Dict[str, str]]:
         """Inspect Set-Cookie headers for security flag omissions."""
         issues: List[Dict[str, str]] = []
-        cookies_raw = headers.get_list("set-cookie") if hasattr(headers, "get_list") else []
+        cookies_raw = (
+            headers.get_list("set-cookie") if hasattr(headers, "get_list") else []
+        )
         if not cookies_raw:
             # httpx may store multiple Set-Cookie as separate header entries
             cookies_raw = [v for k, v in headers.items() if k.lower() == "set-cookie"]
@@ -424,11 +431,19 @@ class HttpInterceptor:
         findings: List[str] = []
 
         patterns = {
-            "AWS key": re.compile(r'AKIA[0-9A-Z]{16}'),
-            "Private key block": re.compile(r'-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----'),
-            "Email addresses": re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'),
-            "JWT token": re.compile(r'eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+'),
-            "IP addresses": re.compile(r'\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d+\.\d+\b'),
+            "AWS key": re.compile(r"AKIA[0-9A-Z]{16}"),
+            "Private key block": re.compile(
+                r"-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----"
+            ),
+            "Email addresses": re.compile(
+                r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}"
+            ),
+            "JWT token": re.compile(
+                r"eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"
+            ),
+            "IP addresses": re.compile(
+                r"\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d+\.\d+\b"
+            ),
         }
 
         for label, pat in patterns.items():
@@ -754,7 +769,8 @@ class HttpInterceptor:
         ]
         if report.get("redirect_chain"):
             lines.append(
-                "Redirects: " + " → ".join(report["redirect_chain"])
+                "Redirects: "
+                + " → ".join(report["redirect_chain"])
                 + f" → {report['final_url']}"
             )
 
@@ -762,7 +778,9 @@ class HttpInterceptor:
         if header_issues:
             lines.append(f"\n⚠️ **Security header issues ({len(header_issues)}):**")
             for h in header_issues:
-                lines.append(f"  • [{h['issue'].upper()}] {h['header']}: {h['description']}")
+                lines.append(
+                    f"  • [{h['issue'].upper()}] {h['header']}: {h['description']}"
+                )
         else:
             lines.append("\n✅ All expected security headers are present.")
 
@@ -792,9 +810,7 @@ class HttpInterceptor:
             )
         lines.append(f"Links found: {report.get('links_found', 0)}")
 
-        lines.append(
-            "\n⚠️ *For authorized security testing only.*"
-        )
+        lines.append("\n⚠️ *For authorized security testing only.*")
         return "\n".join(lines)
 
     def format_vuln_scan_report(self, report: Dict[str, Any]) -> str:
@@ -858,9 +874,7 @@ class HttpInterceptor:
                 + (f"  links={links}" if links else "")
             )
 
-        lines.append(
-            "\n⚠️ *For authorized security testing only.*"
-        )
+        lines.append("\n⚠️ *For authorized security testing only.*")
         return "\n".join(lines)
 
 
@@ -888,7 +902,7 @@ _HTTP_INTERCEPTOR_KEYWORDS = [
     "crawl website",
     "crawl web",
     "web crawler",
-    "web security scan",       # was: "security scan" (too vague — moved here)
+    "web security scan",  # was: "security scan" (too vague — moved here)
     "website security scan",
     "security headers",
     "check headers",
@@ -922,14 +936,14 @@ def is_http_interceptor_query(message: str) -> bool:
 def _extract_url_from_message(message: str) -> Optional[str]:
     """Extract the first URL or domain name from a message."""
     # Full URL
-    m = re.search(r'https?://[^\s]+', message)
+    m = re.search(r"https?://[^\s]+", message)
     if m:
         return m.group(0).rstrip(".,;:)'\"")
 
     # Domain-like (word.tld or word.word.tld)
     m = re.search(
-        r'\b([a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?'
-        r'(?:\.[a-zA-Z]{2,})+(?:/[^\s]*)?)\b',
+        r"\b([a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
+        r"(?:\.[a-zA-Z]{2,})+(?:/[^\s]*)?)\b",
         message,
     )
     if m:
@@ -971,7 +985,19 @@ async def handle_http_interceptor_query(message: str) -> Optional[str]:
         )
 
     # Vulnerability scan
-    if any(kw in msg for kw in ("vuln", "vulnerability", "scan", "pentest", "owasp", "sqli", "xss", "injection")):
+    if any(
+        kw in msg
+        for kw in (
+            "vuln",
+            "vulnerability",
+            "scan",
+            "pentest",
+            "owasp",
+            "sqli",
+            "xss",
+            "injection",
+        )
+    ):
         report = await interceptor.scan_vulnerabilities(url)
         return interceptor.format_vuln_scan_report(report)
 
