@@ -34,9 +34,6 @@ for _mod in (
     "pymongo",
     "pymongo.collection",
     "pymongo.errors",
-    "llm",
-    "llm.manager",
-    "dotenv",
     "telegram",
     "telegram.ext",
 ):
@@ -53,9 +50,6 @@ for _mod in (
 ):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
-
-if "utils.persona" not in sys.modules:
-    sys.modules["utils.persona"] = MagicMock()
 
 
 # ─── cli.canvas_webview ───────────────────────────────────────────────────────
