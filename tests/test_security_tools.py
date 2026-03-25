@@ -180,6 +180,14 @@ class TestNetworkAnalyzer:
         assert is_network_analyzer_query("capture packets on eth0")
         assert is_network_analyzer_query("analyze network traffic")
         assert is_network_analyzer_query("are there any suspicious connections?")
+        # New natural language phrases
+        assert is_network_analyzer_query("what is connected to my machine?")
+        assert is_network_analyzer_query("who's connected?")
+        assert is_network_analyzer_query("show my connections")
+        assert is_network_analyzer_query("check network health")
+        assert is_network_analyzer_query("what's using my network bandwidth?")
+        assert is_network_analyzer_query("list open connections")
+        assert is_network_analyzer_query("show established connections")
 
     def test_is_network_analyzer_query_negative(self):
         from agent.skills.network_analyzer import is_network_analyzer_query
@@ -383,11 +391,21 @@ class TestNetworkScanner:
         assert is_network_scanner_query("find open ports on example.com")
         assert is_network_scanner_query("nmap 10.0.0.1")
         assert is_network_scanner_query("discover live hosts on 192.168.1.0/24")
+        # New natural language phrases
+        assert is_network_scanner_query("scan my network")
+        assert is_network_scanner_query("what devices are on my network?")
+        assert is_network_scanner_query("what's on my network")
+        assert is_network_scanner_query("scan my local network")
+        assert is_network_scanner_query("scan surrounding network")
+        assert is_network_scanner_query("what connected devices are there?")
+        assert is_network_scanner_query("network security scan")
 
     def test_is_network_scanner_query_negative(self):
         from agent.skills.network_scanner import is_network_scanner_query
         assert not is_network_scanner_query("convert 100 usd to eur")
         assert not is_network_scanner_query("remind me to water the plants")
+        # "security scan" alone no longer triggers the scanner (needs network context)
+        assert not is_network_scanner_query("do a security scan")
 
     def test_handle_network_scanner_query_no_target(self):
         from agent.skills.network_scanner import handle_network_scanner_query
@@ -437,6 +455,245 @@ class TestNetworkScanner:
     def test_extract_target_none(self):
         from agent.skills.network_scanner import _extract_target
         assert _extract_target("just a generic query with no host") is None
+
+    # -- Hardware-aware concurrency ------------------------------------------
+
+    def test_get_hardware_concurrency_scales_with_cpu(self):
+        from agent.skills.network_scanner import _get_hardware_concurrency
+        with patch("os.cpu_count", return_value=8):
+            result = _get_hardware_concurrency()
+        assert result >= 256  # minimum floor
+        assert result <= 1024  # maximum cap
+
+    def test_get_hardware_concurrency_min_floor(self):
+        from agent.skills.network_scanner import _get_hardware_concurrency
+        with patch("os.cpu_count", return_value=1):
+            result = _get_hardware_concurrency()
+        assert result == 256  # floor is 256
+
+    def test_get_hardware_concurrency_max_cap(self):
+        from agent.skills.network_scanner import _get_hardware_concurrency
+        with patch("os.cpu_count", return_value=32):
+            result = _get_hardware_concurrency()
+        assert result == 1024  # cap is 1024
+
+    def test_get_hardware_concurrency_null_cpu(self):
+        from agent.skills.network_scanner import _get_hardware_concurrency
+        with patch("os.cpu_count", return_value=None):
+            result = _get_hardware_concurrency()
+        assert result >= 256
+
+    def test_get_network_scanner_uses_hardware_concurrency(self):
+        from agent.skills.network_scanner import get_network_scanner, _get_hardware_concurrency
+        sc = get_network_scanner()
+        assert sc.max_concurrent == _get_hardware_concurrency()
+
+    # -- Local network detection ---------------------------------------------
+
+    def test_get_local_networks_without_psutil(self):
+        from agent.skills.network_scanner import _get_local_networks
+        with patch("agent.skills.network_scanner._psutil_available", False):
+            result = _get_local_networks()
+        assert result == []
+
+    def test_get_local_networks_with_psutil(self):
+        from agent.skills.network_scanner import _get_local_networks
+        import socket as _socket
+        FakeAddr = MagicMock()
+        FakeAddr.family.value = _socket.AF_INET
+        FakeAddr.address = "192.168.1.100"
+        FakeAddr.netmask = "255.255.255.0"
+        fake_psutil = MagicMock()
+        fake_psutil.net_if_addrs.return_value = {"eth0": [FakeAddr]}
+        with patch("agent.skills.network_scanner._psutil_available", True):
+            with patch("agent.skills.network_scanner._psutil", fake_psutil):
+                result = _get_local_networks()
+        assert "192.168.1.0/24" in result
+
+    def test_get_local_networks_skips_loopback(self):
+        from agent.skills.network_scanner import _get_local_networks
+        import socket as _socket
+        FakeAddr = MagicMock()
+        FakeAddr.family.value = _socket.AF_INET
+        FakeAddr.address = "127.0.0.1"
+        FakeAddr.netmask = "255.0.0.0"
+        fake_psutil = MagicMock()
+        fake_psutil.net_if_addrs.return_value = {"lo": [FakeAddr]}
+        with patch("agent.skills.network_scanner._psutil_available", True):
+            with patch("agent.skills.network_scanner._psutil", fake_psutil):
+                result = _get_local_networks()
+        assert result == []
+
+    def test_get_local_networks_narrows_large_network(self):
+        """Networks wider than /16 are narrowed to /24 of the host IP."""
+        from agent.skills.network_scanner import _get_local_networks
+        import socket as _socket
+        FakeAddr = MagicMock()
+        FakeAddr.family.value = _socket.AF_INET
+        FakeAddr.address = "10.0.0.50"
+        FakeAddr.netmask = "255.0.0.0"  # /8 — too wide
+        fake_psutil = MagicMock()
+        fake_psutil.net_if_addrs.return_value = {"eth0": [FakeAddr]}
+        with patch("agent.skills.network_scanner._psutil_available", True):
+            with patch("agent.skills.network_scanner._psutil", fake_psutil):
+                result = _get_local_networks()
+        assert "10.0.0.0/24" in result
+
+    def test_get_local_networks_deduplicates(self):
+        """Duplicate CIDRs from multiple interfaces are collapsed."""
+        from agent.skills.network_scanner import _get_local_networks
+        import socket as _socket
+
+        def _addr(ip):
+            a = MagicMock()
+            a.family.value = _socket.AF_INET
+            a.address = ip
+            a.netmask = "255.255.255.0"
+            return a
+        fake_psutil = MagicMock()
+        fake_psutil.net_if_addrs.return_value = {
+            "eth0": [_addr("192.168.1.10")],
+            "wlan0": [_addr("192.168.1.20")],  # same /24
+        }
+        with patch("agent.skills.network_scanner._psutil_available", True):
+            with patch("agent.skills.network_scanner._psutil", fake_psutil):
+                result = _get_local_networks()
+        # Both IPs map to 192.168.1.0/24 — should appear only once
+        assert result.count("192.168.1.0/24") == 1
+
+    # -- scan_local_networks --------------------------------------------------
+
+    def test_scan_local_networks_no_psutil(self, scanner):
+        async def _run():
+            with patch("agent.skills.network_scanner._psutil_available", False):
+                return await scanner.scan_local_networks()
+
+        result = asyncio.get_event_loop().run_until_complete(_run())
+        assert "error" in result
+
+    def test_scan_local_networks_with_results(self, scanner):
+        async def _run():
+            fake_networks = ["192.168.1.0/24"]
+            mock_net_report = {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "cidr": "192.168.1.0/24",
+                "hosts_checked": 254,
+                "live_hosts": 3,
+                "elapsed_seconds": 2.0,
+                "hosts": [
+                    {
+                        "target": "192.168.1.1",
+                        "resolved_ip": "192.168.1.1",
+                        "ports_scanned": 47,
+                        "elapsed_seconds": 0.5,
+                        "open_count": 1,
+                        "open_ports": [{"port": 80, "state": "open", "service": "HTTP"}],
+                    }
+                ],
+            }
+            with patch(
+                "agent.skills.network_scanner._get_local_networks",
+                return_value=fake_networks,
+            ):
+                with patch.object(scanner, "scan_network", return_value=mock_net_report):
+                    return await scanner.scan_local_networks()
+
+        result = asyncio.get_event_loop().run_until_complete(_run())
+        assert "error" not in result
+        assert result["networks_scanned"] == 1
+        assert result["total_live_hosts"] == 3
+        assert "192.168.1.0/24" in result["auto_detected_networks"]
+
+    # -- format_local_network_report -----------------------------------------
+
+    def test_format_local_network_report_error(self, scanner):
+        report = {"error": "psutil not available"}
+        text = scanner.format_local_network_report(report)
+        assert "⚠️" in text or "error" in text.lower()
+
+    def test_format_local_network_report_ok(self, scanner):
+        report = {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "auto_detected_networks": ["192.168.1.0/24"],
+            "networks_scanned": 1,
+            "total_hosts_checked": 254,
+            "total_live_hosts": 2,
+            "port_spec": "top100",
+            "networks": [
+                {
+                    "cidr": "192.168.1.0/24",
+                    "hosts_checked": 254,
+                    "live_hosts": 2,
+                    "elapsed_seconds": 1.5,
+                    "hosts": [
+                        {
+                            "target": "192.168.1.1",
+                            "open_count": 1,
+                            "open_ports": [{"port": 80, "service": "HTTP"}],
+                        },
+                        {
+                            "target": "192.168.1.50",
+                            "open_count": 0,
+                            "open_ports": [],
+                        },
+                    ],
+                }
+            ],
+        }
+        text = scanner.format_local_network_report(report)
+        assert "192.168.1.0/24" in text
+        assert "192.168.1.1" in text
+        assert "HTTP" in text
+        assert "authorized" in text.lower()
+
+    def test_format_local_network_report_no_live_hosts(self, scanner):
+        report = {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "auto_detected_networks": ["192.168.1.0/24"],
+            "networks_scanned": 1,
+            "total_hosts_checked": 10,
+            "total_live_hosts": 0,
+            "port_spec": "top100",
+            "networks": [
+                {
+                    "cidr": "192.168.1.0/24",
+                    "hosts_checked": 10,
+                    "live_hosts": 0,
+                    "elapsed_seconds": 0.5,
+                    "hosts": [],
+                }
+            ],
+        }
+        text = scanner.format_local_network_report(report)
+        assert "No live hosts" in text
+
+    # -- handle local network auto-scan in chat --------------------------------
+
+    def test_handle_network_scanner_query_local_trigger(self):
+        from agent.skills.network_scanner import handle_network_scanner_query
+        fake_local_report = {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "auto_detected_networks": ["192.168.1.0/24"],
+            "networks_scanned": 1,
+            "total_hosts_checked": 254,
+            "total_live_hosts": 0,
+            "port_spec": "top100",
+            "networks": [],
+        }
+
+        async def _run():
+            # Patch the high-level scan_local_networks method directly
+            with patch(
+                "agent.skills.network_scanner.NetworkScanner.scan_local_networks",
+                return_value=fake_local_report,
+            ):
+                return await handle_network_scanner_query("scan my local network")
+
+        result = asyncio.get_event_loop().run_until_complete(_run())
+        assert result is not None
+        assert isinstance(result, str)
+        # Should use the local network report format
+        assert "Local Network" in result or "192.168.1.0/24" in result
 
 
 # ---------------------------------------------------------------------------
@@ -744,11 +1001,15 @@ class TestHttpInterceptor:
         assert is_http_interceptor_query("test for xss on example.com")
         assert is_http_interceptor_query("burp suite equivalent check")
         assert is_http_interceptor_query("inspect http traffic on example.com")
+        assert is_http_interceptor_query("web security scan of example.com")
+        assert is_http_interceptor_query("website security scan")
 
     def test_is_http_interceptor_query_negative(self):
         from agent.skills.http_interceptor import is_http_interceptor_query
         assert not is_http_interceptor_query("what is the capital of France?")
         assert not is_http_interceptor_query("scan ports on 192.168.1.1")
+        # "security scan" alone (without web context) should NOT match
+        assert not is_http_interceptor_query("do a security scan")
 
     def test_handle_http_interceptor_query_no_url(self):
         from agent.skills.http_interceptor import handle_http_interceptor_query

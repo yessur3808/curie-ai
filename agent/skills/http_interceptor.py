@@ -888,7 +888,8 @@ _HTTP_INTERCEPTOR_KEYWORDS = [
     "crawl website",
     "crawl web",
     "web crawler",
-    "security scan",
+    "web security scan",       # was: "security scan" (too vague — moved here)
+    "website security scan",
     "security headers",
     "check headers",
     "inspect http",

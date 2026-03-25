@@ -13,13 +13,22 @@ Commonly used in pentesting for enumeration and attack surface mapping.
 import asyncio
 import ipaddress
 import logging
+import os
 import re
 import socket
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Optional: psutil for local interface discovery
+try:
+    import psutil as _psutil
+
+    _psutil_available = True
+except ImportError:
+    _psutil_available = False
 
 # ---------------------------------------------------------------------------
 # Port / service catalogue
@@ -86,6 +95,75 @@ _TOP_100_PORTS: List[int] = [
 ]
 
 _TOP_100_PORTS = sorted(set(_TOP_100_PORTS))
+
+
+# ---------------------------------------------------------------------------
+# Hardware-aware concurrency
+# ---------------------------------------------------------------------------
+
+def _get_hardware_concurrency() -> int:
+    """
+    Compute the optimal number of concurrent TCP probes based on available CPUs.
+
+    Each logical CPU can sustain ~128 async socket tasks without being the
+    bottleneck (network I/O dominates).  We cap at 1024 to stay within the
+    typical OS open-file-descriptor limit.
+    """
+    cpu_count = os.cpu_count() or 1
+    return min(1024, max(256, cpu_count * 128))
+
+
+# ---------------------------------------------------------------------------
+# Local network auto-detection
+# ---------------------------------------------------------------------------
+
+def _get_local_networks() -> List[str]:
+    """
+    Return a list of CIDR strings for every active local IPv4 interface.
+
+    Loopback (127.x.x.x) and link-local (169.254.x.x) addresses are skipped.
+    Interfaces with a prefix shorter than /16 (e.g. /8, /12 — wider than a
+    class-B network) are narrowed to the host's /24 to keep scan scope
+    manageable.
+
+    Returns:
+        Deduplicated list of CIDR strings, e.g. ['192.168.1.0/24', '10.0.0.0/24']
+    """
+    if not _psutil_available:
+        return []
+
+    cidrs: List[str] = []
+    seen: Set[str] = set()
+
+    try:
+        for _iface, addr_list in _psutil.net_if_addrs().items():
+            for addr in addr_list:
+                # AF_INET is socket.AF_INET == 2
+                if getattr(addr.family, "value", addr.family) != socket.AF_INET:
+                    continue
+                ip_str = addr.address
+                netmask_str = addr.netmask
+                if not ip_str or not netmask_str:
+                    continue
+                try:
+                    net = ipaddress.IPv4Network(
+                        f"{ip_str}/{netmask_str}", strict=False
+                    )
+                    if net.is_loopback or net.is_link_local:
+                        continue
+                    # Limit to at most a /16; narrow wider nets to /24
+                    if net.prefixlen < 16:
+                        net = ipaddress.IPv4Network(f"{ip_str}/24", strict=False)
+                    cidr = str(net)
+                    if cidr not in seen:
+                        seen.add(cidr)
+                        cidrs.append(cidr)
+                except ValueError:
+                    pass
+    except Exception as exc:
+        logger.debug("Local network detection error: %s", exc)
+
+    return cidrs
 
 
 # ---------------------------------------------------------------------------
@@ -445,13 +523,145 @@ class NetworkScanner:
         )
         return "\n".join(lines)
 
+    # ------------------------------------------------------------------
+    # Local network auto-scan
+    # ------------------------------------------------------------------
+
+    async def scan_local_networks(
+        self, port_spec: str = "top100"
+    ) -> Dict[str, Any]:
+        """
+        Auto-detect local network interfaces and scan all connected subnets.
+
+        Uses psutil to enumerate IPv4 addresses on every active interface,
+        derives the corresponding /24 (or smaller) CIDR, then runs
+        ``scan_network()`` on each in parallel.
+
+        Args:
+            port_spec: Port specification forwarded to each per-subnet scan
+
+        Returns:
+            Combined report with per-network results
+        """
+        networks = _get_local_networks()
+
+        if not networks:
+            return {
+                "error": (
+                    "Could not auto-detect local networks. "
+                    "Install psutil (`pip install psutil`) or specify a "
+                    "target manually (e.g. 'scan 192.168.1.0/24')."
+                )
+            }
+
+        scan_tasks = [
+            asyncio.create_task(
+                self.scan_network(cidr, port_spec=port_spec)
+            )
+            for cidr in networks
+        ]
+        results = await asyncio.gather(*scan_tasks, return_exceptions=True)
+
+        network_reports = []
+        total_hosts_checked = 0
+        total_live_hosts = 0
+
+        for item in results:
+            if isinstance(item, Exception):
+                continue
+            if "error" in item:
+                continue
+            network_reports.append(item)
+            total_hosts_checked += item.get("hosts_checked", 0)
+            total_live_hosts += item.get("live_hosts", 0)
+
+        return {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "auto_detected_networks": networks,
+            "networks_scanned": len(network_reports),
+            "total_hosts_checked": total_hosts_checked,
+            "total_live_hosts": total_live_hosts,
+            "port_spec": port_spec,
+            "networks": network_reports,
+        }
+
+    def format_local_network_report(self, report: Dict[str, Any]) -> str:
+        """Format a local network auto-scan report as human-readable text."""
+        if "error" in report:
+            return f"⚠️ Local Network Scanner error: {report['error']}"
+
+        detected = report.get("auto_detected_networks", [])
+        lines = [
+            "🏠 **Local Network Security Scan**",
+            f"Timestamp: {report['timestamp']}",
+            f"Auto-detected networks: {', '.join(detected) or 'none'}",
+            f"Networks scanned: {report['networks_scanned']}  |  "
+            f"Hosts checked: {report['total_hosts_checked']}  |  "
+            f"Live hosts: **{report['total_live_hosts']}**",
+        ]
+
+        for net_result in report.get("networks", []):
+            lines.append(
+                f"\n**Network: {net_result['cidr']}**  "
+                f"({net_result['live_hosts']} live / "
+                f"{net_result['hosts_checked']} checked)"
+            )
+            for host_result in net_result.get("hosts", []):
+                if host_result.get("open_count", 0) == 0:
+                    continue
+                lines.append(
+                    f"  📡 {host_result['target']} — "
+                    f"{host_result['open_count']} open port(s)"
+                )
+                for p in host_result.get("open_ports", [])[:8]:
+                    lines.append(f"      • {p['port']}/tcp  {p['service']}")
+                if host_result["open_count"] > 8:
+                    lines.append(
+                        f"      … and {host_result['open_count'] - 8} more"
+                    )
+
+        if report["total_live_hosts"] == 0:
+            lines.append("\n✅ No live hosts with open ports found.")
+
+        lines.append(
+            "\n⚠️ *For authorized security testing only. "
+            "Always obtain written permission before scanning.*"
+        )
+        return "\n".join(lines)
+
 
 def get_network_scanner() -> NetworkScanner:
-    """Return a NetworkScanner instance."""
-    return NetworkScanner()
+    """Return a hardware-aware NetworkScanner instance."""
+    return NetworkScanner(max_concurrent=_get_hardware_concurrency())
 
 
 # ── Chat-skill interface ───────────────────────────────────────────────────────
+
+# Phrases that unambiguously mean "scan my own local network" (no explicit target needed)
+_LOCAL_NETWORK_TRIGGERS = [
+    "my network",
+    "my local",
+    "local network",
+    "surrounding network",
+    "surrounding hosts",
+    "nearby hosts",
+    "nearby devices",
+    "what devices",
+    "what's on my network",
+    "whats on my network",
+    "what is on my network",
+    "devices on my network",
+    "network devices",
+    "home network",
+    "office network",
+    "my subnet",
+    "scan surrounding",
+    "scan everything",
+    "full network scan",
+    "connected devices",
+    "network security scan",
+    "security scan my",
+]
 
 _NETWORK_SCANNER_KEYWORDS = [
     "scan ports",
@@ -478,6 +688,8 @@ _NETWORK_SCANNER_KEYWORDS = [
     "scan target",
     "discover hosts",
     "live hosts",
+    # All local-network trigger phrases also qualify as scanner queries
+    *_LOCAL_NETWORK_TRIGGERS,
 ]
 
 
@@ -555,7 +767,17 @@ async def handle_network_scanner_query(message: str) -> Optional[str]:
         return None
 
     scanner = get_network_scanner()
+    msg = message.lower()
+    port_spec = _extract_port_spec(message)
+
+    # ── Local / surrounding network auto-scan ─────────────────────────────
+    # If the message references "my network", "local network", "surrounding
+    # devices" etc. and no explicit IP/CIDR target is given, auto-detect the
+    # local subnets from hardware interfaces and scan them all.
     target = _extract_target(message)
+    if not target and any(kw in msg for kw in _LOCAL_NETWORK_TRIGGERS):
+        report = await scanner.scan_local_networks(port_spec=port_spec)
+        return scanner.format_local_network_report(report)
 
     if not target:
         return (
@@ -564,14 +786,14 @@ async def handle_network_scanner_query(message: str) -> Optional[str]:
             "Examples:\n"
             "• `scan ports on 192.168.1.1`\n"
             "• `scan network 192.168.1.0/24`\n"
-            "• `find open ports on example.com`\n\n"
+            "• `find open ports on example.com`\n"
+            "• `scan my local network` ← auto-detects your subnets\n\n"
             "⚠️ *For authorized security testing only.*"
         )
 
-    msg = message.lower()
-    port_spec = _extract_port_spec(message)
+    # ── Explicit-target scan ───────────────────────────────────────────────
 
-    # Network-wide scan
+    # Network-wide scan (CIDR or "network"/"subnet" keywords)
     if "/" in target or any(kw in msg for kw in ("network", "subnet", "cidr", "range")):
         if "/" not in target:
             target += "/24"
