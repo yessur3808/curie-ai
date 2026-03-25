@@ -288,8 +288,8 @@ class NetworkAnalyzer:
         count = max(1, min(count, 200))
         timeout = max(1, min(timeout, 60))
 
-        # Validate iface name (alphanumerics, digits, hyphens, dots only)
-        if iface and not re.match(r'^[\w.\-]{1,20}$', iface):
+        # Validate iface name (alphanumerics, underscores, hyphens only — no dots/slashes)
+        if iface and not re.match(r'^[a-zA-Z0-9_\-]{1,20}$', iface):
             return {"error": f"Invalid interface name: {iface!r}"}
 
         # BPF filter basic sanity — reject shell metacharacters

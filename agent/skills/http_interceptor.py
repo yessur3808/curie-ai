@@ -229,9 +229,15 @@ class HttpInterceptor:
     and tests for common vulnerability classes.
     """
 
-    def __init__(self, timeout: float = 10.0, follow_redirects: bool = True):
+    def __init__(
+        self,
+        timeout: float = 10.0,
+        follow_redirects: bool = True,
+        verify_ssl: bool = True,
+    ):
         self.timeout = timeout
         self.follow_redirects = follow_redirects
+        self.verify_ssl = verify_ssl
         self._headers = {
             "User-Agent": (
                 "Mozilla/5.0 (compatible; CurieSecurityScanner/1.0; "
@@ -246,7 +252,7 @@ class HttpInterceptor:
             timeout=self.timeout,
             follow_redirects=self.follow_redirects,
             headers=self._headers,
-            verify=False,  # Allow testing self-signed certs in pentest contexts
+            verify=self.verify_ssl,
         )
 
     # ------------------------------------------------------------------
