@@ -82,6 +82,11 @@ class TestNetworkAnalyzer:
         assert "error" in result
 
     def test_get_interface_stats_with_psutil(self, analyzer):
+        try:
+            import psutil  # noqa: F401
+        except ImportError:
+            pytest.skip("psutil not installed")
+
         FakeCounter = MagicMock(
             bytes_sent=100,
             bytes_recv=200,
@@ -214,6 +219,11 @@ class TestNetworkAnalyzer:
     def test_handle_network_analyzer_query_connections(self, analyzer):
         from agent.skills.network_analyzer import handle_network_analyzer_query
 
+        try:
+            import psutil  # noqa: F401
+        except ImportError:
+            pytest.skip("psutil not installed")
+
         with patch("psutil.net_connections", return_value=[]):
             with patch("psutil.process_iter", return_value=[]):
                 result = asyncio.run(
@@ -224,6 +234,11 @@ class TestNetworkAnalyzer:
 
     def test_handle_network_analyzer_query_interface(self, analyzer):
         from agent.skills.network_analyzer import handle_network_analyzer_query
+
+        try:
+            import psutil  # noqa: F401
+        except ImportError:
+            pytest.skip("psutil not installed")
 
         FakeCounter = MagicMock(
             bytes_sent=0,
