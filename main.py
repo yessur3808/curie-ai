@@ -68,9 +68,9 @@ except ImportError:
     WHATSAPP_AVAILABLE = False
     logger.warning("WhatsApp connector not available (whatsapp-web.py not installed)")
 
-# Import Slack connector (optional - may not be installed)
+# Import Slack connector (optional - requires slack-bolt)
 try:
-    from connectors.slack_bot import (
+    from connectors.slack import (
         start_slack_bot,
         set_workflow as set_slack_workflow,
     )
@@ -79,6 +79,57 @@ try:
 except ImportError:
     SLACK_AVAILABLE = False
     logger.warning("Slack connector not available (slack-bolt not installed)")
+
+# Import Signal connector (optional - requires signal-cli REST API)
+try:
+    from connectors.signal import (
+        start_signal_bot,
+        set_workflow as set_signal_workflow,
+    )
+
+    SIGNAL_AVAILABLE = True
+except ImportError:
+    SIGNAL_AVAILABLE = False
+    logger.warning("Signal connector not available")
+
+# Import Microsoft Teams connector (mounts on FastAPI app)
+try:
+    from connectors.teams import (
+        mount_on as mount_teams,
+        set_workflow as set_teams_workflow,
+    )
+
+    TEAMS_AVAILABLE = True
+    mount_teams(fastapi_app)
+except ImportError:
+    TEAMS_AVAILABLE = False
+    logger.warning("Microsoft Teams connector not available")
+
+# Import LINE connector (mounts on FastAPI app)
+try:
+    from connectors.line import (
+        mount_on as mount_line,
+        set_workflow as set_line_workflow,
+    )
+
+    LINE_AVAILABLE = True
+    mount_line(fastapi_app)
+except ImportError:
+    LINE_AVAILABLE = False
+    logger.warning("LINE connector not available")
+
+# Import KakaoTalk connector (mounts on FastAPI app)
+try:
+    from connectors.kakaotalk import (
+        mount_on as mount_kakao,
+        set_workflow as set_kakao_workflow,
+    )
+
+    KAKAO_AVAILABLE = True
+    mount_kakao(fastapi_app)
+except ImportError:
+    KAKAO_AVAILABLE = False
+    logger.warning("KakaoTalk connector not available")
 
 
 def configure_logging():
@@ -201,12 +252,25 @@ def run_whatsapp(workflow: ChatWorkflow):
 def run_slack(workflow: ChatWorkflow):
     """Run Slack connector."""
     if not SLACK_AVAILABLE:
-        logger.error("Slack connector is not available. Install slack-bolt first.")
+        logger.error(
+            "Slack connector is not available. Install slack-bolt first: "
+            "pip install slack-bolt\n"
+            "Also set SLACK_BOT_TOKEN and SLACK_APP_TOKEN in your .env file."
+        )
         return
 
-    print("Starting Slack connector...")
-
+    print("Starting Slack connector (Socket Mode)...")
     start_slack_bot(workflow)
+
+
+def run_signal(workflow: ChatWorkflow):
+    """Run Signal connector polling loop."""
+    if not SIGNAL_AVAILABLE:
+        logger.error("Signal connector is not available.")
+        return
+
+    print("Starting Signal connector...")
+    start_signal_bot(workflow)
 
 
 def run_api():
@@ -308,6 +372,10 @@ def parse_args():
         "--api", action="store_true", help="Run API connector (FastAPI)"
     )
     parser.add_argument(
+        "--slack", action="store_true", help="Run Slack connector (Socket Mode)"
+    )
+    parser.add_argument("--signal", action="store_true", help="Run Signal connector")
+    parser.add_argument(
         "--coding-service", action="store_true", help="Run standalone coding service"
     )
     parser.add_argument(
@@ -344,44 +412,49 @@ def determine_what_to_run(args):
     run_telegram_env = os.getenv("RUN_TELEGRAM", "false").lower() == "true"
     run_discord_env = os.getenv("RUN_DISCORD", "false").lower() == "true"
     run_whatsapp_env = os.getenv("RUN_WHATSAPP", "false").lower() == "true"
-    run_slack_env = os.getenv("RUN_SLACK", "false").lower() == "true"
     run_api_env = os.getenv("RUN_API", "false").lower() == "true"
     run_coder_env = os.getenv("RUN_CODER", "false").lower() == "true"
     run_coding_service_env = os.getenv("RUN_CODING_SERVICE", "false").lower() == "true"
+    run_slack_env = os.getenv("RUN_SLACK", "false").lower() == "true"
+    run_signal_env = os.getenv("RUN_SIGNAL", "false").lower() == "true"
 
     run_telegram_flag = args.all or args.telegram or run_telegram_env
     run_discord_flag = args.all or args.discord or run_discord_env
     run_whatsapp_flag = args.all or args.whatsapp or run_whatsapp_env
-    run_slack_flag = args.all or args.slack or run_slack_env
     run_api_flag = args.all or args.api or run_api_env
     run_coder_flag = args.all or args.coder or run_coder_env
     run_coder_batch_flag = args.coder_batch
     run_coding_service_flag = args.coding_service or run_coding_service_env
+    run_slack_flag = args.all or args.slack or run_slack_env
+    run_signal_flag = args.all or args.signal or run_signal_env
 
     if not (
         run_telegram_flag
         or run_discord_flag
         or run_whatsapp_flag
-        or run_slack_flag
         or run_api_flag
         or run_coder_flag
         or run_coder_batch_flag
         or run_coding_service_flag
+        or run_slack_flag
+        or run_signal_flag
     ):
         print(
-            "Nothing to run! Use --telegram, --discord, --whatsapp, --slack, --api, "
-            "--coder, --coder-batch, --coding-service, --all or set RUN_* in .env."
+            "Nothing to run! Use --telegram, --discord, --whatsapp, --api, "
+            "--slack, --signal, --coder, --coder-batch, --coding-service, --all "
+            "or set RUN_* in .env."
         )
         sys.exit(1)
     return (
         run_telegram_flag,
         run_discord_flag,
         run_whatsapp_flag,
-        run_slack_flag,
         run_api_flag,
         run_coder_flag,
         run_coder_batch_flag,
         run_coding_service_flag,
+        run_slack_flag,
+        run_signal_flag,
     )
 
 
@@ -482,11 +555,12 @@ def main():
         run_telegram_flag,
         run_discord_flag,
         run_whatsapp_flag,
-        run_slack_flag,
         run_api_flag,
         run_coder_flag,
         run_coder_batch_flag,
         run_coding_service_flag,
+        run_slack_flag,
+        run_signal_flag,
     ) = determine_what_to_run(args)
     init_llm_and_memory(args.no_init)
 
@@ -510,9 +584,10 @@ def main():
         run_telegram_flag
         or run_discord_flag
         or run_whatsapp_flag
-        or run_slack_flag
         or run_api_flag
         or run_coding_service_flag
+        or run_slack_flag
+        or run_signal_flag
     ):
         set_telegram_workflow(workflow)
         set_api_workflow(workflow)
@@ -522,6 +597,14 @@ def main():
             set_whatsapp_workflow(workflow)
         if SLACK_AVAILABLE:
             set_slack_workflow(workflow)
+        if SIGNAL_AVAILABLE:
+            set_signal_workflow(workflow)
+        if TEAMS_AVAILABLE:
+            set_teams_workflow(workflow)
+        if LINE_AVAILABLE:
+            set_line_workflow(workflow)
+        if KAKAO_AVAILABLE:
+            set_kakao_workflow(workflow)
 
     threads = []
 
@@ -575,7 +658,16 @@ def main():
         else:
             logger.error("Slack connector requested but not available")
 
-    # Start API in thread
+    # Start Signal polling loop in thread
+    if run_signal_flag:
+        if SIGNAL_AVAILABLE:
+            t = threading.Thread(target=run_signal, args=(workflow,), daemon=True)
+            threads.append(t)
+            t.start()
+        else:
+            logger.error("Signal connector requested but not available")
+
+    # Start API in thread (Teams / LINE / KakaoTalk webhooks are mounted on the same app)
     if run_api_flag:
         t = threading.Thread(target=run_api, daemon=True)
         threads.append(t)
