@@ -51,6 +51,39 @@ try:
 except ImportError:
     _find_info_available = False
 
+try:
+    from agent.skills.network_analyzer import (
+        get_network_analyzer,
+        handle_network_analyzer_query,
+        NetworkAnalyzer,
+    )
+
+    _network_analyzer_available = True
+except ImportError:
+    _network_analyzer_available = False
+
+try:
+    from agent.skills.network_scanner import (
+        get_network_scanner,
+        handle_network_scanner_query,
+        NetworkScanner,
+    )
+
+    _network_scanner_available = True
+except ImportError:
+    _network_scanner_available = False
+
+try:
+    from agent.skills.http_interceptor import (
+        get_http_interceptor,
+        handle_http_interceptor_query,
+        HttpInterceptor,
+    )
+
+    _http_interceptor_available = True
+except ImportError:
+    _http_interceptor_available = False
+
 # Build __all__ dynamically based on what's available
 __all__ = []
 
@@ -71,3 +104,18 @@ if _bug_detector_available:
 
 if _performance_analyzer_available:
     __all__.extend(["get_performance_analyzer", "PerformanceAnalyzer"])
+
+if _network_analyzer_available:
+    __all__.extend(
+        ["get_network_analyzer", "handle_network_analyzer_query", "NetworkAnalyzer"]
+    )
+
+if _network_scanner_available:
+    __all__.extend(
+        ["get_network_scanner", "handle_network_scanner_query", "NetworkScanner"]
+    )
+
+if _http_interceptor_available:
+    __all__.extend(
+        ["get_http_interceptor", "handle_http_interceptor_query", "HttpInterceptor"]
+    )

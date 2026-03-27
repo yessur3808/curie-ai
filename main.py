@@ -367,6 +367,7 @@ def parse_args():
     parser.add_argument(
         "--whatsapp", action="store_true", help="Run WhatsApp connector"
     )
+    parser.add_argument("--slack", action="store_true", help="Run Slack connector")
     parser.add_argument(
         "--api", action="store_true", help="Run API connector (FastAPI)"
     )
