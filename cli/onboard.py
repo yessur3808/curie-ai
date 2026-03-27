@@ -262,8 +262,65 @@ def run_onboard(verbose: bool = False) -> int:
     if master_id:
         updates["MASTER_USER_ID"] = master_id
 
+    # ── Persona & Behaviour ────────────────────────────────────────────────────
+    _print("\n[bold]5. Assistant Persona[/bold]")
+    _print("  Choose the AI personality and display name.")
+
+    _persona_opts = [
+        "personality (default polished assistant)",
+        "jarvis (formal, tactical)",
+        "friday (friendly, proactive)",
+        "gideon (analytical, strategic)",
+        "bagley (witty, sarcastic)",
+    ]
+    _persona_files = ["personality.json", "jarvis.json", "friday.json", "gideon.json", "bagley.json"]
+    _existing_persona = existing.get("PERSONA_FILE", "personality.json")
+    _default_persona_idx = 0
+    for _i, _pf in enumerate(_persona_files):
+        if _pf == _existing_persona:
+            _default_persona_idx = _i
+            break
+
+    try:
+        from cli.ui import select as _ui_select  # noqa: PLC0415
+        _persona_idx = _ui_select(_persona_opts, title="Persona", default=_default_persona_idx)
+        persona_file = _persona_files[_persona_idx]
+    except (ImportError, Exception):
+        persona_file = _prompt(
+            "  [cyan]PERSONA_FILE[/cyan]",
+            default=_existing_persona,
+        )
+    if persona_file:
+        updates["PERSONA_FILE"] = persona_file
+
+    assistant_name = _prompt(
+        "  [cyan]ASSISTANT_NAME[/cyan]  (display name, e.g. jarvis / friday)",
+        default=existing.get("ASSISTANT_NAME", "jarvis"),
+    )
+    if assistant_name:
+        updates["ASSISTANT_NAME"] = assistant_name
+
+    # ── Time & Location ────────────────────────────────────────────────────────
+    _print("\n[bold]6. Time & Location (optional)[/bold]")
+    _print("  Used for accurate date/time/weather context when the user hasn't set their own.")
+
+    tz = _prompt(
+        "  [cyan]DEFAULT_TIMEZONE[/cyan]  (e.g. America/New_York, Europe/London)",
+        default=existing.get("DEFAULT_TIMEZONE", "UTC"),
+    )
+    if tz:
+        updates["DEFAULT_TIMEZONE"] = tz
+
+    location = _prompt(
+        "  [cyan]DEFAULT_LOCATION[/cyan]  (city name or leave blank)",
+        default=existing.get("DEFAULT_LOCATION", ""),
+    )
+    # Write DEFAULT_LOCATION unconditionally so an empty entry explicitly clears
+    # a previously stored value.  An empty location is valid: it means "not set".
+    updates["DEFAULT_LOCATION"] = location
+
     # ── Confirm & write ───────────────────────────────────────────────────
-    _print("\n[bold]5. Summary[/bold]")
+    _print("\n[bold]7. Summary[/bold]")
     if updates:
         _print(f"  Writing [green]{len(updates)}[/green] settings to [bold]{env_path}[/bold] …")
         _write_env_file(env_path, updates)

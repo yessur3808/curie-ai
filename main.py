@@ -255,15 +255,28 @@ def run_coder_interactive():
         print(f"MAIN_REPO not set. Using default: {DEFAULT_MAIN_REPO_URL}")
 
     goal = input("Describe the code enhancement goal: ").strip()
-    repo_path = input("Enter local repo path (absolute or relative): ").strip()
+    if not goal:
+        print("Error: goal is required.")
+        return
+
+    repo_raw = input("Enter local repo path (absolute or relative) [.]: ").strip()
+    repo_path = repo_raw or "."
+
     raw_branch_name = input(
         "Enter the branch name to use (press Enter to auto-generate): "
     ).strip()
     branch_name = resolve_branch_name(goal, raw_branch_name)
     if not raw_branch_name:
         print(f"Auto-generated branch name: {branch_name}")
-    files = input("Comma-separated filenames to edit (relative to repo): ").strip()
-    files_to_edit = [f.strip() for f in files.split(",") if f.strip()]
+
+    files_raw = input(
+        "Comma-separated filenames to edit (press Enter to auto-detect .py files): "
+    ).strip()
+    if files_raw:
+        files_to_edit = [f.strip() for f in files_raw.split(",") if f.strip()]
+    else:
+        files_to_edit = find_all_files(repo_path, exts=[".py"])
+        print(f"Auto-detected {len(files_to_edit)} Python file(s) in {repo_path}.")
     print(f"Running code enhancement for files: {files_to_edit} ...")
     result = apply_code_change(goal, files_to_edit, repo_path, branch_name)
     print("\n---\nResult:\n")
@@ -368,11 +381,14 @@ def determine_what_to_run(args):
         or run_coder_batch_flag
         or run_coding_service_flag
     ):
-        print(
-            "Nothing to run! Use --telegram, --discord, --whatsapp, --slack, --api, "
-            "--coder, --coder-batch, --coding-service, --all or set RUN_* in .env."
+        # No connector was explicitly requested — default to the REST API so
+        # that a bare ``python main.py`` (or an unconfigured .env) still works.
+        logger.info(
+            "No connector specified — defaulting to REST API (http://0.0.0.0:8000).\n"
+            "  Tip: pass --telegram, --discord, --all, etc. or set RUN_* in .env.\n"
+            "  Example: python main.py --api --telegram"
         )
-        sys.exit(1)
+        run_api_flag = True
     return (
         run_telegram_flag,
         run_discord_flag,
@@ -386,19 +402,44 @@ def determine_what_to_run(args):
 
 
 def init_llm_and_memory(no_init):
-    if not no_init:
-        print("Initializing model and memory...")
+    if no_init:
+        return
+
+    import concurrent.futures
+
+    print("Initializing model and memory (concurrent)...")
+
+    llm_error: list[Exception] = []
+
+    def _load_llm():
+        # LLM errors are expected (missing model file, cloud-only config, etc.)
+        # so they are collected here and surfaced after both tasks finish.
         try:
             manager.preload_llama_model()
         except (FileNotFoundError, ValueError) as e:
+            llm_error.append(e)
+        except Exception as e:
+            llm_error.append(e)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        llm_future = executor.submit(_load_llm)
+        mem_future = executor.submit(init_memory)
+        # Retrieve results in submission order; llm_future never raises (errors
+        # are captured in llm_error), while mem_future re-raises any unexpected
+        # database-init exception just as the original sequential code did.
+        llm_future.result()
+        mem_future.result()
+
+    if llm_error:
+        e = llm_error[0]
+        if isinstance(e, (FileNotFoundError, ValueError)):
             logger.warning(f"⚠️  LLM model unavailable: {e}")
             logger.warning(
                 "Continuing without LLM - text responses will be placeholders"
             )
-        except Exception as e:
+        else:
             logger.warning(f"⚠️  Unexpected LLM error: {e}")
             logger.warning("Continuing without LLM")
-        init_memory()
 
 
 # --- Coder Batch Mode Helpers ---

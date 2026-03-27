@@ -238,9 +238,18 @@ def preload_llama_model():
     """
     Loads the default Llama model into memory at startup.
     Should be called ONCE before any ask_llm calls.
+    Skipped automatically when no llama.cpp provider is configured.
     """
+    # Honour both LLM_PROVIDER and LLM_PROVIDER_PRIORITY so that cloud-only
+    # configurations don't pay the cost of loading a local GGUF model.
     provider = llm_config.get("provider", "llama.cpp")
-    if provider != "llama.cpp":
+    provider_priority = [
+        p.strip().lower()
+        for p in os.getenv("LLM_PROVIDER_PRIORITY", "llama.cpp").split(",")
+        if p.strip()
+    ]
+    if provider != "llama.cpp" and "llama.cpp" not in provider_priority:
+        logger.info("Skipping llama.cpp model preload (cloud-only provider config)")
         return  # Only preload local Llama models
 
     if Llama is None:
