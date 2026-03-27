@@ -261,18 +261,29 @@ def preload_llama_model():
     skipped, or the load failed) so that any ``ask_llm()`` callers waiting on
     the event are unblocked.
     """
-    # Honour both LLM_PROVIDER and LLM_PROVIDER_PRIORITY so that cloud-only
-    # configurations don't pay the cost of loading a local GGUF model.
-    provider = llm_config.get("provider", "llama.cpp")
+    # Honour LLM_PROVIDER_PRIORITY to skip local GGUF loading for cloud-only
+    # configurations.  LLM_PROVIDER is treated as a legacy override, but we
+    # normalise it to lowercase and only fall back to "llama.cpp" when both
+    # LLM_PROVIDER and LLM_PROVIDER_PRIORITY are absent.
     provider_priority = [
         p.strip().lower()
-        for p in os.getenv("LLM_PROVIDER_PRIORITY", "llama.cpp").split(",")
+        for p in os.getenv("LLM_PROVIDER_PRIORITY", "").split(",")
         if p.strip()
     ]
-    if provider != "llama.cpp" and "llama.cpp" not in provider_priority:
+    provider = llm_config.get("provider", "").strip().lower()
+    # If neither source mentions llama.cpp, skip the local preload.
+    if provider_priority:
+        # Provider priority is explicitly configured — respect it.
+        if "llama.cpp" not in provider_priority:
+            logger.info("Skipping llama.cpp model preload (cloud-only provider config)")
+            _model_load_event.set()
+            return
+    elif provider and provider != "llama.cpp":
+        # No priority list, but LLM_PROVIDER is set to a non-local value.
         logger.info("Skipping llama.cpp model preload (cloud-only provider config)")
         _model_load_event.set()
-        return  # Only preload local Llama models
+        return
+    # Else: neither is set (defaults), fall through and load the local model.
 
     if Llama is None:
         _model_load_event.set()

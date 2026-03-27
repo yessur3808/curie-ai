@@ -121,10 +121,40 @@ def load_default_agent(persona_filename=None):
     return Agent(persona=persona)
 
 
+# Directories that are never interesting for code editing.
+_SKIP_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".venv",
+    "venv",
+    ".env",
+    "env",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "node_modules",
+    "dist",
+    "build",
+    ".eggs",
+    "*.egg-info",
+    "site-packages",
+}
+
+_AUTO_DETECT_WARN_THRESHOLD = 50  # warn before processing a very large file list
+
+
 # --- Helper: Find all files recursively ---
 def find_all_files(repo_path, exts=None):
     all_files = []
     for root, dirs, files in os.walk(repo_path):
+        # Prune directories in-place so os.walk won't descend into them.
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in _SKIP_DIRS and not d.endswith(".egg-info")
+        ]
         for f in files:
             rel_path = os.path.relpath(os.path.join(root, f), repo_path)
             if exts is None or any(rel_path.endswith(ext) for ext in exts):
@@ -277,6 +307,14 @@ def run_coder_interactive():
     else:
         files_to_edit = find_all_files(repo_path, exts=[".py"])
         print(f"Auto-detected {len(files_to_edit)} Python file(s) in {repo_path}.")
+        if len(files_to_edit) > _AUTO_DETECT_WARN_THRESHOLD:
+            confirm = input(
+                f"⚠️  That's a large number of files ({len(files_to_edit)}). "
+                "Proceed? [y/N]: "
+            ).strip().lower()
+            if confirm != "y":
+                print("Aborted. Please specify files manually.")
+                return
     print(f"Running code enhancement for files: {files_to_edit} ...")
     result = apply_code_change(goal, files_to_edit, repo_path, branch_name)
     print("\n---\nResult:\n")
