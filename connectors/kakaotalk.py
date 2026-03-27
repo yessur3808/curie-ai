@@ -65,6 +65,7 @@ def set_workflow(workflow: ChatWorkflow) -> None:
 
 
 def _get_internal_id(kakao_user_id: str) -> str:
+    """Map a KakaoTalk user ID to the internal UUID used across all platforms."""
     return UserManager.get_or_create_user_internal_id(
         channel="kakaotalk",
         external_id=kakao_user_id,

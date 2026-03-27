@@ -37,6 +37,7 @@ SIGNAL_PHONE_NUMBER     – The Signal phone number registered for the bot
 SIGNAL_POLL_INTERVAL    – Seconds between message polling (default: 2)
 """
 
+import asyncio
 import datetime
 import logging
 import os
@@ -68,6 +69,7 @@ def set_workflow(workflow: ChatWorkflow) -> None:
 
 
 def _get_internal_id(phone_number: str) -> str:
+    """Map a Signal phone number to the internal UUID used across all platforms."""
     return UserManager.get_or_create_user_internal_id(
         channel="signal",
         external_id=phone_number,
@@ -110,8 +112,6 @@ def _process_envelope(envelope: dict) -> None:
     if not _workflow:
         return
 
-    import asyncio
-
     data_msg = envelope.get("dataMessage") or {}
     text = data_msg.get("message", "")
     source = envelope.get("source", "")
@@ -130,13 +130,9 @@ def _process_envelope(envelope: dict) -> None:
         "internal_id": internal_id,
     }
 
-    try:
-        result = asyncio.run(_workflow.process_message(normalized_input))
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_workflow.process_message(normalized_input))
-
+    # The Signal polling loop runs in a plain thread (no asyncio event loop),
+    # so asyncio.run() is always safe to call directly here.
+    result = asyncio.run(_workflow.process_message(normalized_input))
     response_text = result.get("text", "[Error: No response]")
     _send_signal_message(source, response_text)
 

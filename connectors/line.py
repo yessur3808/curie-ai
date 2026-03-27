@@ -74,6 +74,7 @@ def set_workflow(workflow: ChatWorkflow) -> None:
 
 
 def _get_internal_id(line_user_id: str) -> str:
+    """Map a LINE user ID to the internal UUID used across all platforms."""
     return UserManager.get_or_create_user_internal_id(
         channel="line",
         external_id=line_user_id,

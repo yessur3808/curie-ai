@@ -52,6 +52,7 @@ def set_workflow(workflow: ChatWorkflow) -> None:
 
 
 def _get_internal_id(slack_user_id: str) -> str:
+    """Map a Slack user ID to the internal UUID used across all platforms."""
     return UserManager.get_or_create_user_internal_id(
         channel="slack",
         external_id=slack_user_id,
@@ -121,23 +122,9 @@ def start_slack_bot(workflow: ChatWorkflow) -> None:
 
         import asyncio
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        asyncio.run, _workflow.process_message(normalized_input)
-                    )
-                    result = future.result()
-            else:
-                result = loop.run_until_complete(
-                    _workflow.process_message(normalized_input)
-                )
-        except RuntimeError:
-            result = asyncio.run(_workflow.process_message(normalized_input))
-
+        # Slack Bolt sync handlers run in their own threads (not inside an
+        # asyncio event loop), so asyncio.run() is safe to call directly.
+        result = asyncio.run(_workflow.process_message(normalized_input))
         say(result.get("text", "[Error: No response]"))
 
     # ── App mention handler (@Curie …) ───────────────────────────────────────

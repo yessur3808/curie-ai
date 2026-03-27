@@ -254,7 +254,8 @@ def run_slack(workflow: ChatWorkflow):
     if not SLACK_AVAILABLE:
         logger.error(
             "Slack connector is not available. Install slack-bolt first: "
-            "pip install slack-bolt"
+            "pip install slack-bolt\n"
+            "Also set SLACK_BOT_TOKEN and SLACK_APP_TOKEN in your .env file."
         )
         return
 
