@@ -374,9 +374,7 @@ def parse_args():
     parser.add_argument(
         "--slack", action="store_true", help="Run Slack connector (Socket Mode)"
     )
-    parser.add_argument(
-        "--signal", action="store_true", help="Run Signal connector"
-    )
+    parser.add_argument("--signal", action="store_true", help="Run Signal connector")
     parser.add_argument(
         "--coding-service", action="store_true", help="Run standalone coding service"
     )

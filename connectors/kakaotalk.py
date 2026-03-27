@@ -104,9 +104,8 @@ async def kakao_webhook(request: Request) -> JSONResponse:
 
     # Extract utterance text (Kakao SkillPayload v2 schema)
     utterance = (body.get("userRequest") or {}).get("utterance", "").strip()
-    kakao_user_id = (
-        ((body.get("userRequest") or {}).get("user") or {})
-        .get("id", "unknown")
+    kakao_user_id = ((body.get("userRequest") or {}).get("user") or {}).get(
+        "id", "unknown"
     )
     block_id = (body.get("action") or {}).get("id", str(uuid.uuid4()))
 

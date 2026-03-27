@@ -101,9 +101,7 @@ def start_slack_bot(workflow: ChatWorkflow) -> None:
     app_token = os.getenv("SLACK_APP_TOKEN")
 
     if not bot_token:
-        raise RuntimeError(
-            "SLACK_BOT_TOKEN is not set. Add it to your .env file."
-        )
+        raise RuntimeError("SLACK_BOT_TOKEN is not set. Add it to your .env file.")
     if not app_token:
         raise RuntimeError(
             "SLACK_APP_TOKEN is not set (required for Socket Mode). "

@@ -168,9 +168,7 @@ def start_signal_bot(workflow: ChatWorkflow) -> None:
     _workflow = workflow
 
     if not _PHONE:
-        raise RuntimeError(
-            "SIGNAL_PHONE_NUMBER is not set. Add it to your .env file."
-        )
+        raise RuntimeError("SIGNAL_PHONE_NUMBER is not set. Add it to your .env file.")
 
     print(f"📡 Signal bot polling {_API_URL} as {_PHONE} …")
 

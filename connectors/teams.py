@@ -153,9 +153,7 @@ async def _send_teams_reply(
     app_password = os.getenv("TEAMS_APP_PASSWORD", "")
 
     if not app_id or not app_password:
-        logger.warning(
-            "TEAMS_APP_ID / TEAMS_APP_PASSWORD not set – reply not sent."
-        )
+        logger.warning("TEAMS_APP_ID / TEAMS_APP_PASSWORD not set – reply not sent.")
         return
 
     try:

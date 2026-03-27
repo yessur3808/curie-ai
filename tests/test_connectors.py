@@ -407,30 +407,30 @@ class TestTeamsConnectorPlatform:
 
     def test_platform_tag_is_teams(self):
         source = self._load_source()
-        assert '"platform": "teams"' in source, (
-            "connectors/teams.py must set platform='teams' in normalized_input"
-        )
+        assert (
+            '"platform": "teams"' in source
+        ), "connectors/teams.py must set platform='teams' in normalized_input"
 
     def test_get_internal_id_uses_teams_channel(self):
         source = self._load_source()
-        assert 'channel="teams"' in source, (
-            "connectors/teams.py must pass channel='teams' to UserManager"
-        )
+        assert (
+            'channel="teams"' in source
+        ), "connectors/teams.py must pass channel='teams' to UserManager"
 
     def test_bearer_auth_required(self):
         source = self._load_source()
-        assert 'Authorization' in source, (
-            "connectors/teams.py must check the Authorization header on incoming requests"
-        )
-        assert '"Bearer "' in source or "'Bearer '" in source or "Bearer " in source, (
-            "connectors/teams.py must validate the Bearer token in the Authorization header"
-        )
+        assert (
+            "Authorization" in source
+        ), "connectors/teams.py must check the Authorization header on incoming requests"
+        assert (
+            '"Bearer "' in source or "'Bearer '" in source or "Bearer " in source
+        ), "connectors/teams.py must validate the Bearer token in the Authorization header"
 
     def test_reply_status_checked(self):
         source = self._load_source()
-        assert "is_success" in source or "raise_for_status" in source, (
-            "connectors/teams.py must check the reply response status (is_success or raise_for_status)"
-        )
+        assert (
+            "is_success" in source or "raise_for_status" in source
+        ), "connectors/teams.py must check the reply response status (is_success or raise_for_status)"
 
 
 # ---------------------------------------------------------------------------
@@ -452,21 +452,21 @@ class TestLineConnectorPlatform:
 
     def test_platform_tag_is_line(self):
         source = self._load_source()
-        assert '"platform": "line"' in source, (
-            "connectors/line.py must set platform='line' in normalized_input"
-        )
+        assert (
+            '"platform": "line"' in source
+        ), "connectors/line.py must set platform='line' in normalized_input"
 
     def test_signature_verification_present(self):
         source = self._load_source()
-        assert "_verify_line_signature" in source, (
-            "connectors/line.py must implement LINE webhook signature verification"
-        )
+        assert (
+            "_verify_line_signature" in source
+        ), "connectors/line.py must implement LINE webhook signature verification"
 
     def test_get_internal_id_uses_line_channel(self):
         source = self._load_source()
-        assert 'channel="line"' in source, (
-            "connectors/line.py must pass channel='line' to UserManager"
-        )
+        assert (
+            'channel="line"' in source
+        ), "connectors/line.py must pass channel='line' to UserManager"
 
     def test_fail_closed_without_secret(self):
         source = self._load_source()
@@ -479,9 +479,9 @@ class TestLineConnectorPlatform:
 
     def test_reply_status_checked(self):
         source = self._load_source()
-        assert "is_success" in source or "raise_for_status" in source, (
-            "connectors/line.py must check the reply response status (is_success or raise_for_status)"
-        )
+        assert (
+            "is_success" in source or "raise_for_status" in source
+        ), "connectors/line.py must check the reply response status (is_success or raise_for_status)"
 
 
 # ---------------------------------------------------------------------------
@@ -503,21 +503,21 @@ class TestKakaoConnectorPlatform:
 
     def test_platform_tag_is_kakaotalk(self):
         source = self._load_source()
-        assert '"platform": "kakaotalk"' in source, (
-            "connectors/kakaotalk.py must set platform='kakaotalk' in normalized_input"
-        )
+        assert (
+            '"platform": "kakaotalk"' in source
+        ), "connectors/kakaotalk.py must set platform='kakaotalk' in normalized_input"
 
     def test_skill_response_version(self):
         source = self._load_source()
-        assert '"version": "2.0"' in source, (
-            "connectors/kakaotalk.py must return Kakao SkillResponse version 2.0"
-        )
+        assert (
+            '"version": "2.0"' in source
+        ), "connectors/kakaotalk.py must return Kakao SkillResponse version 2.0"
 
     def test_get_internal_id_uses_kakaotalk_channel(self):
         source = self._load_source()
-        assert 'channel="kakaotalk"' in source, (
-            "connectors/kakaotalk.py must pass channel='kakaotalk' to UserManager"
-        )
+        assert (
+            'channel="kakaotalk"' in source
+        ), "connectors/kakaotalk.py must pass channel='kakaotalk' to UserManager"
 
     def test_secret_username_uses_kakaotalk_prefix(self):
         source = self._load_source()
@@ -553,18 +553,18 @@ class TestWebChatUI:
 
     def test_webchat_route_exists(self):
         source = self._load_source()
-        assert 'async def webchat_ui' in source, (
-            "connectors/api.py must expose a GET / webchat_ui endpoint"
-        )
+        assert (
+            "async def webchat_ui" in source
+        ), "connectors/api.py must expose a GET / webchat_ui endpoint"
 
     def test_webchat_html_contains_websocket_connect(self):
         source = self._load_source()
-        assert "/ws/chat" in source, (
-            "The WebChat UI HTML must connect to the /ws/chat WebSocket endpoint"
-        )
+        assert (
+            "/ws/chat" in source
+        ), "The WebChat UI HTML must connect to the /ws/chat WebSocket endpoint"
 
     def test_webchat_uses_html_response(self):
         source = self._load_source()
-        assert "HTMLResponse" in source, (
-            "connectors/api.py must import and use HTMLResponse for the WebChat UI"
-        )
+        assert (
+            "HTMLResponse" in source
+        ), "connectors/api.py must import and use HTMLResponse for the WebChat UI"
