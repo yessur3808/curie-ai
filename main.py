@@ -490,14 +490,12 @@ def determine_what_to_run(args):
         or run_slack_flag
         or run_signal_flag
     ):
-        # No connector was explicitly requested — default to the REST API so
-        # that a bare ``python main.py`` (or an unconfigured .env) still works.
-        logger.info(
-            "No connector specified — defaulting to REST API (http://0.0.0.0:8000).\n"
-            "  Tip: pass --telegram, --discord, --all, etc. or set RUN_* in .env.\n"
-            "  Example: python main.py --api --telegram"
+        print(
+            "Nothing to run! Use --telegram, --discord, --whatsapp, --api, "
+            "--slack, --signal, --coder, --coder-batch, --coding-service, --all "
+            "or set RUN_* in .env."
         )
-        run_api_flag = True
+        sys.exit(1)
     return (
         run_telegram_flag,
         run_discord_flag,
@@ -607,6 +605,29 @@ def main():
     configure_logging()
 
     args = parse_args()
+
+    # Default to REST API when no connector has been explicitly requested so
+    # that a bare ``python main.py`` (or an unconfigured .env) still works.
+    _anything_arg = any([
+        args.all, args.telegram, args.discord, args.whatsapp,
+        args.api, args.coder, args.coder_batch, args.coding_service,
+        args.slack, args.signal,
+    ])
+    _anything_env = any(
+        os.getenv(v, "false").lower() == "true"
+        for v in (
+            "RUN_TELEGRAM", "RUN_DISCORD", "RUN_WHATSAPP", "RUN_API",
+            "RUN_CODER", "RUN_CODING_SERVICE", "RUN_SLACK", "RUN_SIGNAL",
+        )
+    )
+    if not _anything_arg and not _anything_env:
+        logger.info(
+            "No connector specified — defaulting to REST API (http://0.0.0.0:8000).\n"
+            "  Tip: pass --telegram, --discord, --all, etc. or set RUN_* in .env.\n"
+            "  Example: python main.py --api --telegram"
+        )
+        args.api = True
+
     (
         run_telegram_flag,
         run_discord_flag,
