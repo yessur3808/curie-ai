@@ -456,7 +456,9 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                     logger.info(
                         f"No cached model, attempting to load with fallback (preferred: {preferred_model})"
                     )
-                    model, model_name_loaded = _load_model_with_fallback(preferred_model)
+                    model, model_name_loaded = _load_model_with_fallback(
+                        preferred_model
+                    )
                     if model is None or model_name_loaded is None:
                         return "[Error: Failed to load any available model]"
                     llama_models_cache[model_name_loaded] = model

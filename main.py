@@ -202,9 +202,7 @@ def find_all_files(repo_path, exts=None):
     for root, dirs, files in os.walk(repo_path):
         # Prune directories in-place so os.walk won't descend into them.
         dirs[:] = [
-            d
-            for d in dirs
-            if d not in _SKIP_DIRS and not d.endswith(".egg-info")
+            d for d in dirs if d not in _SKIP_DIRS and not d.endswith(".egg-info")
         ]
         for f in files:
             rel_path = os.path.relpath(os.path.join(root, f), repo_path)
@@ -372,10 +370,14 @@ def run_coder_interactive():
         files_to_edit = find_all_files(repo_path, exts=[".py"])
         print(f"Auto-detected {len(files_to_edit)} Python file(s) in {repo_path}.")
         if len(files_to_edit) > _AUTO_DETECT_WARN_THRESHOLD:
-            confirm = input(
-                f"⚠️  That's a large number of files ({len(files_to_edit)}). "
-                "Proceed? [y/N]: "
-            ).strip().lower()
+            confirm = (
+                input(
+                    f"⚠️  That's a large number of files ({len(files_to_edit)}). "
+                    "Proceed? [y/N]: "
+                )
+                .strip()
+                .lower()
+            )
             if confirm != "y":
                 print("Aborted. Please specify files manually.")
                 return
@@ -608,16 +610,31 @@ def main():
 
     # Default to REST API when no connector has been explicitly requested so
     # that a bare ``python main.py`` (or an unconfigured .env) still works.
-    _anything_arg = any([
-        args.all, args.telegram, args.discord, args.whatsapp,
-        args.api, args.coder, args.coder_batch, args.coding_service,
-        args.slack, args.signal,
-    ])
+    _anything_arg = any(
+        [
+            args.all,
+            args.telegram,
+            args.discord,
+            args.whatsapp,
+            args.api,
+            args.coder,
+            args.coder_batch,
+            args.coding_service,
+            args.slack,
+            args.signal,
+        ]
+    )
     _anything_env = any(
         os.getenv(v, "false").lower() == "true"
         for v in (
-            "RUN_TELEGRAM", "RUN_DISCORD", "RUN_WHATSAPP", "RUN_API",
-            "RUN_CODER", "RUN_CODING_SERVICE", "RUN_SLACK", "RUN_SIGNAL",
+            "RUN_TELEGRAM",
+            "RUN_DISCORD",
+            "RUN_WHATSAPP",
+            "RUN_API",
+            "RUN_CODER",
+            "RUN_CODING_SERVICE",
+            "RUN_SLACK",
+            "RUN_SIGNAL",
         )
     )
     if not _anything_arg and not _anything_env:
