@@ -27,12 +27,22 @@ for _mod in (
 # ---------------------------------------------------------------------------
 # Module isolation
 # ---------------------------------------------------------------------------
-# test_connectors.py loads first alphabetically and may have injected a
-# MagicMock for "memory" and "llm" into sys.modules.  Remove those stubs so
-# the real local packages can be imported below.
+# Earlier test modules (e.g. test_chat_workflow.py) inject a MagicMock for
+# "llm" into sys.modules before the real package is loaded.  If another test
+# module collected before us (e.g. test_conversions.py) then triggers the
+# import of agent.skills.find_info via agent/skills/__init__.py, find_info's
+# module-level `from llm import manager` resolves to that MagicMock and the
+# cached module object is forever tainted.  Clear the cached module too so
+# that our import below always executes find_info.py against the real llm.
 for _k in [k for k in sys.modules if k == "memory" or k.startswith("memory.")]:
     del sys.modules[_k]
 for _k in [k for k in sys.modules if k == "llm" or k.startswith("llm.")]:
+    del sys.modules[_k]
+for _k in [
+    k
+    for k in sys.modules
+    if k == "agent.skills.find_info" or k.startswith("agent.skills.find_info.")
+]:
     del sys.modules[_k]
 
 from agent.skills.find_info import (  # noqa: E402
