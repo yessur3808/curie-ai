@@ -40,6 +40,7 @@ LINE_CHANNEL_ACCESS_TOKEN  – Channel access token from LINE Developer Console
 LINE_CHANNEL_SECRET        – Channel secret (used for signature validation)
 """
 
+import base64
 import datetime
 import hashlib
 import hmac
@@ -85,14 +86,11 @@ def _get_internal_id(line_user_id: str) -> str:
 
 def _verify_line_signature(body_bytes: bytes, x_line_signature: str) -> bool:
     """Validate the X-Line-Signature header to verify the request is from LINE."""
-    if not _CHANNEL_SECRET:
-        return True  # Skip validation if secret is not configured
     expected = hmac.new(
         _CHANNEL_SECRET.encode("utf-8"),
         body_bytes,
         hashlib.sha256,
     ).digest()
-    import base64
 
     return hmac.compare_digest(
         base64.b64encode(expected).decode("utf-8"),
@@ -110,7 +108,7 @@ async def _reply_to_line(reply_token: str, text: str) -> None:
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
+            reply_resp = await client.post(
                 "https://api.line.me/v2/bot/message/reply",
                 headers={
                     "Authorization": f"Bearer {_CHANNEL_ACCESS_TOKEN}",
@@ -120,6 +118,12 @@ async def _reply_to_line(reply_token: str, text: str) -> None:
                     "replyToken": reply_token,
                     "messages": [{"type": "text", "text": text}],
                 },
+            )
+        if not reply_resp.is_success:
+            logger.error(
+                "LINE reply failed: status=%s body=%s",
+                reply_resp.status_code,
+                reply_resp.text,
             )
     except Exception as exc:
         logger.error("Failed to send LINE reply: %s", exc)
@@ -141,7 +145,19 @@ async def line_webhook(
 
     body_bytes = await request.body()
 
-    if _CHANNEL_SECRET and not _verify_line_signature(body_bytes, x_line_signature):
+    if not _CHANNEL_SECRET:
+        # Fail closed: reject all requests until LINE_CHANNEL_SECRET is
+        # configured.  Set LINE_ALLOW_UNVERIFIED=true only for local dev.
+        if os.getenv("LINE_ALLOW_UNVERIFIED", "").lower() != "true":
+            logger.error(
+                "LINE_CHANNEL_SECRET is not set. "
+                "Rejecting LINE webhook request. "
+                "Set LINE_ALLOW_UNVERIFIED=true to disable this check for local dev."
+            )
+            return Response(
+                content="LINE_CHANNEL_SECRET not configured", status_code=500
+            )
+    elif not _verify_line_signature(body_bytes, x_line_signature):
         raise HTTPException(status_code=400, detail="Invalid LINE signature")
 
     try:

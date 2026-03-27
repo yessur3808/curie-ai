@@ -84,9 +84,24 @@ async def teams_messages(request: Request) -> Response:
 
     Teams sends Activity objects here.  We extract the text, process it
     through ChatWorkflow, and reply using the Bot Framework REST API.
+
+    Authentication
+    --------------
+    The Bot Framework sends a signed JWT Bearer token in the Authorization
+    header.  We verify that the header is present and well-formed here.
+    For full production validation (checking iss/aud/appid JWT claims),
+    install and configure ``botbuilder-core``.
     """
     if not _workflow:
         return Response(content="System not initialized", status_code=503)
+
+    # ── Basic Bot Framework auth check ──────────────────────────────────────
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        logger.warning(
+            "Teams webhook: missing or malformed Authorization header – rejecting request."
+        )
+        return Response(content="Unauthorized", status_code=401)
 
     try:
         body = await request.json()
@@ -173,11 +188,17 @@ async def _send_teams_reply(
                 "replyToId": activity_id,
             }
 
-            await client.post(
+            reply_resp = await client.post(
                 reply_url,
                 json=reply_activity,
                 headers={"Authorization": f"Bearer {access_token}"},
             )
+            if not reply_resp.is_success:
+                logger.error(
+                    "Teams reply failed: status=%s body=%s",
+                    reply_resp.status_code,
+                    reply_resp.text,
+                )
     except Exception as exc:
         logger.error("Failed to send Teams reply: %s", exc)
 

@@ -19,9 +19,11 @@ SLACK_APP_TOKEN   – App-level token  (xapp-...)  [required for Socket Mode]
 Both tokens are created in the Slack app dashboard at https://api.slack.com/apps.
 """
 
+import asyncio
 import datetime
 import logging
 import os
+import threading
 import uuid
 from typing import Optional
 
@@ -43,6 +45,30 @@ logger = logging.getLogger(__name__)
 
 # Shared ChatWorkflow instance (set by main.py)
 _workflow: Optional[ChatWorkflow] = None
+
+# Dedicated asyncio event loop running in a background thread so that async
+# ChatWorkflow calls can be dispatched from Slack Bolt's sync event handlers
+# without creating a new event loop for every incoming message.
+_async_loop: Optional[asyncio.AbstractEventLoop] = None
+_async_loop_lock = threading.Lock()
+
+
+def _ensure_async_loop() -> asyncio.AbstractEventLoop:
+    """Return the long-lived event loop, creating it on first call."""
+    global _async_loop
+    with _async_loop_lock:
+        if _async_loop is None or _async_loop.is_closed():
+            _async_loop = asyncio.new_event_loop()
+            t = threading.Thread(target=_async_loop.run_forever, daemon=True)
+            t.start()
+    return _async_loop
+
+
+def _run_async(coro):
+    """Schedule a coroutine on the persistent event loop and block until done."""
+    loop = _ensure_async_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
 
 
 def set_workflow(workflow: ChatWorkflow) -> None:
@@ -120,11 +146,9 @@ def start_slack_bot(workflow: ChatWorkflow) -> None:
             "internal_id": internal_id,
         }
 
-        import asyncio
-
-        # Slack Bolt sync handlers run in their own threads (not inside an
-        # asyncio event loop), so asyncio.run() is safe to call directly.
-        result = asyncio.run(_workflow.process_message(normalized_input))
+        # Dispatch to the persistent shared event loop so a new loop is not
+        # created for every message (Bolt sync handlers run in worker threads).
+        result = _run_async(_workflow.process_message(normalized_input))
         say(result.get("text", "[Error: No response]"))
 
     # ── App mention handler (@Curie …) ───────────────────────────────────────

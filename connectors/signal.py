@@ -41,6 +41,7 @@ import asyncio
 import datetime
 import logging
 import os
+import threading
 import time
 import uuid
 from typing import Optional
@@ -60,6 +61,30 @@ _workflow: Optional[ChatWorkflow] = None
 _API_URL = os.getenv("SIGNAL_CLI_API_URL", "http://localhost:8080")
 _PHONE = os.getenv("SIGNAL_PHONE_NUMBER", "")
 _POLL_INTERVAL = float(os.getenv("SIGNAL_POLL_INTERVAL", "2"))
+
+# Dedicated asyncio event loop running in a background thread so that async
+# ChatWorkflow calls can be dispatched from the synchronous polling loop
+# without creating a new event loop for every incoming message.
+_async_loop: Optional[asyncio.AbstractEventLoop] = None
+_async_loop_lock = threading.Lock()
+
+
+def _ensure_async_loop() -> asyncio.AbstractEventLoop:
+    """Return the long-lived event loop, creating it on first call."""
+    global _async_loop
+    with _async_loop_lock:
+        if _async_loop is None or _async_loop.is_closed():
+            _async_loop = asyncio.new_event_loop()
+            t = threading.Thread(target=_async_loop.run_forever, daemon=True)
+            t.start()
+    return _async_loop
+
+
+def _run_async(coro):
+    """Schedule a coroutine on the persistent event loop and block until done."""
+    loop = _ensure_async_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
 
 
 def set_workflow(workflow: ChatWorkflow) -> None:
@@ -131,8 +156,8 @@ def _process_envelope(envelope: dict) -> None:
     }
 
     # The Signal polling loop runs in a plain thread (no asyncio event loop),
-    # so asyncio.run() is always safe to call directly here.
-    result = asyncio.run(_workflow.process_message(normalized_input))
+    # so we dispatch through the persistent shared loop.
+    result = _run_async(_workflow.process_message(normalized_input))
     response_text = result.get("text", "[Error: No response]")
     _send_signal_message(source, response_text)
 
@@ -149,6 +174,11 @@ def start_signal_bot(workflow: ChatWorkflow) -> None:
 
     print(f"📡 Signal bot polling {_API_URL} as {_PHONE} …")
 
+    # Exponential back-off on consecutive failures to avoid log-spam and
+    # wasted CPU when the signal-cli REST API is unavailable.
+    _backoff = _POLL_INTERVAL
+    _MAX_BACKOFF = 60.0
+
     while True:
         try:
             envelopes = _receive_signal_messages()
@@ -157,7 +187,10 @@ def start_signal_bot(workflow: ChatWorkflow) -> None:
                     _process_envelope(envelope)
                 except Exception as exc:
                     logger.error("Error processing Signal envelope: %s", exc)
+            # Reset back-off on a successful poll cycle.
+            _backoff = _POLL_INTERVAL
         except Exception as exc:
             logger.error("Signal polling error: %s", exc)
+            _backoff = min(_backoff * 2, _MAX_BACKOFF)
 
-        time.sleep(_POLL_INTERVAL)
+        time.sleep(_backoff)

@@ -298,6 +298,7 @@ class TestSlackGetInternalId:
     def setup_method(self):
         # Stub optional slack_bolt so the module loads without the package.
         sys.modules.setdefault("slack_bolt", MagicMock())
+        sys.modules.setdefault("slack_bolt.adapter", MagicMock())
         sys.modules.setdefault("slack_bolt.adapter.socket_mode", MagicMock())
 
         if "connectors.slack" in sys.modules:
@@ -359,6 +360,34 @@ class TestSignalGetInternalId:
         )
 
 
+class TestSignalPollingLoop:
+    """Verify the Signal polling loop source code contains exponential backoff."""
+
+    def _load_source(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "connectors",
+            "signal.py",
+        )
+        with open(path) as fh:
+            return fh.read()
+
+    def test_backoff_present(self):
+        source = self._load_source()
+        assert "_MAX_BACKOFF" in source, (
+            "connectors/signal.py must implement exponential back-off "
+            "(_MAX_BACKOFF constant) in the polling loop to avoid log spam "
+            "when the signal-cli REST API is down"
+        )
+
+    def test_backoff_doubling_logic(self):
+        source = self._load_source()
+        assert "_backoff * 2" in source or "backoff * 2" in source, (
+            "connectors/signal.py polling loop must double the back-off delay "
+            "on consecutive failures"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Teams connector — platform tag
 # ---------------------------------------------------------------------------
@@ -386,6 +415,21 @@ class TestTeamsConnectorPlatform:
         source = self._load_source()
         assert 'channel="teams"' in source, (
             "connectors/teams.py must pass channel='teams' to UserManager"
+        )
+
+    def test_bearer_auth_required(self):
+        source = self._load_source()
+        assert 'Authorization' in source, (
+            "connectors/teams.py must check the Authorization header on incoming requests"
+        )
+        assert '"Bearer "' in source or "'Bearer '" in source or "Bearer " in source, (
+            "connectors/teams.py must validate the Bearer token in the Authorization header"
+        )
+
+    def test_reply_status_checked(self):
+        source = self._load_source()
+        assert "is_success" in source or "raise_for_status" in source, (
+            "connectors/teams.py must check the reply response status (is_success or raise_for_status)"
         )
 
 
@@ -424,6 +468,21 @@ class TestLineConnectorPlatform:
             "connectors/line.py must pass channel='line' to UserManager"
         )
 
+    def test_fail_closed_without_secret(self):
+        source = self._load_source()
+        # The webhook must not silently skip validation; it must check
+        # LINE_CHANNEL_SECRET and reject requests when it is absent.
+        assert "LINE_ALLOW_UNVERIFIED" in source, (
+            "connectors/line.py must fail closed when LINE_CHANNEL_SECRET is not set; "
+            "use LINE_ALLOW_UNVERIFIED=true to opt out for local dev"
+        )
+
+    def test_reply_status_checked(self):
+        source = self._load_source()
+        assert "is_success" in source or "raise_for_status" in source, (
+            "connectors/line.py must check the reply response status (is_success or raise_for_status)"
+        )
+
 
 # ---------------------------------------------------------------------------
 # KakaoTalk connector — platform tag and SkillResponse format
@@ -458,6 +517,20 @@ class TestKakaoConnectorPlatform:
         source = self._load_source()
         assert 'channel="kakaotalk"' in source, (
             "connectors/kakaotalk.py must pass channel='kakaotalk' to UserManager"
+        )
+
+    def test_secret_username_uses_kakaotalk_prefix(self):
+        source = self._load_source()
+        assert '"kakaotalk_' in source, (
+            "connectors/kakaotalk.py must use 'kakaotalk_' prefix in secret_username "
+            "to be consistent with the channel='kakaotalk' tag"
+        )
+
+    def test_no_bogus_bot_id_token_check(self):
+        source = self._load_source()
+        assert 'body.get("bot")' not in source, (
+            "connectors/kakaotalk.py must not compare bot.id as a security token; "
+            "bot.id is a bot identifier, not a shared secret"
         )
 
 

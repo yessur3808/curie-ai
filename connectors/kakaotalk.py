@@ -21,21 +21,16 @@ Setup
 
        https://<your-host>/kakao/webhook
 
-3. (Optional) Set the verification token::
-
-       KAKAO_VERIFY_TOKEN=<your-verification-token>
-
 Kakao i Open Builder sends a JSON body conforming to their SkillPayload spec.
 The connector returns a JSON body conforming to their SkillResponse spec.
 
-Environment variables
----------------------
-KAKAO_VERIFY_TOKEN  – Optional verification token for request validation
+Note: Kakao i Open Builder does not provide a request signing mechanism for
+skill server calls.  Restrict access to the endpoint at the network/proxy
+layer (e.g. IP allowlist) rather than relying on application-layer secrets.
 """
 
 import datetime
 import logging
-import os
 import uuid
 from typing import Optional
 
@@ -52,8 +47,6 @@ logger = logging.getLogger(__name__)
 # Shared ChatWorkflow instance (set by main.py)
 _workflow: Optional[ChatWorkflow] = None
 
-_VERIFY_TOKEN = os.getenv("KAKAO_VERIFY_TOKEN", "")
-
 # Sub-application that the main FastAPI app mounts at /kakao
 kakao_app = FastAPI(title="Curie AI – KakaoTalk connector")
 
@@ -69,7 +62,7 @@ def _get_internal_id(kakao_user_id: str) -> str:
     return UserManager.get_or_create_user_internal_id(
         channel="kakaotalk",
         external_id=kakao_user_id,
-        secret_username=f"kakao_{kakao_user_id}",
+        secret_username=f"kakaotalk_{kakao_user_id}",
         updated_by="kakao_bot",
     )
 
@@ -108,12 +101,6 @@ async def kakao_webhook(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         return JSONResponse(content={"error": "Invalid JSON"}, status_code=400)
-
-    # Optional token verification
-    if _VERIFY_TOKEN:
-        token = (body.get("bot") or {}).get("id", "")
-        if token != _VERIFY_TOKEN:
-            return JSONResponse(content={"error": "Invalid token"}, status_code=403)
 
     # Extract utterance text (Kakao SkillPayload v2 schema)
     utterance = (body.get("userRequest") or {}).get("utterance", "").strip()
