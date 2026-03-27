@@ -8,7 +8,7 @@ import hashlib
 import time
 import gc
 from collections import OrderedDict
-from threading import Lock
+from threading import Event, Lock, Thread
 from dotenv import load_dotenv
 from typing import TYPE_CHECKING
 
@@ -61,6 +61,15 @@ _response_cache_misses = 0
 MAX_MODELS_IN_CACHE = 1  # Only keep one model in memory at a time
 _last_gc_time = 0
 _gc_interval = 300  # Run garbage collection every 5 minutes
+
+# Background preload state
+# _model_load_event is set once preload_llama_model() finishes (or is skipped/fails).
+# ask_llm() waits on it so concurrent callers don't race to load the model.
+_model_load_event = Event()
+_model_lazy_lock = Lock()  # serialise concurrent lazy-load attempts in ask_llm()
+_background_preload_started = False  # True only when start_background_preload() is used
+# How long ask_llm() waits for a background preload to finish before giving up.
+_PRELOAD_WAIT_TIMEOUT = 300  # seconds
 
 
 def _trigger_garbage_collection():
@@ -176,7 +185,13 @@ def _load_model_with_fallback(
 
     # Try each candidate in order
     seen = set()
-    n_threads = _get_int_env("LLM_THREADS", 18)
+    # Default to all logical CPU cores rather than a hardcoded magic number.
+    n_threads = _get_int_env("LLM_THREADS", os.cpu_count() or 4)
+    # GPU layers: number of transformer layers to offload to GPU (0 = CPU-only).
+    # Set LLM_GPU_LAYERS=-1 to offload all layers (full GPU inference).
+    n_gpu_layers = _get_int_env("LLM_GPU_LAYERS", 0)
+    # Suppress llama.cpp's own verbose init output unless DEBUG logging is on.
+    verbose = logger.isEnabledFor(logging.DEBUG)
 
     for model_name in candidates:
         if not model_name or model_name in seen:
@@ -194,6 +209,8 @@ def _load_model_with_fallback(
                 model_path=model_path,
                 n_ctx=MODEL_CONTEXT_SIZE,
                 n_threads=n_threads,
+                n_gpu_layers=n_gpu_layers,
+                verbose=verbose,
             )
             logger.info(f"Successfully loaded model: {model_name}")
             return model, model_name
@@ -239,6 +256,10 @@ def preload_llama_model():
     Loads the default Llama model into memory at startup.
     Should be called ONCE before any ask_llm calls.
     Skipped automatically when no llama.cpp provider is configured.
+
+    Always sets ``_model_load_event`` on return (whether the model was loaded,
+    skipped, or the load failed) so that any ``ask_llm()`` callers waiting on
+    the event are unblocked.
     """
     # Honour both LLM_PROVIDER and LLM_PROVIDER_PRIORITY so that cloud-only
     # configurations don't pay the cost of loading a local GGUF model.
@@ -250,9 +271,11 @@ def preload_llama_model():
     ]
     if provider != "llama.cpp" and "llama.cpp" not in provider_priority:
         logger.info("Skipping llama.cpp model preload (cloud-only provider config)")
+        _model_load_event.set()
         return  # Only preload local Llama models
 
     if Llama is None:
+        _model_load_event.set()
         raise RuntimeError("llama_cpp is not installed")
 
     preferred_model = llm_config.get("model_path") or DEFAULT_LLAMA_MODEL
@@ -260,10 +283,43 @@ def preload_llama_model():
 
     model, model_name = _load_model_with_fallback(preferred_model)
     if model is None or model_name is None:
+        _model_load_event.set()
         raise RuntimeError("Failed to load any available LLM model")
 
     llama_models_cache[model_name] = model
     logger.info(f"Preloaded model: {model_name}")
+    _model_load_event.set()
+
+
+def _run_preload_background():
+    """Worker target for :func:`start_background_preload`."""
+    try:
+        preload_llama_model()
+    except Exception as exc:
+        logger.warning("Background LLM preload failed: %s", exc, exc_info=True)
+    finally:
+        # Always signal — even on failure — so ask_llm() is never blocked forever.
+        _model_load_event.set()
+
+
+def start_background_preload() -> Thread:
+    """Load the LLM model in a background daemon thread.
+
+    Returns immediately so that connectors and the workflow can start while
+    the model warms up.  The first :func:`ask_llm` call that needs the local
+    model will wait (up to 5 minutes) for the preload to finish.
+
+    Returns
+    -------
+    threading.Thread
+        The daemon thread handling the preload (joinable if needed).
+    """
+    global _background_preload_started
+    _background_preload_started = True
+    t = Thread(target=_run_preload_background, daemon=True, name="llm-preload")
+    t.start()
+    logger.info("LLM model preload started in background thread")
+    return t
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +403,13 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
         # Try to use cached model first
         llama_model = None
 
+        # If a background preload is running and hasn't finished yet, wait for
+        # it before attempting a lazy-load ourselves.  This avoids two threads
+        # racing to load the same GGUF file simultaneously.
+        if _background_preload_started and not _model_load_event.is_set():
+            logger.info("Waiting for background LLM preload to complete…")
+            _model_load_event.wait(timeout=_PRELOAD_WAIT_TIMEOUT)
+
         # Check if preferred model is already cached
         if preferred_model in llama_models_cache:
             selected_model = preferred_model
@@ -364,19 +427,32 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                     )
                     break
 
-        # Lazy-load with fallback if no cached model available
+        # Lazy-load with fallback if no cached model available.
+        # The lock prevents multiple concurrent callers from each trying to
+        # load the model file at the same time (e.g. first burst of messages).
         if llama_model is None:
-            logger.info(
-                f"No cached model, attempting to load with fallback (preferred: {preferred_model})"
-            )
-            model, model_name_loaded = _load_model_with_fallback(preferred_model)
-            if model is None or model_name_loaded is None:
-                return "[Error: Failed to load any available model]"
-            llama_models_cache[model_name_loaded] = model
-            llama_model = model
-            selected_model = model_name_loaded
-            # Clean up excess models to prevent memory bloat
-            _cleanup_excess_models()
+            with _model_lazy_lock:
+                # Re-check inside the lock — another thread may have loaded it.
+                if preferred_model in llama_models_cache:
+                    llama_model = llama_models_cache[preferred_model]
+                    selected_model = preferred_model
+                else:
+                    for cached_name in llama_models_cache:
+                        llama_model = llama_models_cache[cached_name]
+                        selected_model = cached_name
+                        break
+                if llama_model is None:
+                    logger.info(
+                        f"No cached model, attempting to load with fallback (preferred: {preferred_model})"
+                    )
+                    model, model_name_loaded = _load_model_with_fallback(preferred_model)
+                    if model is None or model_name_loaded is None:
+                        return "[Error: Failed to load any available model]"
+                    llama_models_cache[model_name_loaded] = model
+                    llama_model = model
+                    selected_model = model_name_loaded
+                    # Clean up excess models to prevent memory bloat
+                    _cleanup_excess_models()
 
         # Compute the effective token budget:
         # - Tokenise the prompt precisely using the loaded model's tokeniser.

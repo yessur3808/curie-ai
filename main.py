@@ -405,41 +405,19 @@ def init_llm_and_memory(no_init):
     if no_init:
         return
 
-    import concurrent.futures
+    # Initialise the database synchronously — connectors need it before they
+    # can handle any message.
+    print("Initializing memory...")
+    init_memory()
 
-    print("Initializing model and memory (concurrent)...")
-
-    llm_error: list[Exception] = []
-
-    def _load_llm():
-        # LLM errors are expected (missing model file, cloud-only config, etc.)
-        # so they are collected here and surfaced after both tasks finish.
-        try:
-            manager.preload_llama_model()
-        except (FileNotFoundError, ValueError) as e:
-            llm_error.append(e)
-        except Exception as e:
-            llm_error.append(e)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        llm_future = executor.submit(_load_llm)
-        mem_future = executor.submit(init_memory)
-        # Retrieve results in submission order; llm_future never raises (errors
-        # are captured in llm_error), while mem_future re-raises any unexpected
-        # database-init exception just as the original sequential code did.
-        llm_future.result()
-        mem_future.result()
-
-    if llm_error:
-        e = llm_error[0]
-        if isinstance(e, (FileNotFoundError, ValueError)):
-            logger.warning(f"⚠️  LLM model unavailable: {e}")
-            logger.warning(
-                "Continuing without LLM - text responses will be placeholders"
-            )
-        else:
-            logger.warning(f"⚠️  Unexpected LLM error: {e}")
-            logger.warning("Continuing without LLM")
+    # Start the LLM model loading in a background daemon thread so connectors
+    # (Telegram, Discord, API, …) can come online immediately.  The first
+    # ask_llm() call that needs the local model will wait for the preload to
+    # finish, but users can connect and send messages right away.
+    print(
+        "LLM model loading started in background — connectors will start immediately."
+    )
+    manager.start_background_preload()
 
 
 # --- Coder Batch Mode Helpers ---
