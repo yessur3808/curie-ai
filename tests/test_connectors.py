@@ -285,3 +285,286 @@ class TestDiscordUsernameFormat:
             "clear_memory_command must handle new Discord usernames "
             "(discriminator == '0' means new-style, use name only)."
         )
+
+
+# ---------------------------------------------------------------------------
+# Slack connector helpers
+# ---------------------------------------------------------------------------
+
+
+class TestSlackGetInternalId:
+    """Tests for connectors/slack.py _get_internal_id()."""
+
+    def setup_method(self):
+        # Stub optional slack_bolt so the module loads without the package.
+        sys.modules.setdefault("slack_bolt", MagicMock())
+        sys.modules.setdefault("slack_bolt.adapter", MagicMock())
+        sys.modules.setdefault("slack_bolt.adapter.socket_mode", MagicMock())
+
+        if "connectors.slack" in sys.modules:
+            del sys.modules["connectors.slack"]
+
+        from connectors.slack import _get_internal_id
+
+        self._get_internal_id = _get_internal_id
+
+    def test_calls_user_manager(self):
+        with patch("connectors.slack.UserManager") as mock_um:
+            mock_um.get_or_create_user_internal_id.return_value = "slack-uuid"
+            result = self._get_internal_id("U12345")
+        assert result == "slack-uuid"
+        mock_um.get_or_create_user_internal_id.assert_called_once_with(
+            channel="slack",
+            external_id="U12345",
+            secret_username="slack_U12345",
+            updated_by="slack_bot",
+        )
+
+    def test_username_prefix(self):
+        with patch("connectors.slack.UserManager") as mock_um:
+            mock_um.get_or_create_user_internal_id.return_value = "x"
+            self._get_internal_id("U99999")
+            kwargs = mock_um.get_or_create_user_internal_id.call_args.kwargs
+        assert kwargs["secret_username"] == "slack_U99999"
+
+
+# ---------------------------------------------------------------------------
+# Signal connector helpers
+# ---------------------------------------------------------------------------
+
+
+class TestSignalGetInternalId:
+    """Tests for connectors/signal.py _get_internal_id()."""
+
+    def setup_method(self):
+        # Stub requests so the module loads without a live server.
+        sys.modules.setdefault("requests", MagicMock())
+
+        if "connectors.signal" in sys.modules:
+            del sys.modules["connectors.signal"]
+
+        from connectors.signal import _get_internal_id
+
+        self._get_internal_id = _get_internal_id
+
+    def test_calls_user_manager(self):
+        with patch("connectors.signal.UserManager") as mock_um:
+            mock_um.get_or_create_user_internal_id.return_value = "signal-uuid"
+            result = self._get_internal_id("+1234567890")
+        assert result == "signal-uuid"
+        mock_um.get_or_create_user_internal_id.assert_called_once_with(
+            channel="signal",
+            external_id="+1234567890",
+            secret_username="signal_+1234567890",
+            updated_by="signal_bot",
+        )
+
+
+class TestSignalPollingLoop:
+    """Verify the Signal polling loop source code contains exponential backoff."""
+
+    def _load_source(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "connectors",
+            "signal.py",
+        )
+        with open(path) as fh:
+            return fh.read()
+
+    def test_backoff_present(self):
+        source = self._load_source()
+        assert "_MAX_BACKOFF" in source, (
+            "connectors/signal.py must implement exponential back-off "
+            "(_MAX_BACKOFF constant) in the polling loop to avoid log spam "
+            "when the signal-cli REST API is down"
+        )
+
+    def test_backoff_doubling_logic(self):
+        source = self._load_source()
+        assert "_backoff * 2" in source or "backoff * 2" in source, (
+            "connectors/signal.py polling loop must double the back-off delay "
+            "on consecutive failures"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Teams connector — platform tag
+# ---------------------------------------------------------------------------
+
+
+class TestTeamsConnectorPlatform:
+    """Verify connectors/teams.py uses platform='teams' in normalized_input."""
+
+    def _load_source(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "connectors",
+            "teams.py",
+        )
+        with open(path) as fh:
+            return fh.read()
+
+    def test_platform_tag_is_teams(self):
+        source = self._load_source()
+        assert (
+            '"platform": "teams"' in source
+        ), "connectors/teams.py must set platform='teams' in normalized_input"
+
+    def test_get_internal_id_uses_teams_channel(self):
+        source = self._load_source()
+        assert (
+            'channel="teams"' in source
+        ), "connectors/teams.py must pass channel='teams' to UserManager"
+
+    def test_bearer_auth_required(self):
+        source = self._load_source()
+        assert (
+            "Authorization" in source
+        ), "connectors/teams.py must check the Authorization header on incoming requests"
+        assert (
+            '"Bearer "' in source or "'Bearer '" in source or "Bearer " in source
+        ), "connectors/teams.py must validate the Bearer token in the Authorization header"
+
+    def test_reply_status_checked(self):
+        source = self._load_source()
+        assert (
+            "is_success" in source or "raise_for_status" in source
+        ), "connectors/teams.py must check the reply response status (is_success or raise_for_status)"
+
+
+# ---------------------------------------------------------------------------
+# LINE connector — platform tag and signature verification
+# ---------------------------------------------------------------------------
+
+
+class TestLineConnectorPlatform:
+    """Verify connectors/line.py uses platform='line' in normalized_input."""
+
+    def _load_source(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "connectors",
+            "line.py",
+        )
+        with open(path) as fh:
+            return fh.read()
+
+    def test_platform_tag_is_line(self):
+        source = self._load_source()
+        assert (
+            '"platform": "line"' in source
+        ), "connectors/line.py must set platform='line' in normalized_input"
+
+    def test_signature_verification_present(self):
+        source = self._load_source()
+        assert (
+            "_verify_line_signature" in source
+        ), "connectors/line.py must implement LINE webhook signature verification"
+
+    def test_get_internal_id_uses_line_channel(self):
+        source = self._load_source()
+        assert (
+            'channel="line"' in source
+        ), "connectors/line.py must pass channel='line' to UserManager"
+
+    def test_fail_closed_without_secret(self):
+        source = self._load_source()
+        # The webhook must not silently skip validation; it must check
+        # LINE_CHANNEL_SECRET and reject requests when it is absent.
+        assert "LINE_ALLOW_UNVERIFIED" in source, (
+            "connectors/line.py must fail closed when LINE_CHANNEL_SECRET is not set; "
+            "use LINE_ALLOW_UNVERIFIED=true to opt out for local dev"
+        )
+
+    def test_reply_status_checked(self):
+        source = self._load_source()
+        assert (
+            "is_success" in source or "raise_for_status" in source
+        ), "connectors/line.py must check the reply response status (is_success or raise_for_status)"
+
+
+# ---------------------------------------------------------------------------
+# KakaoTalk connector — platform tag and SkillResponse format
+# ---------------------------------------------------------------------------
+
+
+class TestKakaoConnectorPlatform:
+    """Verify connectors/kakaotalk.py uses platform='kakaotalk' and correct response."""
+
+    def _load_source(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "connectors",
+            "kakaotalk.py",
+        )
+        with open(path) as fh:
+            return fh.read()
+
+    def test_platform_tag_is_kakaotalk(self):
+        source = self._load_source()
+        assert (
+            '"platform": "kakaotalk"' in source
+        ), "connectors/kakaotalk.py must set platform='kakaotalk' in normalized_input"
+
+    def test_skill_response_version(self):
+        source = self._load_source()
+        assert (
+            '"version": "2.0"' in source
+        ), "connectors/kakaotalk.py must return Kakao SkillResponse version 2.0"
+
+    def test_get_internal_id_uses_kakaotalk_channel(self):
+        source = self._load_source()
+        assert (
+            'channel="kakaotalk"' in source
+        ), "connectors/kakaotalk.py must pass channel='kakaotalk' to UserManager"
+
+    def test_secret_username_uses_kakaotalk_prefix(self):
+        source = self._load_source()
+        assert '"kakaotalk_' in source, (
+            "connectors/kakaotalk.py must use 'kakaotalk_' prefix in secret_username "
+            "to be consistent with the channel='kakaotalk' tag"
+        )
+
+    def test_no_bogus_bot_id_token_check(self):
+        source = self._load_source()
+        assert 'body.get("bot")' not in source, (
+            "connectors/kakaotalk.py must not compare bot.id as a security token; "
+            "bot.id is a bot identifier, not a shared secret"
+        )
+
+
+# ---------------------------------------------------------------------------
+# WebChat UI — served at GET /
+# ---------------------------------------------------------------------------
+
+
+class TestWebChatUI:
+    """Verify the WebChat UI endpoint exists in connectors/api.py."""
+
+    def _load_source(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "connectors",
+            "api.py",
+        )
+        with open(path) as fh:
+            return fh.read()
+
+    def test_webchat_route_exists(self):
+        source = self._load_source()
+        assert (
+            "async def webchat_ui" in source
+        ), "connectors/api.py must expose a GET / webchat_ui endpoint"
+
+    def test_webchat_html_contains_websocket_connect(self):
+        source = self._load_source()
+        assert (
+            "/ws/chat" in source
+        ), "The WebChat UI HTML must connect to the /ws/chat WebSocket endpoint"
+
+    def test_webchat_uses_html_response(self):
+        source = self._load_source()
+        assert (
+            "HTMLResponse" in source
+        ), "connectors/api.py must import and use HTMLResponse for the WebChat UI"
