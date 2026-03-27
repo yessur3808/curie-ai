@@ -20,6 +20,7 @@ try:
 
     _psutil_available = True
 except ImportError:
+    psutil = None  # type: ignore[assignment]
     _psutil_available = False
 
 try:

@@ -575,6 +575,24 @@ class ChatWorkflow:
                 pass
 
             try:
+                from agent.skills.browser import (  # noqa
+                    is_browser_intent,
+                    handle_browser_query,
+                )
+
+                if is_browser_intent(user_text):
+                    _skill_specs.append(
+                        (
+                            "browser_skill",
+                            "browser",
+                            "Fetching web page",
+                            handle_browser_query(user_text),
+                        )
+                    )
+            except Exception:
+                pass
+
+            try:
                 from agent.skills.network_analyzer import (  # noqa
                     handle_network_analyzer_query,
                 )

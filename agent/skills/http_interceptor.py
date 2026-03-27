@@ -147,11 +147,10 @@ def _validate_url(url: str) -> str:
         raise ValueError(f"Only http/https URLs are supported: {url}")
     if not parsed.netloc:
         raise ValueError(f"Invalid URL (no hostname): {url}")
-    # Reject private/loopback addresses for safety
-    # (allow localhost for local testing)
-    # Note: this function only enforces http/https scheme and hostname presence.
-    # The caller is responsible for any additional SSRF or access-control
-    # restrictions appropriate for the deployment context.
+    # Note: this function only validates the scheme (http/https) and requires
+    # a hostname to be present. It does NOT reject private, loopback, or other
+    # restricted address ranges. Callers are responsible for applying any SSRF
+    # or access-control restrictions appropriate for their deployment context.
     return url
 
 

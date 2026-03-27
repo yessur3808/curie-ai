@@ -220,8 +220,9 @@ def _get_local_networks() -> List[str]:
                     net = ipaddress.IPv4Network(f"{ip_str}/{netmask_str}", strict=False)
                     if net.is_loopback or net.is_link_local:
                         continue
-                    # Limit to at most a /16; narrow wider nets to /24
-                    if net.prefixlen < 16:
+                    # Narrow any network wider than /24 to /24 so
+                    # scan_network()'s 256-host cap is always satisfied.
+                    if net.prefixlen < 24:
                         net = ipaddress.IPv4Network(f"{ip_str}/24", strict=False)
                     cidr = str(net)
                     if cidr not in seen:
@@ -395,6 +396,7 @@ class NetworkScanner:
         target: str,
         port_spec: str = "top100",
         grab_banners: bool = True,
+        _shared_sem: Optional[asyncio.Semaphore] = None,
     ) -> Dict[str, Any]:
         """
         Scan a single host for open ports.
@@ -403,6 +405,8 @@ class NetworkScanner:
             target:      Hostname or IP address
             port_spec:   Port specification (e.g. 'top100', '1-1024', '22,80,443')
             grab_banners: Attempt to read service banners
+            _shared_sem: Optional externally-owned semaphore for global concurrency
+                         control (used by scan_network to cap total TCP probes).
 
         Returns:
             Scan result dict
@@ -426,22 +430,57 @@ class NetworkScanner:
 
         start_time = time.monotonic()
 
-        sem = asyncio.Semaphore(self.max_concurrent)
+        # Use shared semaphore (from scan_network) or a per-host one so the
+        # total number of concurrent TCP probes is always bounded.
+        sem = (
+            _shared_sem
+            if _shared_sem is not None
+            else asyncio.Semaphore(self.max_concurrent)
+        )
 
-        async def _probe(port: int):
-            async with sem:
-                return port, await _tcp_connect(host, port, self.connect_timeout)
+        # Bounded sliding-window scan: keep at most max_concurrent tasks in
+        # flight at once rather than creating one task per port up-front.
+        scan_results: Dict[int, Tuple[bool, Optional[str]]] = {}
+        ports_iter = iter(ports)
+        active_tasks: Set[asyncio.Task] = set()
 
-        tasks = [asyncio.create_task(_probe(p)) for p in ports]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        def _make_task(p: int) -> asyncio.Task:
+            async def _probe() -> Tuple[int, Tuple[bool, Optional[str]]]:
+                async with sem:
+                    return p, await _tcp_connect(host, p, self.connect_timeout)
+
+            return asyncio.create_task(_probe())
+
+        # Prime initial batch
+        for _ in range(min(self.max_concurrent, len(ports))):
+            try:
+                active_tasks.add(_make_task(next(ports_iter)))
+            except StopIteration:
+                break
+
+        while active_tasks:
+            done, active_tasks = await asyncio.wait(
+                active_tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                try:
+                    port, result = task.result()
+                    scan_results[port] = result
+                except Exception:
+                    pass
+                try:
+                    active_tasks.add(_make_task(next(ports_iter)))
+                except StopIteration:
+                    pass
 
         elapsed = time.monotonic() - start_time
         open_ports: List[Dict[str, Any]] = []
 
-        for item in results:
-            if isinstance(item, Exception):
+        for port in ports:
+            result = scan_results.get(port)
+            if result is None:
                 continue
-            port, (is_open, banner) = item
+            is_open, banner = result
             if is_open:
                 entry: Dict[str, Any] = {
                     "port": port,
@@ -470,8 +509,12 @@ class NetworkScanner:
         """
         Discover live hosts and their open ports across a CIDR range.
 
+        Scans are limited to /24 (256 hosts) to avoid overloading the OS file-
+        descriptor budget. Use _get_local_networks() + scan_local_networks() for
+        automatic interface discovery (which already narrows wider subnets to /24).
+
         Args:
-            cidr:      Network in CIDR notation (e.g. '192.168.1.0/24')
+            cidr:      Network in CIDR notation (must be /24 or smaller, e.g. '192.168.1.0/24')
             port_spec: Port specification
 
         Returns:
@@ -515,16 +558,17 @@ class NetworkScanner:
             if up
         ]
 
-        # Scan open ports on live hosts with a host-level semaphore to cap
-        # total concurrent probes and avoid unbounded socket fan-out.
-        host_scan_limit = getattr(self, "max_concurrent", 64)
-        host_scan_sem = asyncio.Semaphore(host_scan_limit)
+        # Share a single semaphore across ALL TCP probes for the entire network
+        # scan so the total concurrent socket count is globally bounded regardless
+        # of how many live hosts are found.
+        shared_sem = asyncio.Semaphore(self.max_concurrent)
 
-        async def _scan_host_limited(h: str):
-            async with host_scan_sem:
-                return await self.scan_host(h, port_spec, grab_banners=False)
-
-        scan_tasks = [asyncio.create_task(_scan_host_limited(h)) for h in live_hosts]
+        scan_tasks = [
+            asyncio.create_task(
+                self.scan_host(h, port_spec, grab_banners=False, _shared_sem=shared_sem)
+            )
+            for h in live_hosts
+        ]
         scan_results = await asyncio.gather(*scan_tasks, return_exceptions=True)
 
         hosts_report = []

@@ -9,7 +9,6 @@ Tests for the three security skill modules:
 
 import asyncio
 import pytest
-import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
@@ -586,7 +585,7 @@ class TestNetworkScanner:
         assert result == []
 
     def test_get_local_networks_narrows_large_network(self):
-        """Networks wider than /16 are narrowed to /24 of the host IP."""
+        """Networks wider than /24 are narrowed to /24 of the host IP."""
         from agent.skills.network_scanner import _get_local_networks
         import socket as _socket
 
