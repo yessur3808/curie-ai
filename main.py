@@ -172,10 +172,38 @@ def load_default_agent(persona_filename=None):
     return Agent(persona=persona)
 
 
+# Directories that are never interesting for code editing.
+_SKIP_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".venv",
+    "venv",
+    ".env",
+    "env",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "node_modules",
+    "dist",
+    "build",
+    ".eggs",
+    "*.egg-info",
+    "site-packages",
+}
+
+_AUTO_DETECT_WARN_THRESHOLD = 50  # warn before processing a very large file list
+
+
 # --- Helper: Find all files recursively ---
 def find_all_files(repo_path, exts=None):
     all_files = []
     for root, dirs, files in os.walk(repo_path):
+        # Prune directories in-place so os.walk won't descend into them.
+        dirs[:] = [
+            d for d in dirs if d not in _SKIP_DIRS and not d.endswith(".egg-info")
+        ]
         for f in files:
             rel_path = os.path.relpath(os.path.join(root, f), repo_path)
             if exts is None or any(rel_path.endswith(ext) for ext in exts):
@@ -319,15 +347,40 @@ def run_coder_interactive():
         print(f"MAIN_REPO not set. Using default: {DEFAULT_MAIN_REPO_URL}")
 
     goal = input("Describe the code enhancement goal: ").strip()
-    repo_path = input("Enter local repo path (absolute or relative): ").strip()
+    if not goal:
+        print("Error: goal is required.")
+        return
+
+    repo_raw = input("Enter local repo path (absolute or relative) [.]: ").strip()
+    repo_path = repo_raw or "."
+
     raw_branch_name = input(
         "Enter the branch name to use (press Enter to auto-generate): "
     ).strip()
     branch_name = resolve_branch_name(goal, raw_branch_name)
     if not raw_branch_name:
         print(f"Auto-generated branch name: {branch_name}")
-    files = input("Comma-separated filenames to edit (relative to repo): ").strip()
-    files_to_edit = [f.strip() for f in files.split(",") if f.strip()]
+
+    files_raw = input(
+        "Comma-separated filenames to edit (press Enter to auto-detect .py files): "
+    ).strip()
+    if files_raw:
+        files_to_edit = [f.strip() for f in files_raw.split(",") if f.strip()]
+    else:
+        files_to_edit = find_all_files(repo_path, exts=[".py"])
+        print(f"Auto-detected {len(files_to_edit)} Python file(s) in {repo_path}.")
+        if len(files_to_edit) > _AUTO_DETECT_WARN_THRESHOLD:
+            confirm = (
+                input(
+                    f"⚠️  That's a large number of files ({len(files_to_edit)}). "
+                    "Proceed? [y/N]: "
+                )
+                .strip()
+                .lower()
+            )
+            if confirm != "y":
+                print("Aborted. Please specify files manually.")
+                return
     print(f"Running code enhancement for files: {files_to_edit} ...")
     result = apply_code_change(goal, files_to_edit, repo_path, branch_name)
     print("\n---\nResult:\n")
@@ -459,19 +512,22 @@ def determine_what_to_run(args):
 
 
 def init_llm_and_memory(no_init):
-    if not no_init:
-        print("Initializing model and memory...")
-        try:
-            manager.preload_llama_model()
-        except (FileNotFoundError, ValueError) as e:
-            logger.warning(f"⚠️  LLM model unavailable: {e}")
-            logger.warning(
-                "Continuing without LLM - text responses will be placeholders"
-            )
-        except Exception as e:
-            logger.warning(f"⚠️  Unexpected LLM error: {e}")
-            logger.warning("Continuing without LLM")
-        init_memory()
+    if no_init:
+        return
+
+    # Initialise the database synchronously — connectors need it before they
+    # can handle any message.
+    print("Initializing memory...")
+    init_memory()
+
+    # Start the LLM model loading in a background daemon thread so connectors
+    # (Telegram, Discord, API, …) can come online immediately.  The first
+    # ask_llm() call that needs the local model will wait for the preload to
+    # finish, but users can connect and send messages right away.
+    print(
+        "LLM model loading started in background — connectors will start immediately."
+    )
+    manager.start_background_preload()
 
 
 # --- Coder Batch Mode Helpers ---
@@ -551,6 +607,44 @@ def main():
     configure_logging()
 
     args = parse_args()
+
+    # Default to REST API when no connector has been explicitly requested so
+    # that a bare ``python main.py`` (or an unconfigured .env) still works.
+    _anything_arg = any(
+        [
+            args.all,
+            args.telegram,
+            args.discord,
+            args.whatsapp,
+            args.api,
+            args.coder,
+            args.coder_batch,
+            args.coding_service,
+            args.slack,
+            args.signal,
+        ]
+    )
+    _anything_env = any(
+        os.getenv(v, "false").lower() == "true"
+        for v in (
+            "RUN_TELEGRAM",
+            "RUN_DISCORD",
+            "RUN_WHATSAPP",
+            "RUN_API",
+            "RUN_CODER",
+            "RUN_CODING_SERVICE",
+            "RUN_SLACK",
+            "RUN_SIGNAL",
+        )
+    )
+    if not _anything_arg and not _anything_env:
+        logger.info(
+            "No connector specified — defaulting to REST API (http://0.0.0.0:8000).\n"
+            "  Tip: pass --telegram, --discord, --all, etc. or set RUN_* in .env.\n"
+            "  Example: python main.py --api --telegram"
+        )
+        args.api = True
+
     (
         run_telegram_flag,
         run_discord_flag,
