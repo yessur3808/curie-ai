@@ -53,8 +53,26 @@ class PersonalitySpeechEngine:
         modulation = persona.get("style_modulation", {}).get(mode, {})
         intensity = _safe_float(modulation.get("french_intensity", 0.2), default=0.2)
 
-        # Keep French light and natural: at most 1 phrase most of the time.
+        # The model prompt owns Curie's voice. Post-processing is only a light
+        # fallback when the generated reply contains no French at all.
         if intensity <= 0:
+            return response
+
+        french_markers = (
+            "bonjour",
+            "bonsoir",
+            "oui",
+            "non",
+            "merci",
+            "voilà",
+            "bien sûr",
+            "mon ami",
+            "s'il vous plaît",
+            "très ",
+            "c'est ",
+        )
+        lowered = response.casefold()
+        if any(marker in lowered for marker in french_markers):
             return response
 
         seed = _deterministic_seed(
@@ -66,9 +84,9 @@ class PersonalitySpeechEngine:
             return response
 
         phrase = rng.choice(phrases)
-        if response.endswith((".", "!", "?")):
-            return f"{response} {phrase}"
-        return f"{response}. {phrase}"
+        # A natural lead-in is less likely to feel like a catchphrase pasted on
+        # after an otherwise unrelated answer.
+        return f"{phrase.capitalize()}, {response[0].lower()}{response[1:]}"
 
     def _apply_andreja_speech(self, response: str, persona: Dict, context: Dict) -> str:
         profile = persona.get("language_profile", {})

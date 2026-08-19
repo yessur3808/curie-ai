@@ -16,6 +16,7 @@ try:
     from rich.console import Console
     from rich.table import Table
     from rich import box
+
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -29,7 +30,9 @@ _WARN = "⚠️ "
 _FAIL = "❌"
 
 
-def _check(label: str, ok: bool, detail: str = "", warn_only: bool = False) -> tuple[str, str, str]:
+def _check(
+    label: str, ok: bool, detail: str = "", warn_only: bool = False
+) -> tuple[str, str, str]:
     icon = _OK if ok else (_WARN if warn_only else _FAIL)
     return (icon, label, detail)
 
@@ -40,14 +43,25 @@ def _check(label: str, ok: bool, detail: str = "", warn_only: bool = False) -> t
 def _check_python() -> list[tuple[str, str, str]]:
     v = sys.version_info
     ok = v >= (3, 10)
-    return [_check(f"Python {v.major}.{v.minor}.{v.micro}", ok,
-                   "Requires >= 3.10" if not ok else "")]
+    return [
+        _check(
+            f"Python {v.major}.{v.minor}.{v.micro}",
+            ok,
+            "Requires >= 3.10" if not ok else "",
+        )
+    ]
 
 
 def _check_core_deps() -> list[tuple[str, str, str]]:
     core = [
-        "fastapi", "uvicorn", "psycopg2", "pymongo",
-        "dotenv", "requests", "httpx", "rich",
+        "fastapi",
+        "uvicorn",
+        "psycopg2",
+        "pymongo",
+        "dotenv",
+        "requests",
+        "httpx",
+        "rich",
     ]
     rows = []
     for mod in core:
@@ -84,6 +98,7 @@ def _check_env_vars() -> list[tuple[str, str, str]]:
     if env_path.exists():
         try:
             from dotenv import load_dotenv
+
             load_dotenv(env_path, override=False)
         except ImportError:
             pass
@@ -122,20 +137,59 @@ def _check_services() -> list[tuple[str, str, str]]:
 
     # Check pid file / daemon
     from cli.daemon import get_status
+
     st = get_status()
-    rows.append(_check(
-        "Curie daemon",
-        st["running"],
-        f"PID {st['pid']} running" if st["running"] else "not running",
-        warn_only=True,
-    ))
+    rows.append(
+        _check(
+            "Curie daemon",
+            st["running"],
+            f"PID {st['pid']} running" if st["running"] else "not running",
+            warn_only=True,
+        )
+    )
     return rows
+
+
+def _check_accelerators() -> list[tuple[str, str, str]]:
+    """Report the same hardware view used by the automatic router."""
+    from llm.accelerators import hardware_status
+
+    status = hardware_status()
+    return [
+        _check("CPU inference", status["cpu"], "available"),
+        _check(
+            "Radeon GPU inference",
+            status["gpu"],
+            (
+                "available; full offload selected"
+                if status["gpu"]
+                else "render device unavailable; CPU fallback active"
+            ),
+            warn_only=True,
+        ),
+        _check(
+            "Ryzen AI NPU inference",
+            status["npu"],
+            (
+                f"available; model={status['npu_model']} routing={status['npu_routing']}"
+                if status["npu"]
+                else "NPU device or direct FastFlow runtime unavailable"
+            ),
+            warn_only=True,
+        ),
+        _check(
+            "Accelerator policy",
+            True,
+            f"mode={status['mode']} gpu_layers={status['llama_gpu_layers']}",
+        ),
+    ]
 
 
 def _check_network() -> list[tuple[str, str, str]]:
     rows = []
     try:
         import socket
+
         socket.setdefaulttimeout(3)
         socket.gethostbyname("api.telegram.org")
         rows.append(_check("DNS resolution (api.telegram.org)", True))
@@ -144,10 +198,19 @@ def _check_network() -> list[tuple[str, str, str]]:
 
     try:
         import requests
+
         r = requests.get("https://api.telegram.org", timeout=4)
-        rows.append(_check("HTTP connectivity (Telegram)", r.status_code < 500, f"HTTP {r.status_code}"))
+        rows.append(
+            _check(
+                "HTTP connectivity (Telegram)",
+                r.status_code < 500,
+                f"HTTP {r.status_code}",
+            )
+        )
     except Exception as e:
-        rows.append(_check("HTTP connectivity (Telegram)", False, str(e), warn_only=True))
+        rows.append(
+            _check("HTTP connectivity (Telegram)", False, str(e), warn_only=True)
+        )
 
     return rows
 
@@ -173,6 +236,7 @@ def run_doctor(verbose: bool = False) -> int:
         ("Optional Dependencies", _check_optional_deps()),
         ("Environment Variables", _check_env_vars()),
         ("Files & Daemon", _check_services()),
+        ("Inference Accelerators", _check_accelerators()),
         ("Network", network_rows),
     ]
 

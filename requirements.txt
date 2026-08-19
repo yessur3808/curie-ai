@@ -1,7 +1,8 @@
 # Core Libraries
 python-telegram-bot==21.4
 python-dotenv==1.1.0
-llama-cpp-python==0.3.9
+# Qwen 3.5 support landed after the original 0.3.9 pin.
+llama-cpp-python==0.3.34
 
 psycopg2-binary==2.9.10
 pymongo==4.13.0

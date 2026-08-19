@@ -187,9 +187,11 @@ def _load_model_with_fallback(
     seen = set()
     # Default to all logical CPU cores rather than a hardcoded magic number.
     n_threads = _get_int_env("LLM_THREADS", os.cpu_count() or 4)
-    # GPU layers: number of transformer layers to offload to GPU (0 = CPU-only).
-    # Set LLM_GPU_LAYERS=-1 to offload all layers (full GPU inference).
-    n_gpu_layers = _get_int_env("LLM_GPU_LAYERS", 0)
+    # Select CPU, GPU, or CPU+iGPU automatically. The selected llama.cpp build
+    # still verifies backend compatibility while loading and falls back below.
+    from llm.accelerators import select_llama_gpu_layers
+
+    n_gpu_layers = select_llama_gpu_layers()
     # Suppress llama.cpp's own verbose init output unless DEBUG logging is on.
     verbose = logger.isEnabledFor(logging.DEBUG)
 
@@ -203,20 +205,27 @@ def _load_model_with_fallback(
             logger.warning(f"Model file not found: {model_path}")
             continue
 
-        logger.info(f"Attempting to load model: {model_name}")
-        try:
-            model = Llama(
-                model_path=model_path,
-                n_ctx=MODEL_CONTEXT_SIZE,
-                n_threads=n_threads,
-                n_gpu_layers=n_gpu_layers,
-                verbose=verbose,
-            )
-            logger.info(f"Successfully loaded model: {model_name}")
-            return model, model_name
-        except Exception as e:
-            logger.error(f"Failed to load {model_name}: {e}")
-            continue
+        layer_attempts = [n_gpu_layers]
+        if n_gpu_layers != 0:
+            layer_attempts.append(0)
+        for layers in layer_attempts:
+            backend = "GPU/hybrid" if layers != 0 else "CPU"
+            logger.info("Attempting to load model %s using %s", model_name, backend)
+            try:
+                model = Llama(
+                    model_path=model_path,
+                    n_ctx=MODEL_CONTEXT_SIZE,
+                    n_threads=n_threads,
+                    n_gpu_layers=layers,
+                    verbose=verbose,
+                )
+                logger.info(
+                    "Successfully loaded model %s using %s", model_name, backend
+                )
+                return model, model_name
+            except Exception as e:
+                logger.error("Failed to load %s using %s: %s", model_name, backend, e)
+        continue
 
     logger.error("All model loading attempts failed")
     return None, None
@@ -396,6 +405,19 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
         return f"[OpenAI simulated response to]: {prompt}"
 
     elif provider == "llama.cpp":
+
+        # In auto mode, lightweight conversations can run on the efficient
+        # Ryzen AI NPU model. Any startup or inference failure falls through to
+        # the stronger GGUF CPU/GPU path below.
+        try:
+            from llm.accelerators import ask_npu, should_use_npu
+
+            if should_use_npu(prompt):
+                npu_response = ask_npu(prompt, temperature, max_tokens)
+                if npu_response:
+                    return npu_response
+        except Exception as accelerator_exc:
+            logger.warning("NPU path unavailable; falling back: %s", accelerator_exc)
 
         if Llama is None:
             return "[Error: llama_cpp not installed]"

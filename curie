@@ -5,11 +5,19 @@ curie – CLI entry point for Curie AI.
 Run `curie --help` for usage information.
 """
 
-import sys
 import os
+import sys
+
+# Prefer the project-local environment created by the installer. Re-exec once
+# so GPU-enabled native libraries and all Python dependencies are consistent.
+_repo_root = os.path.dirname(os.path.abspath(__file__))
+_venv_python = os.path.join(_repo_root, ".venv", "bin", "python")
+if os.path.isfile(_venv_python) and os.path.realpath(
+    sys.executable
+) != os.path.realpath(_venv_python):
+    os.execv(_venv_python, [_venv_python, os.path.abspath(__file__), *sys.argv[1:]])
 
 # Ensure the repo root is on sys.path so `cli` and other packages can be found
-_repo_root = os.path.dirname(os.path.abspath(__file__))
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 

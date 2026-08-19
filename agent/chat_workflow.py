@@ -697,6 +697,12 @@ class ChatWorkflow:
                         pass
 
             if _skill_response:
+                # Skill handlers bypass the main LLM prompt, so apply the same
+                # persona speech layer before returning their otherwise-plain
+                # utility text. This keeps connector and skill replies coherent.
+                _skill_response = self.personality_context.apply_response_style(
+                    _skill_response, user_text
+                )
                 if _TASK_TRACKING:
                     try:
                         _finish_task(task_id)
@@ -954,7 +960,11 @@ class ChatWorkflow:
         4. [CONVERSATION HISTORY]
         5. Current user message
         """
-        history_str = "\n".join([f"{role}: {msg[:50]}" for role, msg in history[-5:]])
+        # This value is part of the prompt-cache key. Keep the full history and
+        # current request in it: the old 50-character truncation allowed two
+        # different conversations to reuse stale personality state and facts.
+        history_str = "\n".join([f"{role}: {msg}" for role, msg in history])
+        history_str = f"{history_str}\nCurrent user: {user_text}"
         personality_directives = self.personality_context.build_prompt_directives(
             user_text,
             user_profile=user_profile,
@@ -1021,6 +1031,10 @@ class ChatWorkflow:
                 "- Be concise but complete - answer questions fully without being overwhelming."
             )
             lines.append("- If you don't know something, just say so naturally.")
+            lines.append(
+                "- Never invent facts, citations, memories, tool results, or completed actions. "
+                "Clearly label uncertainty and inference."
+            )
             lines.append(
                 "- Avoid meta-commentary like 'As an AI...' or '[Note: ...]' - just respond directly."
             )
