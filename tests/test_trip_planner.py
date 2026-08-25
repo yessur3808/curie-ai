@@ -10,19 +10,6 @@ from unittest.mock import MagicMock, patch, AsyncMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Stub heavy DB dependencies before importing the skill
-for _mod in (
-    "psycopg2",
-    "psycopg2.extras",
-    "psycopg2.extensions",
-    "pymongo",
-    "pymongo.collection",
-    "pymongo.errors",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-
-
 from agent.skills.trip_planner import (  # noqa: E402
     is_trip_query,
     extract_trip_params,

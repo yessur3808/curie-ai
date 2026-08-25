@@ -11,27 +11,9 @@ import sys
 import os
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-# Stub heavy dependencies before import
-for _mod in (
-    "psycopg2",
-    "psycopg2.extras",
-    "psycopg2.extensions",
-    "pymongo",
-    "pymongo.collection",
-    "pymongo.errors",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-
-# ---------------------------------------------------------------------------
-# Module isolation
-# ---------------------------------------------------------------------------
-# test_connectors.py loads first alphabetically and stubs sys.modules["llm"]
-# with a MagicMock.  Clear those stubs so the real local llm package loads.
-for _k in [k for k in sys.modules if k == "llm" or k.startswith("llm.")]:
-    del sys.modules[_k]
 
 from llm.providers import (  # noqa: E402
     _is_simple_query,
@@ -211,6 +193,12 @@ class TestIsLocalOnly:
 
 
 class TestComputeResponseBudget:
+    @pytest.fixture(autouse=True)
+    def _default_context(self):
+        """Keep budget tests independent from the machine's configured model."""
+        with patch("llm.manager.MODEL_CONTEXT_SIZE", 2048):
+            yield
+
     def test_no_cap_returns_full_available(self):
         """When max_cap=None the full available context space is returned."""
         result = compute_response_budget("hello", max_cap=None)

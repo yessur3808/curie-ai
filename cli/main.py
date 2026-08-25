@@ -9,6 +9,8 @@ Usage examples:
   curie status                # Show daemon status
   curie metrics               # Live system-metrics dashboard
   curie metrics --once        # One-shot metrics snapshot
+  curie dashboard             # Live instances, models, and hardware dashboard
+  curie livelogs              # Follow logs from all instances
   curie tasks                 # Show task / sub-agent breakdown
   curie tasks --live          # Live-updating task view
   curie tasks --all           # Include finished tasks
@@ -93,7 +95,7 @@ def _cmd_start(args: argparse.Namespace) -> int:
 
     label = f"Starting Curie daemon with {connector_args or 'defaults'!s}…"
     with ui.spinner(label):
-        result = start_daemon(connector_args=connector_args if connector_args else None)
+        result = start_daemon(connector_args=connector_args if connector_args else None, instance=getattr(args, "instance", "default"))
 
     if result["success"]:
         ui.success(result["message"])
@@ -107,7 +109,7 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     from cli.daemon import stop_daemon
     from cli import ui
     with ui.spinner("Stopping Curie daemon…"):
-        result = stop_daemon()
+        result = stop_daemon(instance=getattr(args, "instance", "default"))
     if result["success"]:
         ui.success(result["message"])
         ui.notify("Curie AI", result["message"])
@@ -129,7 +131,7 @@ def _cmd_restart(args: argparse.Namespace) -> int:
     if args.all_connectors:
         connector_args = ["--all"]
     with ui.spinner("Restarting Curie daemon…"):
-        result = restart_daemon(connector_args=connector_args if connector_args else None)
+        result = restart_daemon(connector_args=connector_args if connector_args else None, instance=getattr(args, "instance", "default"))
     if result["success"]:
         ui.success(result["message"])
         ui.notify("Curie AI", result["message"])
@@ -147,7 +149,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
         from rich import box
         console = Console()
 
-        st = get_status()
+        st = get_status(getattr(args, "instance", "default"))
         table = Table(box=box.ROUNDED, show_header=False, expand=False)
         table.add_column("Key", style="bold cyan")
         table.add_column("Value")
@@ -167,7 +169,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
             print(f"PID: {st['pid']}")
         print(f"Log: {st['log_file']}")
 
-    return 0 if get_status()["running"] else 1
+    return 0 if get_status(getattr(args, "instance", "default"))["running"] else 1
 
 
 def _cmd_metrics(args: argparse.Namespace) -> int:
@@ -176,6 +178,12 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
         show_metrics_once()
     else:
         show_metrics_live(refresh_rate=args.interval)
+    return 0
+
+
+def _cmd_dashboard(args: argparse.Namespace) -> int:
+    from cli.dashboard import show_dashboard
+    show_dashboard(once=args.once, refresh_rate=args.interval)
     return 0
 
 
@@ -335,8 +343,17 @@ def _cmd_tools(args: argparse.Namespace) -> int:
         table.add_column("Category", style="dim")
         table.add_column("Status", justify="center")
         table.add_column("Description")
+        diagnostics = {}
+        if getattr(args, "diagnostics", False):
+            from agent.tooling import get_runtime_registry
+            diagnostics = {row["name"]: row for row in get_runtime_registry().diagnostics()}
         for t in tools:
-            status = "[green]✓[/green]" if t.available else "[red]✗[/red]"
+            if diagnostics:
+                state = diagnostics[t.name]["status"]
+                styles = {"reachable": "green", "registered": "cyan", "permission_blocked": "yellow", "dependency_missing": "red"}
+                status = f"[{styles.get(state, 'white')}]{state}[/]"
+            else:
+                status = "[green]✓[/green]" if t.available else "[red]✗[/red]"
             table.add_row(
                 t.name,
                 t.display_name,
@@ -381,22 +398,23 @@ def _cmd_service(args: argparse.Namespace) -> int:
 
 
 def _cmd_logs(args: argparse.Namespace) -> int:
-    from cli.daemon import LOG_FILE
+    from cli.daemon import get_status
     from cli import ui
 
+    log_file = Path(get_status(getattr(args, "instance", "default"))["log_file"])
     n = args.lines
-    if not LOG_FILE.exists():
-        ui.error(f"Log file not found: {LOG_FILE}")
+    if not log_file.exists():
+        ui.error(f"Log file not found: {log_file}")
         return 1
 
     if args.follow:
         # Rich live tail (press Ctrl-C to exit)
-        ui.live_tail(LOG_FILE, n_lines=n, label="Curie Daemon Log")
+        ui.live_tail(log_file, n_lines=n, label=f"{getattr(args, 'instance', 'default')} daemon log")
         return 0
 
     # Plain one-shot print
     try:
-        lines = LOG_FILE.read_text(errors="replace").splitlines()
+        lines = log_file.read_text(errors="replace").splitlines()
         tail = lines[-n:]
     except OSError as e:
         ui.error(f"Could not read log: {e}")
@@ -411,6 +429,18 @@ def _cmd_logs(args: argparse.Namespace) -> int:
     except ImportError:
         for line in tail:
             print(line)
+    return 0
+
+
+def _cmd_livelogs(args: argparse.Namespace) -> int:
+    from cli.livelogs import show_live_logs
+    show_live_logs(
+        instance=args.instance,
+        lines=args.lines,
+        level=args.level,
+        refresh_rate=args.interval,
+        once=args.once,
+    )
     return 0
 
 
@@ -554,6 +584,8 @@ Examples:
   curie status                     Show daemon status
   curie metrics                    Live system metrics dashboard
   curie metrics --once             One-shot metrics snapshot
+  curie dashboard                  Live instance/model/resource overview
+  curie livelogs                   Follow combined logs from all instances
   curie tasks                      Show task / sub-agent breakdown
   curie tasks --live               Live task view
   curie tasks --tree               Tree visualization of agents
@@ -600,10 +632,12 @@ Examples:
     p_start.add_argument("--telegram", action="store_true", help="Enable Telegram connector")
     p_start.add_argument("--discord", action="store_true", help="Enable Discord connector")
     p_start.add_argument("--all", dest="all_connectors", action="store_true", help="Enable all connectors")
+    p_start.add_argument("--instance", default="default", help="Named instance environment from instances/NAME.env")
     p_start.set_defaults(func=_cmd_start)
 
     # ── stop ───────────────────────────────────────────────────────────────
     p_stop = subs.add_parser("stop", help="Stop the running daemon")
+    p_stop.add_argument("--instance", default="default", help="Named instance to stop")
     p_stop.set_defaults(func=_cmd_stop)
 
     # ── restart ────────────────────────────────────────────────────────────
@@ -612,10 +646,12 @@ Examples:
     p_restart.add_argument("--telegram", action="store_true")
     p_restart.add_argument("--discord", action="store_true")
     p_restart.add_argument("--all", dest="all_connectors", action="store_true")
+    p_restart.add_argument("--instance", default="default", help="Named instance environment from instances/NAME.env")
     p_restart.set_defaults(func=_cmd_restart)
 
     # ── status ─────────────────────────────────────────────────────────────
     p_status = subs.add_parser("status", help="Show daemon / agent status")
+    p_status.add_argument("--instance", default="default", help="Named instance to inspect")
     p_status.set_defaults(func=_cmd_status)
 
     # ── metrics ────────────────────────────────────────────────────────────
@@ -624,6 +660,15 @@ Examples:
     p_metrics.add_argument("--interval", type=float, default=1.0, metavar="SECS",
                            help="Refresh interval in seconds (default: 1.0)")
     p_metrics.set_defaults(func=_cmd_metrics)
+
+    # ── dashboard ─────────────────────────────────────────────────────────
+    p_dashboard = subs.add_parser(
+        "dashboard", help="Live instances, personalities, models, and resource usage"
+    )
+    p_dashboard.add_argument("--once", action="store_true", help="Show one snapshot and exit")
+    p_dashboard.add_argument("--interval", type=float, default=1.0, metavar="SECS",
+                             help="Refresh interval in seconds (default: 1.0)")
+    p_dashboard.set_defaults(func=_cmd_dashboard)
 
     # ── tasks ──────────────────────────────────────────────────────────────
     p_tasks = subs.add_parser("tasks", help="Show task and sub-agent breakdown")
@@ -682,7 +727,20 @@ Examples:
                         help="Number of lines to show (default: 50)")
     p_logs.add_argument("-f", "--follow", action="store_true",
                         help="Follow log output (like tail -f)")
+    p_logs.add_argument("--instance", default="default", help="Named instance log to show")
     p_logs.set_defaults(func=_cmd_logs)
+
+    # ── live logs ──────────────────────────────────────────────────────────
+    p_livelogs = subs.add_parser("livelogs", help="Follow logs from all Curie instances")
+    p_livelogs.add_argument("--instance", default="all", help="Named instance, or all (default)")
+    p_livelogs.add_argument("-n", "--lines", type=int, default=100, metavar="N",
+                            help="Number of recent lines retained (default: 100)")
+    p_livelogs.add_argument("--level", choices=["all", "debug", "info", "warning", "error"],
+                            default="all", help="Filter by log severity")
+    p_livelogs.add_argument("--interval", type=float, default=0.5, metavar="SECS",
+                            help="Refresh interval in seconds (default: 0.5)")
+    p_livelogs.add_argument("--once", action="store_true", help=argparse.SUPPRESS)
+    p_livelogs.set_defaults(func=_cmd_livelogs)
 
     # ── onboard ────────────────────────────────────────────────────────────
     p_onboard = subs.add_parser("onboard", help="Guided first-time setup wizard")
@@ -893,6 +951,10 @@ Examples:
         dest="available_only",
         action="store_true",
         help="Show only tools whose dependencies are satisfied",
+    )
+    p_tools.add_argument(
+        "--diagnostics", action="store_true",
+        help="Show registered/reachable/permission/dependency status",
     )
     p_tools.set_defaults(func=_cmd_tools)
 

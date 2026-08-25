@@ -22,11 +22,11 @@ from .session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
-_instance: SessionManager | None = None
+_instance: object | None = None
 _instance_lock = threading.Lock()
 
 
-def get_session_manager() -> SessionManager:
+def get_session_manager():
     """Return the module-level SessionManager singleton, creating it if needed."""
     global _instance
     if _instance is None:
@@ -34,21 +34,23 @@ def get_session_manager() -> SessionManager:
             if _instance is None:
                 mongo_uri = os.getenv("MONGODB_URI")
                 if not mongo_uri:
-                    raise RuntimeError(
-                        "MONGODB_URI environment variable is required for SessionManager but was not set"
+                    from .local_store import LocalSessionManager
+
+                    _instance = LocalSessionManager()
+                    logger.info("Using durable local SQLite session memory")
+                else:
+                    db_name = os.environ.get("MONGODB_DB", "assistant_db")
+                    collection = os.environ.get("SESSION_COLLECTION", "sessions")
+                    _instance = SessionManager(
+                        mongo_uri=mongo_uri,
+                        db_name=db_name,
+                        collection_name=collection,
                     )
-                db_name = os.environ.get("MONGODB_DB", "assistant_db")
-                collection = os.environ.get("SESSION_COLLECTION", "sessions")
-                _instance = SessionManager(
-                    mongo_uri=mongo_uri,
-                    db_name=db_name,
-                    collection_name=collection,
-                )
-                logger.debug(
-                    "SessionManager singleton created (db=%s, collection=%s)",
-                    db_name,
-                    collection,
-                )
+                    logger.debug(
+                        "SessionManager singleton created (db=%s, collection=%s)",
+                        db_name,
+                        collection,
+                    )
     return _instance
 
 

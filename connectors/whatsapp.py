@@ -105,6 +105,40 @@ async def handle_voice_message(message) -> Optional[str]:
             os.remove(audio_file)
 
 
+async def handle_media_message(message, request: str = "") -> Optional[str]:
+    """Download and understand a WhatsApp image, document, or audio attachment."""
+    media_file = None
+    try:
+        media_file = await message.download_media()
+        if not media_file:
+            return None
+        filename = (
+            getattr(message, "filename", None)
+            or getattr(message, "file_name", None)
+            or os.path.basename(str(media_file))
+        )
+        content_type = (
+            getattr(message, "mimetype", None)
+            or getattr(message, "mime_type", None)
+            or ""
+        )
+        from services.media_ingestion import prepare_attachment_message
+
+        return await prepare_attachment_message(
+            str(media_file),
+            filename,
+            request,
+            content_type=content_type,
+            persona=_workflow.persona if _workflow else {},
+        )
+    except Exception as exc:
+        logger.error("Error processing WhatsApp attachment: %s", exc)
+        return None
+    finally:
+        if media_file and os.path.exists(str(media_file)):
+            os.remove(str(media_file))
+
+
 async def handle_message(message):
     """Main message handler - normalize and process through ChatWorkflow."""
     if not _workflow:
@@ -130,6 +164,17 @@ async def handle_message(message):
                 )
                 return
             await message.reply(f"🎤 I heard: {user_message}")
+        elif any(
+            bool(getattr(message, field, False))
+            for field in ("image", "photo", "document")
+        ):
+            await message.reply("I’m checking the attachment now, mon ami.")
+            user_message = await handle_media_message(message, message.text or "")
+            if not user_message:
+                await message.reply(
+                    "I couldn't read that attachment, mon ami. Please try sending it again as an image, PDF, DOCX, or text file."
+                )
+                return
         else:
             user_message = message.text or ""
 
@@ -187,6 +232,23 @@ async def handle_message(message):
 
         # Strip Markdown formatting — WhatsApp renders **bold** etc. as literal characters
         response_text = strip_markdown(result.get("text", "[Error: No response]"))
+        try:
+            from services.voice_delivery import synthesize_reply, voice_replies_enabled
+
+            if voice_replies_enabled(internal_id, "whatsapp"):
+                voice_path = await synthesize_reply(response_text, _workflow.persona, internal_id)
+                if voice_path:
+                    try:
+                        sender = getattr(message, "reply_audio", None) or getattr(
+                            message, "send_audio", None
+                        )
+                        if sender:
+                            await sender(voice_path)
+                            return
+                    finally:
+                        os.remove(voice_path)
+        except Exception as exc:
+            logger.warning("WhatsApp voice reply failed; sending text: %s", exc)
         await message.reply(response_text)
 
     except Exception as e:

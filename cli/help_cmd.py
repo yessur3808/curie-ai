@@ -53,6 +53,10 @@ _COMMANDS: list[tuple[str, str, list[str]]] = [
      "Show the last N daemon log lines; -f to follow",
      ["curie logs", "curie logs -n 100", "curie logs -f"]),
 
+    ("livelogs [--instance NAME] [--level LEVEL]",
+     "Follow colour-coded logs from all instances in one live terminal view",
+     ["curie livelogs", "curie livelogs --instance curie", "curie livelogs --level error"]),
+
     # Agent / Chat
     ("agent",
      "Start an interactive chat session with Curie",
@@ -71,10 +75,18 @@ _COMMANDS: list[tuple[str, str, list[str]]] = [
      "Run full system diagnostics – dependencies, env vars, connectivity",
      ["curie doctor", "curie doctor --verbose"]),
 
+    ("tools [--available] [--diagnostics]",
+     "List executable capabilities and explain reachability or missing dependencies",
+     ["curie tools", "curie tools --diagnostics", "curie tools --available"]),
+
     # System Metrics & Tasks
     ("metrics [--once] [--interval SECS]",
      "Live dashboard: CPU, RAM, Disk, Network, GPU (requires psutil)",
      ["curie metrics", "curie metrics --once", "curie metrics --interval 0.5"]),
+
+    ("dashboard [--once] [--interval SECS]",
+     "Live operations view: instances, personalities, LLMs, CPU, RAM, GPU, NPU",
+     ["curie dashboard", "curie dashboard --once"]),
 
     ("tasks [--live] [--all]",
      "Show active tasks and sub-agent breakdown",
@@ -189,10 +201,10 @@ _COMMANDS: list[tuple[str, str, list[str]]] = [
 
 # Group definitions: (heading, icon, command-prefix-list)
 _GROUPS: list[tuple[str, str, list[str]]] = [
-    ("Daemon & Process",    "⚙️ ",  ["start", "stop", "restart", "status", "logs"]),
+    ("Daemon & Process",    "⚙️ ",  ["start", "stop", "restart", "status", "logs", "livelogs"]),
     ("Agent / Chat",        "💬",  ["agent"]),
-    ("Setup & Diagnostics", "🩺",  ["onboard", "doctor"]),
-    ("System Metrics",      "📊",  ["metrics", "tasks"]),
+    ("Setup & Diagnostics", "🩺",  ["onboard", "doctor", "tools"]),
+    ("System Metrics",      "📊",  ["metrics", "dashboard", "tasks"]),
     ("Channels",            "📡",  ["channel"]),
     ("Cron / Scheduling",   "⏰",  ["cron"]),
     ("Memory",              "🧠",  ["memory"]),

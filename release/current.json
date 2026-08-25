@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "release": "2026.08-phase10",
+  "contract_version": "1.0.0",
+  "changelog": "CHANGELOG.md",
+  "migration_notes": "docs/RELEASE_PROCESS.md",
+  "evaluation_delta": "evaluation/deltas/phase10.json",
+  "rollback": {
+    "application": "Restart the prior reviewed revision using the normal instance launcher.",
+    "sqlite_schema_target": 0,
+    "postgres_command": "python -m scripts.down_migrations --target 4",
+    "data_backup_required": true
+  }
+}

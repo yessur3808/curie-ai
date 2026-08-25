@@ -33,13 +33,19 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
 # Reuse the battle-tested SSRF guard from find_info
-from agent.skills.find_info import is_safe_url
+from agent.skills.find_info import (
+    ALLOWED_CONTENT_TYPES,
+    MAX_RESPONSE_BYTES,
+    _bounded_get,
+    _strip_untrusted_markup,
+    is_safe_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,12 +146,16 @@ async def _fetch_raw(url: str) -> Tuple[Optional[str], Optional[str], Optional[s
         follow_redirects=False, timeout=timeout, headers=_HEADERS
     ) as client:
         while redirect_count <= MAX_REDIRECTS:
+            if not await is_safe_url(current_url):
+                return None, None, f"DNS target became unsafe: {current_url}"
             try:
-                response = await client.get(current_url)
+                response = await _bounded_get(client, current_url)
             except httpx.TimeoutException:
                 return None, None, f"Request timed out fetching {current_url}"
             except httpx.RequestError as exc:
                 return None, None, f"Network error: {exc}"
+            except ValueError as exc:
+                return None, None, f"Response rejected: {exc}"
 
             if response.is_redirect:
                 location = response.headers.get("location", "")
@@ -162,22 +172,21 @@ async def _fetch_raw(url: str) -> Tuple[Optional[str], Optional[str], Optional[s
                 return None, None, f"HTTP {response.status_code} from {current_url}"
 
             content_type = response.headers.get("content-type", "")
-            ct_lower = content_type.lower()
-            # Allow traditional text/html types, plus common XML-based HTML
-            # and other human-readable XML variants (e.g. application/xhtml+xml,
-            # application/xml, and application/*+xml). If the content-type header
-            # is missing, fall back to attempting to parse it as text.
-            if ct_lower:
-                if (
-                    ("text" not in ct_lower)
-                    and ("html" not in ct_lower)
-                    and (not ct_lower.startswith("application/xhtml+xml"))
-                    and (not ct_lower.startswith("application/xml"))
-                    and (not ct_lower.endswith("+xml"))
-                ):
-                    return None, None, f"Non-text content-type: {content_type}"
+            media_type = content_type.split(";", 1)[0].strip().casefold()
+            if media_type and media_type not in ALLOWED_CONTENT_TYPES:
+                return None, None, f"Non-research content-type: {content_type}"
+            declared = response.headers.get("content-length")
+            if declared:
+                try:
+                    if int(declared) > MAX_RESPONSE_BYTES:
+                        return None, None, "Response exceeds byte limit"
+                except ValueError:
+                    return None, None, "Invalid Content-Length"
+            html = response.text
+            if len(html.encode("utf-8")) > MAX_RESPONSE_BYTES:
+                return None, None, "Response exceeds byte limit"
 
-            return response.text, current_url, None
+            return html, current_url, None
 
     return None, None, f"Too many redirects (>{MAX_REDIRECTS})"
 
@@ -202,6 +211,7 @@ async def fetch_page(url: str) -> Dict[str, Any]:
         return {"url": url, "title": "", "content": "", "error": error}
 
     soup = BeautifulSoup(html, "html.parser")
+    _strip_untrusted_markup(soup)
     title_tag = soup.find("title")
     title = title_tag.get_text(strip=True) if title_tag else ""
     content = _extract_readable_text(soup)
@@ -228,6 +238,7 @@ async def extract_links(url: str) -> Dict[str, Any]:
         return {"url": url, "links": [], "error": error}
 
     soup = BeautifulSoup(html, "html.parser")
+    _strip_untrusted_markup(soup)
     links = _extract_links_from_soup(soup, final_url)
 
     return {
@@ -265,6 +276,7 @@ async def page_screenshot(url: str) -> Dict[str, Any]:
         }
 
     soup = BeautifulSoup(html, "html.parser")
+    _strip_untrusted_markup(soup)
 
     # Title
     title_tag = soup.find("title")
@@ -312,51 +324,19 @@ async def submit_form(
     if not await is_safe_url(url):
         return {"url": url, "title": "", "content": "", "error": f"URL blocked: {url}"}
 
-    timeout = httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=5, pool=5)
     method_upper = (method or "GET").upper()
     form_data = data or {}
 
-    try:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            max_redirects=MAX_REDIRECTS,
-            timeout=timeout,
-            headers=_HEADERS,
-        ) as client:
-            if method_upper == "POST":
-                response = await client.post(url, data=form_data)
-            else:
-                response = await client.get(url, params=form_data)
-
-            if response.status_code >= 400:
-                return {
-                    "url": str(response.url),
-                    "title": "",
-                    "content": "",
-                    "error": f"HTTP {response.status_code}",
-                }
-
-            soup = BeautifulSoup(response.text, "html.parser")
-            title_tag = soup.find("title")
-            title = title_tag.get_text(strip=True) if title_tag else ""
-            content = _extract_readable_text(soup)
-
-            return {
-                "url": str(response.url),
-                "title": title,
-                "content": content,
-                "error": None,
-            }
-
-    except httpx.TimeoutException:
-        return {"url": url, "title": "", "content": "", "error": "Request timed out"}
-    except httpx.RequestError as exc:
+    if method_upper != "GET":
         return {
             "url": url,
             "title": "",
             "content": "",
-            "error": f"Network error: {exc}",
+            "error": "POST form submission is consequential and requires a separate approved capability",
         }
+    separator = "&" if "?" in url else "?"
+    target = f"{url}{separator}{urlencode(form_data)}" if form_data else url
+    return await fetch_page(target)
 
 
 # ---------------------------------------------------------------------------

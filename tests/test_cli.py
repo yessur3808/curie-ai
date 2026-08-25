@@ -157,6 +157,11 @@ class TestDaemonHelpers:
         d._remove_pid()
         assert d._read_pid() is None
 
+    def test_remove_pid_permission_error_is_non_fatal(self):
+        d = self._daemon_mod
+        with patch.object(Path, "unlink", side_effect=OSError("read-only")):
+            d._remove_pid()
+
     def test_status_not_running(self):
         st = self._daemon_mod.get_status()
         assert st["running"] is False
@@ -527,6 +532,7 @@ class TestWebViewFlags:
         assert "connectSSE" in _HTML
         assert "Curie AI" in _HTML
 
+    @pytest.mark.network
     def test_webview_server(self):
         import threading
         import urllib.request

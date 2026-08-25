@@ -1,9 +1,36 @@
-import random
-import hashlib
 import logging
+import re
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _trim_social_reply(response: str, max_words: int = 28) -> str:
+    """Bound pure small talk without shortening substantive answers."""
+    sentences = re.findall(r".+?(?:[.!?](?=\s|$)|$)", response.strip(), re.DOTALL)
+    selected = " ".join(sentence.strip() for sentence in sentences[:2]).strip()
+    words = selected.split()
+    if len(words) <= max_words:
+        return selected
+    first = sentences[0].strip() if sentences else selected
+    if len(first.split()) <= max_words:
+        return first
+    return " ".join(first.split()[:max_words]).rstrip(",;:-") + "…"
+
+
+def _trim_brief_reply(response: str, max_words: int = 85) -> str:
+    """Enforce a useful ceiling for simple questions without clipping code or lists."""
+    if "```" in response or len(response.split()) <= max_words:
+        return response
+    sentences = re.findall(r".+?(?:[.!?](?=\s|$)|$)", response.strip(), re.DOTALL)
+    selected: list[str] = []
+    for sentence in sentences[:3]:
+        if len((" ".join(selected + [sentence.strip()])).split()) > max_words:
+            break
+        selected.append(sentence.strip())
+    if selected:
+        return " ".join(selected)
+    return " ".join(response.split()[:max_words]).rstrip(",;:-") + "…"
 
 
 def _safe_float(value, default=0.2):
@@ -13,14 +40,6 @@ def _safe_float(value, default=0.2):
     except (TypeError, ValueError):
         logger.debug(f"Could not convert {value!r} to float, using default {default}")
         return default
-
-
-def _deterministic_seed(text: str, context: str, mode: str) -> int:
-    """Generate a deterministic seed from input strings (hash-randomization safe)."""
-    combined = f"{text}:{context}:{mode}"
-    hash_bytes = hashlib.sha256(combined.encode()).digest()
-    # Use first 8 bytes as an int seed
-    return int.from_bytes(hash_bytes[:8], byteorder="big")
 
 
 class PersonalitySpeechEngine:
@@ -50,6 +69,12 @@ class PersonalitySpeechEngine:
             return response
 
         mode = context.get("mode", "casual")
+        if mode == "urgent":
+            return response
+        if context.get("response_depth") == "social":
+            response = _trim_social_reply(response)
+        elif context.get("response_depth") == "brief":
+            response = _trim_brief_reply(response)
         modulation = persona.get("style_modulation", {}).get(mode, {})
         intensity = _safe_float(modulation.get("french_intensity", 0.2), default=0.2)
 
@@ -58,35 +83,9 @@ class PersonalitySpeechEngine:
         if intensity <= 0:
             return response
 
-        french_markers = (
-            "bonjour",
-            "bonsoir",
-            "oui",
-            "non",
-            "merci",
-            "voilà",
-            "bien sûr",
-            "mon ami",
-            "s'il vous plaît",
-            "très ",
-            "c'est ",
-        )
-        lowered = response.casefold()
-        if any(marker in lowered for marker in french_markers):
-            return response
-
-        seed = _deterministic_seed(
-            response[:80], context.get("user_emotion", "neutral"), mode
-        )
-        rng = random.Random(seed)
-        insert_phrase = rng.random() < min(max(intensity, 0.05), 0.5)
-        if not insert_phrase:
-            return response
-
-        phrase = rng.choice(phrases)
-        # A natural lead-in is less likely to feel like a catchphrase pasted on
-        # after an otherwise unrelated answer.
-        return f"{phrase.capitalize()}, {response[0].lower()}{response[1:]}"
+        # The prompt owns the bilingual voice. Automatically inserting phrases
+        # into generated sentences produced awkward or incorrect French.
+        return response
 
     def _apply_andreja_speech(self, response: str, persona: Dict, context: Dict) -> str:
         profile = persona.get("language_profile", {})

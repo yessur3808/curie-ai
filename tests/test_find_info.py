@@ -8,43 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch, Mock
 # Add parent directory to path to import agent modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# ---------------------------------------------------------------------------
-# Dependency stubs
-# ---------------------------------------------------------------------------
-# Stub psycopg2/pymongo so memory.* imports succeed without a real DB driver.
-for _mod in (
-    "psycopg2",
-    "psycopg2.extras",
-    "psycopg2.extensions",
-    "psycopg2.sql",
-    "pymongo",
-    "pymongo.collection",
-    "pymongo.errors",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-
-# ---------------------------------------------------------------------------
-# Module isolation
-# ---------------------------------------------------------------------------
-# Earlier test modules (e.g. test_chat_workflow.py) inject a MagicMock for
-# "llm" into sys.modules before the real package is loaded.  If another test
-# module collected before us (e.g. test_conversions.py) then triggers the
-# import of agent.skills.find_info via agent/skills/__init__.py, find_info's
-# module-level `from llm import manager` resolves to that MagicMock and the
-# cached module object is forever tainted.  Clear the cached module too so
-# that our import below always executes find_info.py against the real llm.
-for _k in [k for k in sys.modules if k == "memory" or k.startswith("memory.")]:
-    del sys.modules[_k]
-for _k in [k for k in sys.modules if k == "llm" or k.startswith("llm.")]:
-    del sys.modules[_k]
-for _k in [
-    k
-    for k in sys.modules
-    if k == "agent.skills.find_info" or k.startswith("agent.skills.find_info.")
-]:
-    del sys.modules[_k]
-
 from agent.skills.find_info import (  # noqa: E402
     search_sources_llm,
     scrape_url,
@@ -394,7 +357,10 @@ async def test_find_info_success():
 
         result = await find_info("test query")
 
-        assert result == "Final answer based on sources"
+        assert result == (
+            "Final answer based on sources\n\nSources:\n"
+            "- https://example.com\n- https://test.com"
+        )
         assert mock_scraper.find_sources.called
         assert mock_adaptive.analyze_webpage.call_count == 2  # Called for each URL
         assert (

@@ -11,19 +11,6 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Stub heavy DB dependencies before importing the skill
-for _mod in (
-    "psycopg2",
-    "psycopg2.extras",
-    "psycopg2.extensions",
-    "pymongo",
-    "pymongo.collection",
-    "pymongo.errors",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-
-
 from agent.skills.scheduler import (  # noqa: E402
     is_reminder_query,
     _parse_due_time,
@@ -216,12 +203,10 @@ class TestHandleReminderQueryAsync:
     async def test_deletes_all_reminders(self):
         from agent.skills.scheduler import handle_reminder_query
 
-        mock_col = MagicMock()
-        mock_col.delete_many.return_value = MagicMock(deleted_count=2)
+        repositories = MagicMock()
+        repositories.reminders.delete.return_value = 2
 
-        with patch(
-            "agent.skills.scheduler._get_reminders_collection", return_value=mock_col
-        ):
+        with patch("memory.repositories.get_repositories", return_value=repositories):
             result = await handle_reminder_query(
                 "cancel all reminders", internal_id="user_1"
             )

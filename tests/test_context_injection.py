@@ -14,18 +14,6 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Stub heavy dependencies before import
-for _mod in (
-    "psycopg2",
-    "psycopg2.extras",
-    "psycopg2.extensions",
-    "pymongo",
-    "pymongo.collection",
-    "pymongo.errors",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-
 # Import the module-level helpers we are testing
 import agent.chat_workflow as _cw_module
 from agent.chat_workflow import _select_relevant_facts

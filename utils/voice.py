@@ -11,10 +11,27 @@ Features:
 import asyncio
 import os
 import logging
+import shutil
+import subprocess
+import tempfile
+import re
 from typing import Optional, Dict, Any
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def get_piper_executable() -> Optional[str]:
+    """Resolve Piper from PATH or Curie's project-local virtual environment."""
+    configured = os.getenv("PIPER_BINARY", "piper").strip() or "piper"
+    executable = shutil.which(configured)
+    if executable:
+        return executable
+    if configured == "piper":
+        local = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "piper"
+        if local.is_file() and os.access(local, os.X_OK):
+            return str(local)
+    return None
 
 # Cache for Whisper models to avoid reloading on each transcription
 _whisper_model_cache = {}
@@ -57,6 +74,42 @@ VOICE_PROFILES = {
     "portuguese": {"lang": "pt", "tld": "pt", "slow": False},
     "brazilian": {"lang": "pt", "tld": "com.br", "slow": False},
 }
+
+
+def get_ffmpeg_executable() -> Optional[str]:
+    """Find a system or project-local FFmpeg binary without downloading at runtime."""
+    executable = shutil.which("ffmpeg")
+    if executable:
+        return executable
+    try:
+        import imageio_ffmpeg
+
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        return bundled if Path(bundled).is_file() else None
+    except (ImportError, OSError):
+        return None
+
+
+def normalize_for_speech(text: str) -> str:
+    """Make common written forms intelligible to offline speech engines."""
+    text = re.sub(
+        r"https?://([^/\s]+)(?:/\S*)?", lambda m: f"link to {m.group(1)}", text
+    )
+    replacements = {
+        "API": "A P I",
+        "CPU": "C P U",
+        "GPU": "G P U",
+        "RAM": "ram",
+        "URL": "U R L",
+        "AI": "A I",
+        "°C": " degrees Celsius",
+        "°F": " degrees Fahrenheit",
+    }
+    for source, target in replacements.items():
+        text = re.sub(rf"\b{re.escape(source)}\b", target, text)
+    text = re.sub(r"(?<=\d)%(?!\w)", " percent", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 async def transcribe_audio(
@@ -248,18 +301,133 @@ async def text_to_speech(
     Returns:
         True if successful, False otherwise
     """
+    config = voice_config or {}
+    text = normalize_for_speech(text)
+    if config:
+        text = apply_code_switching(text, config)
+    output = Path(output_path)
+    fd, wav_path = tempfile.mkstemp(prefix="curie_tts_", suffix=".wav")
+    os.close(fd)
     try:
-        # Apply code-switching if enabled
-        if voice_config:
-            text = apply_code_switching(text, voice_config)
-
-        return await text_to_speech_gtts(text, output_path, voice_config)
-    except ImportError:
-        logger.error("gTTS not available for text-to-speech")
+        piper = get_piper_executable()
+        model = str(config.get("model_path") or os.getenv("PIPER_MODEL_PATH", "")).strip()
+        if piper and model and Path(model).is_file():
+            speed_scale = {"slow": 1.16, "normal": 1.0, "fast": .86}.get(
+                config.get("speed"), 1.0
+            )
+            expression = config.get("expressiveness", "balanced")
+            noise_scale = {"calm": .42, "balanced": .58, "expressive": .72}.get(expression, .58)
+            noise_w_scale = {"calm": .55, "balanced": .70, "expressive": .82}.get(expression, .70)
+            warmth = config.get("warmth", "gentle")
+            sentence_silence = {"neutral": .12, "gentle": .20, "warm": .25}.get(warmth, .20)
+            volume = {"neutral": .92, "gentle": .86, "warm": .82}.get(warmth, .86)
+            process = await asyncio.create_subprocess_exec(
+                piper,
+                "--model",
+                model,
+                "--length-scale",
+                str(speed_scale),
+                "--noise-scale",
+                str(noise_scale),
+                "--noise-w-scale",
+                str(noise_w_scale),
+                "--sentence-silence",
+                str(sentence_silence),
+                "--volume",
+                str(volume),
+                "--output_file",
+                wav_path,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            backend = "piper"
+            _, stderr = await asyncio.wait_for(
+                process.communicate(text.encode("utf-8")), timeout=120
+            )
+        else:
+            allow_espeak = os.getenv("LOCAL_TTS_ALLOW_ESPEAK", "true").lower() in {
+                "1", "true", "yes", "on"
+            }
+            if not allow_espeak:
+                logger.warning(
+                    "Neural TTS is unavailable and eSpeak is disabled; using text fallback"
+                )
+                return False
+            espeak = shutil.which("espeak-ng") or shutil.which("espeak")
+            if not espeak:
+                logger.error("No local TTS backend found; install Piper or eSpeak")
+                return False
+            voice = os.getenv("LOCAL_TTS_ESPEAK_VOICE", "en+f4")
+            speed_base = int(os.getenv("LOCAL_TTS_SPEED", "155"))
+            speed = str({"slow": speed_base - 25, "fast": speed_base + 25}.get(config.get("speed"), speed_base))
+            pitch_base = int(os.getenv("LOCAL_TTS_PITCH", "58"))
+            warmth = {"neutral": 0, "gentle": -3, "warm": -6}.get(config.get("warmth"), -3)
+            expression = {"calm": -2, "balanced": 0, "expressive": 4}.get(config.get("expressiveness"), 0)
+            pitch = str(max(0, min(99, pitch_base + warmth + expression)))
+            process = await asyncio.create_subprocess_exec(
+                espeak,
+                "-v",
+                voice,
+                "-s",
+                speed,
+                "-p",
+                pitch,
+                "-w",
+                wav_path,
+                text,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            backend = "espeak"
+            _, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+        if process.returncode or not Path(wav_path).is_file():
+            logger.error(
+                "Local TTS (%s) failed: %s", backend, stderr.decode(errors="replace")
+            )
+            return False
+        if output.suffix.casefold() == ".wav":
+            shutil.move(wav_path, output)
+            wav_path = ""
+        else:
+            ffmpeg = get_ffmpeg_executable()
+            if not ffmpeg:
+                logger.error(
+                    "ffmpeg is required to encode %s voice replies", output.suffix
+                )
+                return False
+            encoder = await asyncio.create_subprocess_exec(
+                ffmpeg,
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                wav_path,
+                "-c:a",
+                "libopus",
+                str(output),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, encode_error = await asyncio.wait_for(encoder.communicate(), timeout=120)
+            if encoder.returncode:
+                logger.error(
+                    "Voice encoding failed: %s", encode_error.decode(errors="replace")
+                )
+                return False
+        logger.info("Synthesized local speech with %s", backend)
+        return output.is_file() and output.stat().st_size > 0
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        ValueError,
+        asyncio.TimeoutError,
+    ) as exc:
+        logger.error("Local text-to-speech failed: %s", exc)
         return False
-    except Exception as e:
-        logger.error(f"Text-to-speech failed: {e}")
-        return False
+    finally:
+        if wav_path:
+            Path(wav_path).unlink(missing_ok=True)
 
 
 async def text_to_speech_gtts(

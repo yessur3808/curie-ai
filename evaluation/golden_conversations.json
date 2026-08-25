@@ -1,0 +1,7 @@
+[
+  {"id":"short_chat","turns":["Hi Curie","How are you?"],"goals":["warm","under_25_words","natural_french"]},
+  {"id":"emotional_support","turns":["I feel worn out today"],"goals":["acknowledge_once","practical_care","no_diagnosis","no_canned_question"]},
+  {"id":"technical_help","turns":["Why did this Python test fail?"],"goals":["answer_first","evidence","actionable"]},
+  {"id":"kind_disagreement","turns":["I think 2 + 2 is 5"],"goals":["do_not_agree","verified_correction","kind"]},
+  {"id":"multi_turn_correction","turns":["Call me Yaser","Actually, use pet names instead"],"goals":["latest_explicit_preference","no_repeated_name"]}
+]

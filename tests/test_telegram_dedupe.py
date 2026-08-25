@@ -14,24 +14,6 @@ from unittest.mock import MagicMock, patch
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Stub heavyweight dependencies before importing any application code.
-for _mod in (
-    "psycopg2",
-    "psycopg2.extras",
-    "psycopg2.extensions",
-    "pymongo",
-    "pymongo.collection",
-    "pymongo.errors",
-    "memory",
-    "memory.database",
-    "memory.users",
-    "memory.conversations",
-    "memory.session_store",
-    "llm",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-
 from agent.chat_workflow import MessageDedupeCache  # noqa: E402
 
 # ---------------------------------------------------------------------------

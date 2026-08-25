@@ -202,20 +202,13 @@ def add_reminder(
     """
     Persist a new reminder and return a human-readable confirmation.
     """
-    col = _get_reminders_collection()
-    doc = {
-        "internal_id": internal_id,
-        "platform": platform,
-        "message": message,
-        "due_at": due_at,
-        "created_at": datetime.now(timezone.utc),
-        "fired": False,
-        "snooze_count": 0,
-    }
-    result = col.insert_one(doc)
+    from memory.repositories import get_repositories
+    reminder_id = get_repositories().reminders.create(
+        internal_id, platform, message, due_at
+    )
     logger.info(
         "Reminder created id=%s for user=%s due=%s",
-        result.inserted_id,
+        reminder_id,
         internal_id,
         due_at,
     )
@@ -226,14 +219,9 @@ def add_reminder(
 
 def list_reminders(internal_id: str) -> str:
     """Return a formatted list of pending reminders for the user."""
-    col = _get_reminders_collection()
     now = datetime.now(timezone.utc)
-    docs = list(
-        col.find(
-            {"internal_id": internal_id, "fired": False, "due_at": {"$gte": now}},
-            sort=[("due_at", 1)],
-        )
-    )
+    from memory.repositories import get_repositories
+    docs = get_repositories().reminders.upcoming(internal_id, now)
 
     if not docs:
         return "You have no upcoming reminders. 📅"
@@ -251,29 +239,24 @@ def delete_reminder(internal_id: str, index: Optional[int] = None) -> str:
     - If ``index`` is given, delete the Nth upcoming reminder.
     - If ``index`` is None, delete **all** pending reminders.
     """
-    col = _get_reminders_collection()
     now = datetime.now(timezone.utc)
+    from memory.repositories import get_repositories
+    repository = get_repositories().reminders
 
     if index is None:
-        result = col.delete_many({"internal_id": internal_id, "fired": False})
-        count = result.deleted_count
+        count = repository.delete(internal_id)
         return (
             f"🗑️ Deleted all {count} reminder(s)."
             if count
             else "No reminders to delete."
         )
 
-    docs = list(
-        col.find(
-            {"internal_id": internal_id, "fired": False, "due_at": {"$gte": now}},
-            sort=[("due_at", 1)],
-        )
-    )
+    docs = repository.upcoming(internal_id, now)
     if not docs or index < 1 or index > len(docs):
         return f"Couldn't find reminder #{index}. Use 'list my reminders' to see your current list."
 
     target = docs[index - 1]
-    col.delete_one({"_id": target["_id"]})
+    repository.delete(internal_id, target["_id"])
     return f"🗑️ Deleted reminder: _{escape_markdown(target['message'])}_"
 
 

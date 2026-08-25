@@ -314,6 +314,8 @@ def ask_best_provider(
     temperature: float = 0.7,
     max_tokens: Optional[int] = None,
     force_provider: Optional[str] = None,
+    role: Optional[str] = None,
+    owner_scope: str | None = None,
 ) -> Optional[str]:
     """
     Query the highest-priority available LLM provider.
@@ -383,7 +385,11 @@ def ask_best_provider(
                 from llm import manager as _local_manager
 
                 result = _local_manager.ask_llm(
-                    prompt, temperature=temperature, max_tokens=max_tokens
+                    prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    role=role,
+                    owner_scope=owner_scope,
                 )
                 if result and not result.startswith("[Error"):
                     return result

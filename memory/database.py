@@ -253,16 +253,24 @@ def init_databases():
     global _postgres_available
     postgres_available = False
 
-    # Try PostgreSQL
-    try:
-        init_pg()
-        postgres_available = True
-        _postgres_available = True
-        logger.info("✅ PostgreSQL initialized successfully")
-    except Exception as e:
+    # An entirely empty psycopg2 configuration silently falls back to a local
+    # Unix socket and the operating-system username. That produced a misleading
+    # authentication error on SQLite-only installations. PostgreSQL is an
+    # optional external backend, so only initialize it when explicitly enabled
+    # with a host, matching the repository backend selection policy.
+    if not PG_CONN_INFO.get("host"):
         _postgres_available = False
-        logger.warning(f"⚠️  PostgreSQL unavailable: {e}")
-        logger.warning("Continuing without PostgreSQL - in-memory operations only")
+        logger.info("PostgreSQL is not configured; using local SQLite persistence")
+    else:
+        try:
+            init_pg()
+            postgres_available = True
+            _postgres_available = True
+            logger.info("✅ PostgreSQL initialized successfully")
+        except Exception as e:
+            _postgres_available = False
+            logger.warning(f"⚠️  PostgreSQL unavailable: {e}")
+            logger.warning("Continuing with local SQLite persistence")
 
     # Try MongoDB
     try:

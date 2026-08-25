@@ -1,6 +1,7 @@
 # memory/users.py
 
 import uuid
+import os
 from datetime import datetime
 from .database import get_pg_conn, mongo_db
 
@@ -20,6 +21,24 @@ def _validate_channel(channel: str) -> None:
 
 
 class UserManager:
+    @staticmethod
+    def get_external_id(internal_id, channel):
+        """Resolve an internal identity to one stored channel recipient ID."""
+        _validate_channel(channel)
+        if not os.getenv("POSTGRES_HOST"):
+            from .local_store import get_external_id
+
+            return get_external_id(str(internal_id), channel)
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            field = f"{channel}_id"
+            cur.execute(f"SELECT {field} FROM users WHERE internal_id = %s", (str(internal_id),))
+            row = cur.fetchone()
+            if not row or not row[field]:
+                return None
+            ids = row[field]
+            return str(ids[0] if isinstance(ids, (list, tuple)) else ids)
+
     @staticmethod
     def get_internal_id_by_secret_username(secret_username):
         """Get the internal_id (UUID) for a user by their secret_username."""
@@ -54,6 +73,10 @@ class UserManager:
         on creation and is used by the AI assistant to address the user naturally.
         """
         _validate_channel(channel)
+        if not os.getenv("POSTGRES_HOST"):
+            from .local_store import get_or_create_user
+
+            return get_or_create_user(channel, str(external_id))
         with get_pg_conn() as conn:
             cur = conn.cursor()
             field = f"{channel}_id"
@@ -102,11 +125,15 @@ class UserManager:
                 )
             conn.commit()
 
-            # Initialize user profile in MongoDB with proactive messaging enabled by default
-            # Master users and all new users get proactive messaging enabled
+            # Unsolicited messages require explicit per-user opt-in.
             default_profile = {
-                "proactive_messaging_enabled": True,
+                "proactive_messaging_enabled": False,
                 "proactive_interval_hours": 24,
+                "proactive_predictions_enabled": True,
+                "proactive_quiet_hours": {"start": 22, "end": 8},
+                "proactive_daily_max": 1,
+                "proactive_weekly_max": 7,
+                "proactive_topic_cooldown_hours": 72,
             }
             mongo_db.user_profiles.update_one(
                 {"_id": new_uuid},
@@ -197,6 +224,10 @@ class UserManager:
     @staticmethod
     def get_user_profile(internal_id):
         """Returns the 'facts' dict for this user, or an empty dict if not found."""
+        if not os.getenv("MONGODB_URI"):
+            from .local_store import get_profile
+
+            return get_profile(str(internal_id))
         doc = mongo_db.user_profiles.find_one({"_id": str(internal_id)})
         return doc.get("facts", {}) if doc and "facts" in doc else {}
 
@@ -208,6 +239,11 @@ class UserManager:
         """
         if not isinstance(new_facts, dict):
             raise ValueError("new_facts must be a dict")
+        if not os.getenv("MONGODB_URI"):
+            from .local_store import update_profile
+
+            update_profile(str(internal_id), new_facts)
+            return
         update = {}
         for k, v in new_facts.items():
             update[f"facts.{k}"] = v

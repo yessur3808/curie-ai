@@ -243,6 +243,9 @@ def learn_from_exchange(
     internal_id: str,
     user_message: str,
     assistant_reply: str,  # noqa: ARG001  (reserved for future use)
+    *,
+    source_message_id: str = "",
+    source_channel: str = "unknown",
 ) -> None:
     """
     Attempt to extract and persist learnable facts from a conversation turn.
@@ -261,6 +264,16 @@ def learn_from_exchange(
         return
     if not internal_id or not user_message:
         return
+    from memory.adaptive import _DO_NOT_REMEMBER
+
+    if _DO_NOT_REMEMBER.search(user_message):
+        return
+    try:
+        from memory.adaptive import propose_learned_ability
+
+        propose_learned_ability(internal_id, user_message)
+    except Exception as exc:
+        logger.debug("Ability proposal skipped: %s", exc)
     if not _should_attempt_extraction(user_message):
         return
 
@@ -274,7 +287,19 @@ def learn_from_exchange(
         existing = UserManager.get_user_profile(internal_id) or {}
         to_store = _filter_facts(existing, new_facts)
         if to_store:
-            UserManager.update_user_profile(internal_id, to_store)
+            try:
+                from memory.adaptive import record_memories
+
+                record_memories(
+                    internal_id,
+                    to_store,
+                    evidence=user_message,
+                    source="explicit_user_statement",
+                    source_message_id=source_message_id,
+                    source_channel=source_channel,
+                )
+            except Exception as exc:
+                logger.debug("Adaptive memory provenance skipped: %s", exc)
             logger.info(
                 "Learning: stored %d fact(s) for user=%s — keys: %s",
                 len(to_store),

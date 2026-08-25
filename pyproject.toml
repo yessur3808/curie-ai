@@ -21,8 +21,18 @@ line-length = 88
 target-version = ['py310', 'py311', 'py312']
 
 [tool.pytest.ini_options]
+addopts = '-m "not network and not hardware and not model and not connector"'
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "network: opt-in tests that open sockets or access the network",
+    "hardware: opt-in tests that require physical accelerator hardware",
+    "model: opt-in tests that load or execute a real language model",
+    "connector: opt-in tests that contact an external messaging service",
+    "integration: tests spanning multiple application components",
+    "security: adversarial permission, validation, and isolation tests",
+]

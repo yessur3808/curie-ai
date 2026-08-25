@@ -357,24 +357,13 @@ class CronRunner:
 
         # Try to find an external ID for the master user on any connected platform
         try:
-            from memory.database import get_pg_conn  # noqa: PLC0415
-            from psycopg2 import sql as _sql  # noqa: PLC0415
+            from memory.repositories import get_repositories
 
-            with get_pg_conn() as conn:
-                cur = conn.cursor()
-                for platform in ["telegram", "discord", "api"]:
-                    col = f"{platform}_id"
-                    cur.execute(
-                        _sql.SQL("SELECT {} FROM users WHERE internal_id = %s").format(
-                            _sql.Identifier(col)
-                        ),
-                        (master_id,),
-                    )
-                    row = cur.fetchone()
-                    if row and row[0]:
-                        ids = row[0]
-                        ext_id = ids[0] if isinstance(ids, (list, tuple)) else str(ids)
-                        return master_id, platform, ext_id
+            identities = get_repositories().identities
+            for platform in ["telegram", "discord", "api"]:
+                external_id = identities.get_external_id(master_id, platform)
+                if external_id:
+                    return master_id, platform, external_id
         except Exception as e:
             logger.debug("CronRunner: could not look up master external ID: %s", e)
 

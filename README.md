@@ -54,6 +54,16 @@ pip install -r requirements.txt   # or: make install
 python scripts/verify_setup.py    # or: make verify
 ```
 
+For a system-wide user command that works from any directory, run the installer:
+
+```bash
+./install.sh --no-onboard
+curie dashboard
+```
+
+The installer places the launcher in `~/.local/bin/curie`. Ensure
+`~/.local/bin` is included in your `PATH` if your shell does not already include it.
+
 > **Python 3.13+ note:** `openai-whisper` may fail to build on Python 3.13+. Skip `requirements-optional.txt` if you don't need voice features.
 
 ---
@@ -216,6 +226,15 @@ Telegram uses `/` prefix; Discord uses the `!` prefix (e.g. `!start`, `!help`).
 | `/history` | Show recent conversation history |
 | `/reminders` | List your upcoming reminders |
 | `/clear_memory` | Wipe all stored conversation context (admin) |
+| `/voice on\|off\|status` | Enable, disable, or inspect Telegram voice replies |
+| `/voice_profile clear\|soft\|expressive\|french\|custom` | Select a voice preset |
+| `/voice_accent neutral\|subtle\|strong` | Control English/French pronunciation routing |
+| `/voice_speed slow\|normal\|fast` | Adjust speech speed |
+| `/voice_warmth neutral\|gentle\|warm` | Adjust pauses and vocal softness |
+| `/voice_expression calm\|balanced\|expressive` | Adjust synthesis variation |
+| `/voice_sample [text]` | Generate a one-shot sample without changing reply mode |
+| `/voice_custom status\|consent\|revoke\|enroll` | Manage consent-gated custom voice enrollment |
+| `/voice_help` | Show Curie's voice command guide |
 
 **Discord (`!`)**
 
@@ -521,6 +540,143 @@ Simple queries are automatically routed to the local model (cost optimization) u
 - Per-user contact channel preferences (platform priority, blocked platforms)
 - Configurable check interval (`PROACTIVE_CHECK_INTERVAL`)
 
+### Provenance-aware memory controls
+
+In chat, use `/memory inspect`, `/memory why <key>`,
+`/memory correct <key> = <value>`, `/memory confirm <id>`,
+`/memory forget <key|all>`, `/memory export`, `/memory pause`, or
+`/memory resume`. Add “do not remember this” to any message to prevent memory
+storage for that turn. Curie rejects credentials and similarly sensitive values
+instead of storing them.
+
+### Typed learned skills
+
+Teach a declarative response with “When I say …, …”, then inspect and explicitly
+approve the version before it activates. Manage versions in chat with
+`/skill inspect <name>`, `/skill disable <name>`, `/skill rollback <name>`,
+`/skill feedback <name> <feedback>`, `/skill archive <name>`,
+`/skill export [name]`, and `/skill delete <name>`. Executable learned workflows
+are limited to registered tools and never retain approval for future mutations.
+
+### Feedback-driven adaptation
+
+Curie records direct presentation feedback such as “too long,” “too short,” or
+“use a professional tone.” Inspect the versioned preference history with
+`/adaptation`, change bounded settings with `/adaptation set <setting> <value>`,
+temporarily use `/adaptation pause`, or clear one/all preferences with
+`/reset_preferences [setting]`. Implicit operational signals require repeated
+evidence and cannot modify identity, safety rules, permissions, or authority.
+
+### Proactive message controls
+
+Proactive messages are off for new users until explicitly enabled. Use
+`/proactive` to inspect the current timezone, quiet hours, daily and weekly
+limits, topic cooldown, and snooze state. Use `/proactive enable`,
+`/proactive disable`, `/proactive snooze 1h|8h|1d|1w`, or `/proactive why` to
+control delivery and see a privacy-safe explanation for the latest message.
+Predicted help is suggestion-only and always asks permission before work begins.
+
+### Unified request routing
+
+Every conversational request produces one explainable routing decision with its
+confidence, selected capability, live-data requirement, and risk. Independent
+requests in one message receive a focused ordering question. Low-confidence
+requests remain normal conversation, and model-assisted routing cannot authorize
+filesystem or other mutating actions.
+
+### Durable multi-step tasks
+
+Complex work can use persisted dependency graphs with bounded parallel reads,
+deadlines, safe retries, cancellation, explicit completion checks, and retained
+evidence. Mutating steps pause for a single-use, owner- and step-scoped approval;
+an interrupted mutation is verified after restart and is never replayed
+automatically. Use `/task inspect <task-id>`, `/task resume <task-id>`,
+`/task cancel <task-id>`, or `/task approve <task-id> <approval-token>` in chat.
+Use `/task` to list retained tasks. Completed tasks return a receipt naming
+affected resources, verification evidence, and the available recovery path.
+
+### Security and retention controls
+
+Every attachment passes executable denial, archive traversal/expansion checks,
+and ClamAV when it is installed. Set `CURIE_REQUIRE_MALWARE_SCANNER=true` to
+reject media if ClamAV is unavailable. Use `/security` for active controls,
+`/privacy retention` for effective retention limits, and `/privacy purge` for
+owner-scoped cleanup. The trust boundaries are documented in
+[the threat model](docs/THREAT_MODEL.md).
+
+### Managed inference
+
+Conversation model work is coordinated through one bounded, process-wide
+priority service. Active messages outrank background inference, superseded
+requests can be cancelled, and overload is rejected rather than growing memory
+without limit. The dashboard reports managed queue depth/capacity, first-token
+latency, throughput, loaded models, and model reloads. Automatic ensembles only
+activate when `LLM_ENSEMBLE_EVAL_GAIN` meets `LLM_ENSEMBLE_MIN_GAIN`; explicit
+requests for multiple perspectives remain supported.
+
+### Runtime readiness and recovery
+
+Use `/health` in chat or `GET /health` through the API to inspect text, vision,
+transcription, speech, database, disk, security, and inference readiness
+independently. Optional capability failures degrade to text, a retry request, or
+a clear unavailable response instead of silence. Connector, inference, and
+media concurrency are bounded so expensive attachments cannot consume every
+chat resource.
+
+Local SQLite recovery uses `memory.backup.create_backup()` and
+`memory.backup.restore_backup()`. Backups are online-consistent, checksummed,
+schema/integrity checked, permissioned `0600`, and restored atomically while
+retaining a pre-restore rollback copy. Keep backup encryption keys outside the
+backup location.
+
+```bash
+python -m scripts.memory_recovery backup backups/curie.sqlite3
+python -m scripts.memory_recovery verify backups/curie.sqlite3 --sha256 DIGEST
+python -m scripts.memory_recovery restore backups/curie.sqlite3 --sha256 DIGEST --confirm
+```
+
+### Public contracts and capability discovery
+
+`contracts/catalog.py` is the versioned machine-readable contract for
+connectors, tools, media, memory, voice, and response policy. Use
+`/capabilities` or `GET /capabilities` to see only features whose runtime probes
+currently pass; add `all` in chat or `include_unavailable=true` through the API
+for diagnostics. New integrations must pass the shared conformance suite.
+
+Significant releases are described by `release/current.json`. CI requires its
+changelog, evaluation delta, migration notes, and rollback procedure. Applied
+PostgreSQL migrations are checksummed and cannot be silently edited; rollback
+always requires an explicit target version. See
+[the release process](docs/RELEASE_PROCESS.md).
+
+### Cache and index policy
+
+Public lookup caches and owner-scoped personalized caches are TTL-bound,
+size-bound, and expose privacy-safe hit-rate metrics through the health API.
+Personal model responses require an explicit owner scope. Project indexes
+invalidate whenever indexed paths, sizes, or modification times change and omit
+known credential files. See [the cache policy](docs/CACHE_POLICY.md) for the
+complete inventory and invalidation rules.
+
+### Filesystem and command sandbox
+
+Project tools use canonical owner-scoped roots and deny traversal, link escapes,
+credential files, unbounded archives, and oversized project inputs. Approved
+edits are applied atomically with a diff and retained rollback copies. Test and
+development commands use argument arrays inside Bubblewrap with no network,
+filtered environment variables, bounded CPU/memory/process/output/time, and
+whole-process-group termination. Commands outside the safe read-only test
+profile require fresh scoped approval.
+
+### Secure live research
+
+Research validates every resolved address and redirect, blocks internal and
+metadata targets, streams responses under strict size/type/redirect limits, and
+removes executable or hidden markup. Web content is passed to synthesis only as
+untrusted evidence, never instructions. Results distinguish model synthesis from
+source passages, bind citations to retained evidence, and include live-fetch
+timestamps. The read-only browser does not submit POST forms.
+
 ### Deployment Options
 - **Direct**: `python main.py [--telegram] [--discord] [--api] [--all]`
 - **Make shortcuts**: `make run-telegram`, `make run-api`, `make run-all`
@@ -532,27 +688,9 @@ Simple queries are automatically routed to the local model (cost optimization) u
 
 ## 🚀 Upcoming Features
 
-See [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) for detailed implementation plans.
-
-### Priority 1 — High Impact, Lower Complexity
-- **Enhanced News Analysis** — aggregation from multiple sources, sentiment analysis, trending topics
-- **Basic Financial Data** — cryptocurrency prices, stock quotes, Forex rates, market status (view-only)
-
-### Priority 2 — Medium Complexity
-- **Email Integration** — send/receive via SMTP or API (SendGrid, Mailgun), scheduling, templates
-- **Nutrition & Wellness** — nutrition database lookup, calorie/macro tracking, health calculators
-
-### Priority 3 — More Complex
-- **Legal & Tax Reference** — US tax brackets, deduction lookup, basic legal definitions *(with disclaimers — not professional advice)*
-- **Advanced Financial Analysis** — technical indicators (RSI, MACD), portfolio tracking, educational backtesting
-
-### Platform & Infrastructure
-- **Web Dashboard / UI** — browser-based chat and management interface
-- **Advanced Memory Management** — cross-session entity tracking and long-term knowledge graph
-- **Enhanced Multi-User Support** — shared spaces, group conversation context
-- **Plugin System** — third-party skill packages
-
-> ⚠️ Features requiring broker partnerships, medical diagnosis, unauthorized legal practice, or tax filing services are **not planned**.
+See the [Curie Enhancement Roadmap](docs/ENHANCEMENT_ROADMAP.md) for the canonical
+phased plan covering accuracy, multimodal support, local voice, memory,
+friendship, bounded proactivity, personal operations, security, and resilience.
 
 ---
 
@@ -598,6 +736,15 @@ Copy `.env.example` to `.env` and configure these variables.
 |---|---|---|
 | `LLM_MODELS` | *(required)* | Comma-separated GGUF filenames in `models/` |
 | `CODING_MODEL_NAME` | *(none)* | Dedicated GGUF model for coding tasks |
+| `LLM_CODING_MODEL` | general model | Coding model selected by automatic conversation routing |
+| `LLM_GENERAL_MODEL` | first model | Primary conversation/synthesis model |
+| `LLM_FAST_MODEL` | general model | Smaller independent critic/fast-task model |
+| `LLM_REASONING_MODEL` | general model | Model selected by reasoning specialists |
+| `LLM_AGENT_MODEL` | reasoning model | Model used to plan approved project/tool changes |
+| `LLM_CRITIC_MODEL` | general model | Independent second-opinion model used by ensembles |
+| `LLM_MAX_LOADED_MODELS` | `2` | LRU limit for resident GGUF models |
+| `LLM_PARALLEL_WORKERS` | `2` | Maximum concurrent local specialists |
+| `LLM_ENSEMBLE_ENABLED` | `true` | Enable explicit multi-agent requests |
 | `LLM_PROVIDER_PRIORITY` | `llama.cpp` | Provider order, e.g. `anthropic,openai,llama.cpp` |
 | `LLM_CLOUD_SIMPLE_TASKS` | `false` | Route simple queries to cloud (increases cost) |
 | `LLM_CONTEXT_SIZE` | `2048` | Context window size in tokens |
@@ -608,6 +755,20 @@ Copy `.env.example` to `.env` and configure these variables.
 | `ANTHROPIC_MODEL` | `claude-3-haiku-20240307` | Anthropic model name |
 | `GOOGLE_API_KEY` | *(none)* | Google Gemini API key (optional) |
 | `GEMINI_MODEL` | `gemini-1.5-flash` | Gemini model name |
+
+Multi-agent inference is opt-in per request to preserve normal chat latency. Ask
+Curie to “use several agents,” “independently verify,” or “double-check with
+multiple models” to run bounded specialist calls in parallel and synthesize one
+final response. Calls sharing a model are safely serialized; different resident
+models or backends may run concurrently.
+
+Ordinary chat is also routed automatically. Coding and debugging requests use
+`LLM_CODING_MODEL`, analysis and planning use `LLM_REASONING_MODEL`, approved
+tool/project changes use `LLM_AGENT_MODEL`, summaries and transformations use
+`LLM_FAST_MODEL`, and normal conversation uses `LLM_GENERAL_MODEL`. Complex
+reviews pair the reasoning model with `LLM_CRITIC_MODEL` before synthesis.
+Missing specialist files fall back to the next available local model. At most
+`LLM_MAX_LOADED_MODELS` remain resident per assistant instance.
 
 ### Persona & Behavior
 
@@ -620,6 +781,56 @@ Copy `.env.example` to `.env` and configure these variables.
 | `PROACTIVE_CHECK_INTERVAL` | `3600` | Background check frequency in seconds |
 | `ENABLE_LEARNING` | `true` | Auto-extract user preferences from conversations |
 | `LEARNING_MAX_FACTS` | `50` | Max stored facts per user |
+| `CURIE_LOCAL_MEMORY_DB` | `.curie_memory.sqlite3` | Durable fallback when Mongo/Postgres are unset |
+| `PROACTIVE_PREDICTIONS_ENABLED` | `true` | Offer grounded, permission-seeking predicted help |
+| `PROACTIVE_PREDICTION_MIN_CONFIDENCE` | `0.82` | Minimum confidence before suggesting predicted help |
+
+Curie stores explicit memories with provenance and reinforcement counts. You can
+teach a safe declarative ability with a phrase such as “When I say morning
+brief, summarize my priorities.” It remains pending until you reply
+`/approve skill morning_brief`; use `/reject skill morning_brief` to discard it.
+Learned abilities guide responses only—they cannot install or execute generated
+code or authorize consequential external actions.
+
+Natural requests for project scaffolding, file inspection, code changes, tests,
+hardware/RAM inspection, weather, and live research pass through one guarded
+action router. `CURIE_WORKSPACE_ROOT` defines the master user's workspace and
+`CURIE_PROJECTS_ROOT` defines isolated per-user project sandboxes. Generated
+project changes receive a user-bound, 30-minute `/approve action TOKEN` prompt
+before files are modified. Commands use an allowlist without a shell, filter
+secrets from their environment, enforce timeouts, and write outcomes to the
+local audit database. Live research retains the URLs actually fetched.
+Sandboxed command execution requires Bubblewrap (`bwrap`) and permission to
+create unprivileged user namespaces. If the host disables that kernel feature,
+Curie fails closed and reports the command as unavailable instead of running it
+without filesystem isolation.
+
+Audit events are structured and redacted before persistence. Use `/audit` for a
+retained-event and security-alert summary, `/audit export` for an owner-scoped
+JSON export, or `/audit delete` followed by `/audit delete confirm` for explicit
+owner-scoped deletion. `CURIE_AUDIT_RETENTION_DAYS` defaults to 90. Set
+`CURIE_LOG_FILE` to enable private rotating application logs; size and backup
+count are controlled by `CURIE_LOG_MAX_BYTES` and `CURIE_LOG_BACKUP_COUNT`.
+Operational recovery procedures are in `docs/INCIDENT_RESPONSE.md`.
+
+Proactive suggestions are inferred by the local reasoning model from repeated or
+explicit evidence. They always ask permission before work begins and are bounded
+by quiet hours, a daily cap, persisted contact cadence, and safety filters.
+
+### Personal operations
+
+Use `/birthday add NAME MM-DD[-YYYY]` to store an explicitly supplied private
+birthday and `/agenda` to combine birthdays, reminders, cached OAuth calendar
+events, and sourced holidays. New users receive at most one casual proactive
+message daily by default. Google Calendar and Gmail connections request
+read-only scopes unless a separate write workflow is explicitly started, and
+refresh tokens require the operating-system credential store.
+
+Projects must be explicitly enrolled before bounded background health checks.
+Email sends, calendar writes, account submissions, code pushes, and pull-request
+creation require a complete preview followed by fresh single-use approval.
+Curie does not merge pull requests, deploy, alter branch protection, solve
+CAPTCHAs, accept terms, invent identity details, or reuse credentials.
 
 ### Code Repository Integrations
 
@@ -646,17 +857,23 @@ Copy `.env.example` to `.env` and configure these variables.
 | `HISTORY_SUMMARISE_THRESHOLD` | `20` | Compress history after this many turns |
 | `HISTORY_KEEP_RECENT` | `6` | Verbatim recent turns to keep after summarisation |
 | `PROJECTS_ROOT` | *(none)* | Root directory for project management |
+| `CURIE_WORKSPACE_ROOT` | project directory | Filesystem boundary for master actions |
+| `CURIE_PROJECTS_ROOT` | `./projects` | Root for isolated user project sandboxes |
 | `SYSTEMD_SERVICE_NAME` | *(none)* | Systemd service name for self-update restarts |
 
 ---
 
 ## 🏗️ Architecture Overview
 
+The runtime uses typed tools and explicit service boundaries. See the
+[Curie Enhancement Roadmap](docs/ENHANCEMENT_ROADMAP.md) for future accuracy,
+relationship-quality, security, and performance work.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     MESSAGING PLATFORMS                      │
-│   Telegram   │   Discord   │   WhatsApp   │   REST/WS API   │
-└──────────────┴─────────────┴──────────────┴─────────────────┘
+│ Telegram │ Discord │ WhatsApp │ Slack │ REST/WS API        │
+└──────────┴─────────┴──────────┴───────┴────────────────────┘
                               │
                     ┌─────────▼──────────┐
                     │   ChatWorkflow     │  ← central message router
@@ -683,13 +900,13 @@ Copy `.env.example` to `.env` and configure these variables.
 
 ## 📁 Project Structure
 
-See [directory_structure.md](docs/directory_structure.md) for a full file listing.
-
 ```
 curie-ai/
 ├── agent/                  # Core agent logic
 │   ├── chat_workflow.py    # Unified message processing pipeline
-│   ├── core.py             # Agent class, conversation handling
+│   ├── chat_workflow.py    # Authoritative conversation workflow
+│   ├── orchestration/      # Session, routing, model, learning services
+│   ├── tooling/            # Typed executable capability registry
 │   └── skills/             # Skill modules (scheduler, coding, trips, etc.)
 ├── connectors/             # Platform integrations
 │   ├── telegram.py
@@ -724,19 +941,25 @@ curie-ai/
 
 | Guide | Description |
 |---|---|
-| [Quick Start](docs/QUICK_START.md) | Detailed ~10-minute setup walkthrough |
-| [Multi-Platform Guide](docs/MULTI_PLATFORM_GUIDE.md) | Platform-specific setup and voice configuration |
-| [Advanced Coding Features](docs/ADVANCED_CODING_FEATURES.md) | Pair programming, bug detection, performance analysis |
-| [Coding Modules Guide](docs/CODING_MODULES_GUIDE.md) | Code review, PR management, self-update |
-| [Troubleshooting Guide](docs/TROUBLESHOOTING.md) | Common errors and fixes |
-| [Quick Reference](docs/QUICK_REFERENCE.md) | Commands, API usage, and developer integration |
-| [Feature Roadmap](docs/FEATURE_ROADMAP.md) | Planned features with implementation details |
-| [PM2 Setup](docs/PM2_SETUP.md) | Production process management |
-| [Migration Guide](docs/MIGRATION_GUIDE.md) | Upgrading between versions |
+| [Enhancement Roadmap](docs/ENHANCEMENT_ROADMAP.md) | Canonical phased roadmap for capability, friendship, accuracy, and safety |
+| [Cache Policy](docs/CACHE_POLICY.md) | Required scope, lifetime, and sensitivity rules for caches |
+| [Environment Sync](docs/ENV_SYNC.md) | Safely reconcile `.env` with `.env.example` |
+| [Incident Response](docs/INCIDENT_RESPONSE.md) | Response procedures for credentials, data, models, and tasks |
+| [Contributing](docs/CONTRIBUTING.md) | Development and contribution workflow |
+| [Code of Conduct](docs/CODE_OF_CONDUCT.md) | Community participation standards |
 
 ---
 
 ## 🛠️ Development
+
+Captured model responses can be checked against the conversation quality suite:
+
+```bash
+python -m evaluation.runner path/to/responses.json
+```
+
+The response file is a JSON object keyed by scenario ID. Quality and latency
+budgets live in `evaluation/scenarios.json`.
 
 ```bash
 make test          # Run all tests

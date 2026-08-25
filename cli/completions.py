@@ -30,7 +30,7 @@ _curie_completions() {
         cword=$COMP_CWORD
     }
 
-    local top_commands="start stop restart status metrics tasks agent doctor service logs onboard channel cron memory auth completions"
+    local top_commands="start stop restart status metrics dashboard tasks agent doctor service logs livelogs onboard channel cron memory auth tools completions"
 
     if [ $cword -eq 1 ]; then
         COMPREPLY=($(compgen -W "$top_commands" -- "$cur"))
@@ -41,7 +41,7 @@ _curie_completions() {
         start|restart)
             COMPREPLY=($(compgen -W "--api --telegram --discord --all" -- "$cur"))
             ;;
-        metrics)
+        metrics|dashboard)
             COMPREPLY=($(compgen -W "--once --interval" -- "$cur"))
             ;;
         tasks)
@@ -53,11 +53,17 @@ _curie_completions() {
         doctor)
             COMPREPLY=($(compgen -W "--verbose" -- "$cur"))
             ;;
+        tools)
+            COMPREPLY=($(compgen -W "--available --diagnostics --category --tag" -- "$cur"))
+            ;;
         service)
             COMPREPLY=($(compgen -W "install start stop restart status" -- "$cur"))
             ;;
         logs)
             COMPREPLY=($(compgen -W "-n --lines -f --follow" -- "$cur"))
+            ;;
+        livelogs)
+            COMPREPLY=($(compgen -W "-n --lines --instance --level --interval" -- "$cur"))
             ;;
         channel)
             COMPREPLY=($(compgen -W "list doctor bind-telegram bind-discord" -- "$cur"))
@@ -111,16 +117,19 @@ _curie() {
                 'restart:Restart the daemon'
                 'status:Show daemon/agent status'
                 'metrics:Live system metrics dashboard'
+                'dashboard:Live instances, personalities, models, and resources'
                 'tasks:Show task and sub-agent breakdown'
                 'agent:Chat with Curie (interactive or single message)'
                 'doctor:Run system diagnostics'
                 'service:Manage Curie as an OS service'
                 'logs:Show / follow daemon log output'
+                'livelogs:Follow combined logs from all instances'
                 'onboard:Guided first-time setup wizard'
                 'channel:Manage chat channel connectors'
                 'cron:Manage scheduled prompt jobs'
                 'memory:Inspect and manage user memory'
                 'auth:Manage LLM provider credentials'
+                'tools:List executable capabilities and diagnostics'
                 'completions:Generate shell completion scripts'
             )
             _describe 'curie commands' commands
@@ -134,7 +143,7 @@ _curie() {
                         '--discord[Enable Discord connector]' \\
                         '--all[Enable all connectors]'
                     ;;
-                metrics)
+                metrics|dashboard)
                     _arguments \\
                         '--once[One-shot snapshot]' \\
                         '--interval[Refresh interval in seconds]:seconds:'
@@ -154,6 +163,13 @@ _curie() {
                 doctor)
                     _arguments '--verbose[Show extra detail]'
                     ;;
+                tools)
+                    _arguments \
+                        '--available[Only available capabilities]' \
+                        '--diagnostics[Show reachability diagnostics]' \
+                        '--category[Filter category]:category:(skill connector service canvas)' \
+                        '--tag[Filter tag]:tag:'
+                    ;;
                 service)
                     local actions=(install start stop restart status)
                     _describe 'service actions' actions
@@ -164,6 +180,14 @@ _curie() {
                         '--lines[Number of lines]:n:' \\
                         '-f[Follow log output]' \\
                         '--follow[Follow log output]'
+                    ;;
+                livelogs)
+                    _arguments \
+                        '-n[Number of retained lines]:n:' \
+                        '--lines[Number of retained lines]:n:' \
+                        '--instance[Instance name or all]:instance:' \
+                        '--level[Severity filter]:level:(all debug info warning error)' \
+                        '--interval[Refresh interval]:seconds:'
                     ;;
                 channel)
                     local ch_cmds=(list doctor bind-telegram bind-discord)
@@ -200,23 +224,26 @@ _FISH_COMPLETION = """\
 # Curie AI – fish completion
 # Install: curie completions fish > ~/.config/fish/completions/curie.fish
 
-set -l curie_commands start stop restart status metrics tasks agent doctor service logs onboard channel cron memory auth completions
+set -l curie_commands start stop restart status metrics dashboard tasks agent doctor service logs livelogs onboard channel cron memory auth tools completions
 
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a start       -d 'Start Curie daemon'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a stop        -d 'Stop the daemon'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a restart     -d 'Restart the daemon'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a status      -d 'Show daemon status'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a metrics     -d 'Live system metrics'
+complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a dashboard   -d 'Live instance and model dashboard'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a tasks       -d 'Task / sub-agent view'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a agent       -d 'Chat with Curie'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a doctor      -d 'System diagnostics'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a service     -d 'OS service management'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a logs        -d 'Show daemon logs'
+complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a livelogs    -d 'Follow all instance logs'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a onboard     -d 'First-time setup wizard'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a channel     -d 'Manage channels'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a cron        -d 'Scheduled prompt jobs'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a memory      -d 'Inspect user memory'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a auth        -d 'LLM provider auth'
+complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a tools       -d 'Capability diagnostics'
 complete -c curie -f -n "not __fish_seen_subcommand_from $curie_commands" -a completions -d 'Shell completions'
 
 # start / restart flags
@@ -229,6 +256,12 @@ end
 
 # service subcommands
 complete -c curie -f -n "__fish_seen_subcommand_from service" -a "install start stop restart status"
+
+# live log flags
+complete -c curie -f -n "__fish_seen_subcommand_from livelogs" -s n -l lines -d 'Number of retained lines'
+complete -c curie -f -n "__fish_seen_subcommand_from livelogs" -l instance -d 'Instance name or all'
+complete -c curie -f -n "__fish_seen_subcommand_from livelogs" -l level -a "all debug info warning error" -d 'Severity filter'
+complete -c curie -f -n "__fish_seen_subcommand_from livelogs" -l interval -d 'Refresh interval'
 
 # channel subcommands
 complete -c curie -f -n "__fish_seen_subcommand_from channel" -a "list doctor bind-telegram bind-discord"
@@ -245,6 +278,12 @@ complete -c curie -f -n "__fish_seen_subcommand_from auth" -l provider -a "opena
 
 # completions subcommands
 complete -c curie -f -n "__fish_seen_subcommand_from completions" -a "bash zsh fish"
+
+# capability flags
+complete -c curie -f -n "__fish_seen_subcommand_from tools" -l available -d 'Only available capabilities'
+complete -c curie -f -n "__fish_seen_subcommand_from tools" -l diagnostics -d 'Show reachability diagnostics'
+complete -c curie -f -n "__fish_seen_subcommand_from tools" -l category -a "skill connector service canvas" -d 'Filter category'
+complete -c curie -f -n "__fish_seen_subcommand_from tools" -l tag -d 'Filter tag'
 """
 
 

@@ -14,6 +14,7 @@ from fastapi import (
     WebSocketDisconnect,
     UploadFile,
     File,
+    Form,
 )
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field
@@ -193,7 +194,7 @@ async def chat_api(req: MessageRequest):
             # Generate voice file with server-generated UUID to prevent path traversal
             # Use a separate safe server-side filename instead of client-provided message_id
             voice_file_id = str(uuid.uuid4())
-            voice_filename = f"voice_{voice_file_id}.mp3"
+            voice_filename = f"voice_{voice_file_id}.ogg"
             voice_path = f"/tmp/{voice_filename}"
 
             success = await text_to_speech(result["text"], voice_path, voice_config)
@@ -218,11 +219,22 @@ async def chat_api(req: MessageRequest):
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    from services.runtime_health import capability_health
+
+    health = capability_health(workflow_ready=_workflow is not None)
     return {
-        "status": "healthy",
+        **health,
         "workflow_initialized": _workflow is not None,
         "cache_stats": _workflow.get_cache_stats() if _workflow else {},
     }
+
+
+@app.get("/capabilities")
+async def capabilities(include_unavailable: bool = False):
+    """Return versioned, runtime-verified capability metadata."""
+    from contracts import discover_capabilities
+
+    return discover_capabilities(include_unavailable=include_unavailable)
 
 
 @app.get("/reminders")
@@ -426,6 +438,63 @@ async def transcribe_audio_api(
     finally:
         # Clean up temporary file regardless of success or failure
         if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+@app.post("/analyze-attachment")
+async def analyze_attachment_api(
+    file: UploadFile = File(...),
+    user_id: str = Form(...),
+    request: str = Form(""),
+    page_start: Optional[int] = Form(None),
+    page_end: Optional[int] = Form(None),
+):
+    """Analyze an image, readable document, or voice note through Curie's chat workflow."""
+    if not _workflow:
+        raise HTTPException(status_code=500, detail="System not initialized")
+    suffix = os.path.splitext(file.filename or "attachment")[1]
+    temp_path = os.path.join("/tmp", f"curie_media_{uuid.uuid4()}{suffix}")
+    total_size = 0
+    try:
+        with open(temp_path, "wb") as output:
+            while chunk := await file.read(8192):
+                total_size += len(chunk)
+                if total_size > 25 * 1024 * 1024:
+                    raise HTTPException(
+                        status_code=413, detail="File too large. Maximum size is 25MB"
+                    )
+                output.write(chunk)
+        from services.media_ingestion import prepare_attachment_message
+
+        text = await prepare_attachment_message(
+            temp_path,
+            file.filename or "attachment",
+            request,
+            content_type=file.content_type or "",
+            persona=_workflow.persona,
+            source="api_upload",
+            page_start=page_start,
+            page_end=page_end,
+        )
+        internal_id = get_internal_id(user_id)
+        result = await _workflow.process_message(
+            {
+                "platform": "api",
+                "external_user_id": user_id,
+                "external_chat_id": user_id,
+                "message_id": str(uuid.uuid4()),
+                "text": text,
+                "timestamp": datetime.datetime.utcnow(),
+                "internal_id": internal_id,
+            }
+        )
+        return result
+    except HTTPException:
+        raise
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        if os.path.exists(temp_path):
             os.remove(temp_path)
 
 

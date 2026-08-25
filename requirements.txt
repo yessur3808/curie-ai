@@ -18,6 +18,7 @@ black==25.1.0
 flake8>=7.0.0
 pre-commit>=3.0.0
 pytest==8.3.4
+pytest-asyncio==0.25.3
 
 python-weather==2.1.0
 
@@ -44,3 +45,5 @@ pytz==2024.2
 # CLI dashboard and system metrics
 psutil>=5.9.0
 rich>=13.0.0
+imageio-ffmpeg==0.6.0
+piper-tts==1.7.0

@@ -46,7 +46,8 @@ llm_config = {
 }
 
 # Cache for loaded llama models
-llama_models_cache = {}
+llama_models_cache = OrderedDict()
+_model_inference_locks: dict[str, Lock] = {}
 
 # Response cache: {prompt_hash: (response, timestamp)}
 # TTL: 300 seconds (5 minutes), max_size: 100 entries
@@ -58,7 +59,7 @@ _response_cache_hits = 0
 _response_cache_misses = 0
 
 # Memory management configuration
-MAX_MODELS_IN_CACHE = 1  # Only keep one model in memory at a time
+MAX_MODELS_IN_CACHE = max(1, int(os.getenv("LLM_MAX_LOADED_MODELS", "2")))
 _last_gc_time = 0
 _gc_interval = 300  # Run garbage collection every 5 minutes
 
@@ -70,6 +71,19 @@ _model_lazy_lock = Lock()  # serialise concurrent lazy-load attempts in ask_llm(
 _background_preload_started = False  # True only when start_background_preload() is used
 # How long ask_llm() waits for a background preload to finish before giving up.
 _PRELOAD_WAIT_TIMEOUT = 300  # seconds
+
+
+def reset_runtime_state(*, unload_models: bool = False) -> None:
+    """Reset mutable inference state for tests and controlled lifecycle restarts."""
+    global _response_cache_hits, _response_cache_misses, _last_gc_time
+    with _response_cache_lock:
+        _response_cache.clear()
+        _response_cache_hits = 0
+        _response_cache_misses = 0
+    _model_inference_locks.clear()
+    if unload_models:
+        llama_models_cache.clear()
+    _last_gc_time = 0
 
 
 def _trigger_garbage_collection():
@@ -84,16 +98,14 @@ def _trigger_garbage_collection():
 
 def _cleanup_excess_models():
     """
-    Keep only the most recently used model in cache.
+    Keep only the most recently used models in cache.
     Prevents unbounded memory growth from loading multiple models.
     """
     global llama_models_cache
     if len(llama_models_cache) > MAX_MODELS_IN_CACHE:
-        # Keep only the first (most recent) model
-        excess_models = list(llama_models_cache.keys())[1:]
-        for model_name in excess_models:
+        while len(llama_models_cache) > MAX_MODELS_IN_CACHE:
+            model_name, _ = llama_models_cache.popitem(last=False)
             logger.info(f"Unloading excess model from cache: {model_name}")
-            del llama_models_cache[model_name]
         gc.collect()
         _trigger_garbage_collection()
 
@@ -102,17 +114,31 @@ class ResponseCache:
     """Simple TTL-based cache for LLM responses."""
 
     @staticmethod
-    def _make_key(prompt: str, temperature: float, max_tokens: int) -> str:
+    def _make_key(
+        prompt: str,
+        temperature: float,
+        max_tokens: int,
+        model_name: str = "",
+        owner_scope: str = "public",
+    ) -> str:
         """Create a hash key from prompt + parameters."""
-        key_str = f"{prompt}||{temperature}||{max_tokens}"
-        return hashlib.md5(key_str.encode()).hexdigest()
+        key_str = f"{owner_scope}||{model_name}||{prompt}||{temperature}||{max_tokens}"
+        return hashlib.sha256(key_str.encode()).hexdigest()
 
     @staticmethod
-    def get(prompt: str, temperature: float, max_tokens: int) -> str | None:
+    def get(
+        prompt: str,
+        temperature: float,
+        max_tokens: int,
+        model_name: str = "",
+        owner_scope: str = "public",
+    ) -> str | None:
         """Get cached response if available and not expired."""
         global _response_cache_hits, _response_cache_misses
 
-        key = ResponseCache._make_key(prompt, temperature, max_tokens)
+        key = ResponseCache._make_key(
+            prompt, temperature, max_tokens, model_name, owner_scope
+        )
         with _response_cache_lock:
             if key in _response_cache:
                 response, timestamp = _response_cache[key]
@@ -127,9 +153,18 @@ class ResponseCache:
         return None
 
     @staticmethod
-    def set(prompt: str, temperature: float, max_tokens: int, response: str):
+    def set(
+        prompt: str,
+        temperature: float,
+        max_tokens: int,
+        response: str,
+        model_name: str = "",
+        owner_scope: str = "public",
+    ):
         """Cache a response."""
-        key = ResponseCache._make_key(prompt, temperature, max_tokens)
+        key = ResponseCache._make_key(
+            prompt, temperature, max_tokens, model_name, owner_scope
+        )
         with _response_cache_lock:
             _response_cache[key] = (response, time.time())
             # FIFO eviction when exceeding max size
@@ -146,6 +181,12 @@ class ResponseCache:
             "misses": _response_cache_misses,
             "hit_rate_percent": round(hit_rate, 1),
             "size": len(_response_cache),
+            "name": "model_responses",
+            "owner_scope": "user for conversation; public only for explicitly shared calls",
+            "ttl_seconds": _response_cache_ttl,
+            "max_size": _response_cache_max_size,
+            "invalidation_event": "TTL expiry, model change, or runtime reset",
+            "sensitivity": "personal",
         }
 
 
@@ -222,6 +263,12 @@ def _load_model_with_fallback(
                 logger.info(
                     "Successfully loaded model %s using %s", model_name, backend
                 )
+                try:
+                    from llm.inference_service import get_inference_service
+
+                    get_inference_service().note_model_reload()
+                except Exception:
+                    pass
                 return model, model_name
             except Exception as e:
                 logger.error("Failed to load %s using %s: %s", model_name, backend, e)
@@ -350,6 +397,46 @@ def start_background_preload() -> Thread:
 _QUALITY_MIN_WORDS = 4
 
 
+def _apply_generation_controls(prompt: str, model_name: str = "") -> str:
+    """Apply model controls that keep private reasoning out of responses."""
+    # /no_think is a Qwen-specific switch. Other families use their native
+    # chat templates and output-channel handling instead.
+    if model_name and "qwen" not in model_name.lower():
+        return prompt
+    # The 2507 Instruct checkpoint is natively non-thinking; adding the Qwen3
+    # control phrase would become ordinary user text rather than a control.
+    if "instruct-2507" in model_name.lower():
+        return prompt
+    disable_thinking = os.getenv("LLM_DISABLE_THINKING", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if disable_thinking and "/no_think" not in prompt:
+        stripped = prompt.rstrip()
+        # The control belongs to the user/instruction context, before the
+        # assistant generation marker. Appending it after ``Assistant:`` makes
+        # it look like assistant output and can cause an immediate empty stop.
+        if stripped.endswith("Assistant:"):
+            return f"{stripped[:-len('Assistant:')].rstrip()}\n/no_think\nAssistant:"
+        return f"{stripped}\n/no_think"
+    return prompt
+
+
+def _prompt_to_chat_messages(prompt: str) -> list[dict[str, str]]:
+    """Convert Curie's tagged prompt into messages for the model chat template."""
+    marker = "\nUser:"
+    if marker in prompt:
+        context, user_turn = prompt.rsplit(marker, 1)
+        user_turn = re.sub(r"\nAssistant:\s*$", "", user_turn).strip()
+        context = re.sub(r"^System:\s*", "", context.strip())
+        return [
+            {"role": "system", "content": context},
+            {"role": "user", "content": user_turn},
+        ]
+    return [{"role": "user", "content": prompt}]
+
+
 def _response_quality_ok(response: str) -> bool:
     """Return True when *response* passes basic quality checks.
 
@@ -375,7 +462,14 @@ def _response_quality_ok(response: str) -> bool:
     return True
 
 
-def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
+def ask_llm(
+    prompt,
+    model_name=None,
+    temperature=0.7,
+    max_tokens=None,
+    role=None,
+    owner_scope=None,
+):
     """Query the local llama.cpp model.
 
     Token budget
@@ -412,7 +506,7 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
         try:
             from llm.accelerators import ask_npu, should_use_npu
 
-            if should_use_npu(prompt):
+            if str(role).lower() == "npu" or should_use_npu(prompt):
                 npu_response = ask_npu(prompt, temperature, max_tokens)
                 if npu_response:
                     return npu_response
@@ -422,16 +516,34 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
         if Llama is None:
             return "[Error: llama_cpp not installed]"
 
-        # Check response cache first — use sentinel 0 for "dynamic" max_tokens key
-        _cache_key_tokens = max_tokens if max_tokens is not None else 0
-        cached_response = ResponseCache.get(prompt, temperature, _cache_key_tokens)
-        if cached_response:
-            return cached_response
-
         # Decide which model filename to use
-        preferred_model = (
-            model_name or llm_config.get("model_path") or DEFAULT_LLAMA_MODEL
+        role_model = (
+            os.getenv(f"LLM_{str(role).upper()}_MODEL", "")
+            if role and str(role).lower() != "npu"
+            else ""
         )
+        preferred_model = (
+            model_name
+            or role_model
+            or os.getenv("LLM_GENERAL_MODEL", "")
+            or llm_config.get("model_path")
+            or DEFAULT_LLAMA_MODEL
+        )
+        prompt = _apply_generation_controls(prompt, preferred_model)
+
+        # Model identity is part of the cache key: parallel specialists must
+        # never receive an answer generated by a different local model.
+        _cache_key_tokens = max_tokens if max_tokens is not None else 0
+        if owner_scope is not None:
+            cached_response = ResponseCache.get(
+                prompt,
+                temperature,
+                _cache_key_tokens,
+                preferred_model,
+                str(owner_scope),
+            )
+            if cached_response:
+                return cached_response
 
         # Try to use cached model first
         llama_model = None
@@ -447,6 +559,7 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
         if preferred_model in llama_models_cache:
             selected_model = preferred_model
             llama_model = llama_models_cache[preferred_model]
+            llama_models_cache.move_to_end(preferred_model)
         else:
             # Only fall back to a cached model if the requested model file
             # does not exist on disk; otherwise we must load the right model.
@@ -469,7 +582,8 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                 if preferred_model in llama_models_cache:
                     llama_model = llama_models_cache[preferred_model]
                     selected_model = preferred_model
-                else:
+                    llama_models_cache.move_to_end(preferred_model)
+                elif not os.path.exists(os.path.join("models", preferred_model)):
                     for cached_name in llama_models_cache:
                         llama_model = llama_models_cache[cached_name]
                         selected_model = cached_name
@@ -484,6 +598,7 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                     if model is None or model_name_loaded is None:
                         return "[Error: Failed to load any available model]"
                     llama_models_cache[model_name_loaded] = model
+                    _model_inference_locks.setdefault(model_name_loaded, Lock())
                     llama_model = model
                     selected_model = model_name_loaded
                     # Clean up excess models to prevent memory bloat
@@ -522,25 +637,44 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                 effective_max_tokens = min(max_tokens, FALLBACK_MAX_TOKENS)
 
         def _run_inference(temp: float) -> str:
-            result = llama_model(
-                prompt,
-                max_tokens=effective_max_tokens,
-                stop=["</s>", "User:", "user:", "\nUser:", "\nuser:"],
-                temperature=temp,
-                repeat_penalty=1.1,
-                top_p=0.95,
-                top_k=40,
+            use_chat_template = os.getenv("LLM_USE_CHAT_TEMPLATE", "true").lower() in (
+                "1",
+                "true",
+                "yes",
             )
-            if isinstance(result, dict) and "choices" in result:
-                raw = result["choices"][0]["text"].strip()
-            elif hasattr(result, "choices"):
-                raw = result.choices[0].text.strip()
+            if use_chat_template and hasattr(llama_model, "create_chat_completion"):
+                result = llama_model.create_chat_completion(
+                    messages=_prompt_to_chat_messages(prompt),
+                    max_tokens=effective_max_tokens,
+                    temperature=temp,
+                    repeat_penalty=1.1,
+                    top_p=0.95,
+                    top_k=40,
+                )
+                raw = result["choices"][0]["message"]["content"] or ""
+                raw = raw.strip()
             else:
-                raw = str(result)
+                result = llama_model(
+                    prompt,
+                    max_tokens=effective_max_tokens,
+                    stop=["</s>", "User:", "user:", "\nUser:", "\nuser:"],
+                    temperature=temp,
+                    repeat_penalty=1.1,
+                    top_p=0.95,
+                    top_k=40,
+                )
+                if isinstance(result, dict) and "choices" in result:
+                    raw = result["choices"][0]["text"].strip()
+                elif hasattr(result, "choices"):
+                    raw = result.choices[0].text.strip()
+                else:
+                    raw = str(result)
             return _sanity_filter_response(raw)
 
         try:
-            response = _run_inference(temperature)
+            inference_lock = _model_inference_locks.setdefault(selected_model, Lock())
+            with inference_lock:
+                response = _run_inference(temperature)
 
             # Quality retry: if the first attempt produces a very short or
             # apology-only response, retry once with a slightly higher temperature
@@ -551,12 +685,21 @@ def ask_llm(prompt, model_name=None, temperature=0.7, max_tokens=None):
                     len(response.split()),
                 )
                 retry_temp = min(temperature + 0.2, 1.0)
-                response2 = _run_inference(retry_temp)
+                with inference_lock:
+                    response2 = _run_inference(retry_temp)
                 if _response_quality_ok(response2) or len(response2) > len(response):
                     response = response2
 
             # Cache the final response
-            ResponseCache.set(prompt, temperature, _cache_key_tokens, response)
+            if owner_scope is not None:
+                ResponseCache.set(
+                    prompt,
+                    temperature,
+                    _cache_key_tokens,
+                    response,
+                    selected_model,
+                    str(owner_scope),
+                )
 
             return response
         except Exception as e:
@@ -579,6 +722,9 @@ def _sanity_filter_response(response: str) -> str:
     - Validates minimum coherence
     - Filters gibberish
     """
+    # Direct specialist and ensemble callers bypass connector sanitation, so
+    # enforce the hidden-reasoning boundary at the model manager too.
+    response = clean_assistant_reply(response)
     if not response or len(response.strip()) == 0:
         return "I'm having trouble formulating a response. Could you rephrase that?"
 
@@ -620,6 +766,17 @@ def clean_assistant_reply(reply: str) -> str:
     """
     # Remove leading speaker tag (Curie:, Assistant:, etc.) if present
     reply = reply.strip()
+
+    # GPT-OSS emits Harmony channels. Only the final channel is user-visible.
+    # Never fall back to returning an analysis channel when generation ends
+    # before the final marker, since that would expose private reasoning.
+    if "<|channel|>" in reply or "<|message|>" in reply:
+        final = re.search(
+            r"<\|channel\|>final<\|message\|>(.*?)(?=<\|(?:channel|end)\|>|\Z)",
+            reply,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        reply = final.group(1).strip() if final else ""
 
     # Build speaker tag pattern including custom persona name from environment
     speaker_tags = ["Curie", "Assistant", "AI", "System"]
@@ -674,7 +831,7 @@ def clean_assistant_reply(reply: str) -> str:
         r"<\|im_start\|>.*?<\|im_end\|>",  # ChatML format
         r"\[SYSTEM\].*?\[/SYSTEM\]",  # [SYSTEM]...[/SYSTEM]
         r"<<SYS>>.*?<</SYS>>",  # <<SYS>>...</SYS>>
-        r"(?m-s)^(?:<s>.*?</s>)$",  # Special tokens on their own line
+        r"(?m:^(?:<s>[^\n]*?</s>)$)",  # Special tokens on their own line
         r"###\s*Instruction:.*?###",  # ### Instruction: ... ###
         r"###\s*System:.*?###",  # ### System: ... ###
     ]

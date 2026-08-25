@@ -23,34 +23,13 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-# ---------------------------------------------------------------------------
-# Stub heavyweight dependencies before any application module is imported.
-# Mirrors the pattern used by test_connectors.py / test_chat_workflow.py.
-# ---------------------------------------------------------------------------
+# Only optional third-party SDKs are stubbed. Application packages are real.
 for _mod in (
-    "psycopg2",
-    "psycopg2.extras",
-    "psycopg2.extensions",
-    "pymongo",
-    "pymongo.collection",
-    "pymongo.errors",
     "telegram",
     "telegram.ext",
 ):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
-
-for _mod in (
-    "memory",
-    "memory.session_store",
-    "memory.database",
-    "memory.users",
-    "memory.conversations",
-    "memory.scraper_patterns",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-
 
 # ─── cli.canvas_webview ───────────────────────────────────────────────────────
 
@@ -85,6 +64,7 @@ class TestCanvasWebview:
         finally:
             cv._TASKS_FILE = orig
 
+    @pytest.mark.network
     def test_canvas_server_serves_html(self):
         """Smoke-test: start the canvas server and fetch the root page."""
         import cli.canvas_webview as cv

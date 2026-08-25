@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from agent.skills.find_info import is_safe_url
 
+pytestmark = pytest.mark.security
+
 
 @pytest.mark.asyncio
 async def test_block_localhost():

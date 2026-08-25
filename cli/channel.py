@@ -168,7 +168,6 @@ def _api_identity() -> str:
 
 def _channel_status(ch: dict) -> dict:
     """Return a full status dict for a single channel config."""
-    _load_dotenv()
     token = os.getenv(ch["token_env"]) if ch["token_env"] else None
     run_flag = os.getenv(ch["run_env"], "").lower()
     enabled = run_flag in ("1", "true", "yes") or (
@@ -369,5 +368,4 @@ def cmd_channel_bind(platform: str, token: str) -> int:
         _p(f"   Restart Curie to activate: [bold]curie restart[/bold]")
         return 0
     return 1
-
 

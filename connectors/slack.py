@@ -24,8 +24,13 @@ import datetime
 import logging
 import os
 import threading
+import tempfile
 import uuid
+from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
+
+import requests
 
 from dotenv import load_dotenv
 
@@ -87,6 +92,49 @@ def _get_internal_id(slack_user_id: str) -> str:
     )
 
 
+def _download_slack_file(file_info: dict, bot_token: str) -> tuple[str, str, str]:
+    """Download one authenticated Slack file with strict host and size bounds."""
+    url = file_info.get("url_private_download") or file_info.get("url_private") or ""
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or not (
+            parsed.hostname == "slack.com" or parsed.hostname.endswith(".slack.com")
+        )
+    ):
+        raise ValueError("Slack returned an invalid private file URL")
+    max_bytes = int(os.getenv("SLACK_MAX_ATTACHMENT_BYTES", str(20 * 1024 * 1024)))
+    if int(file_info.get("size") or 0) > max_bytes:
+        raise ValueError(
+            "That Slack attachment is too large. The current limit is 20 MB."
+        )
+    filename = file_info.get("name") or f"slack_{file_info.get('id', uuid.uuid4())}"
+    fd, path = tempfile.mkstemp(prefix="curie_slack_", suffix=Path(filename).suffix)
+    os.close(fd)
+    total = 0
+    try:
+        with requests.get(
+            url,
+            headers={"Authorization": f"Bearer {bot_token}"},
+            stream=True,
+            timeout=30,
+        ) as response:
+            response.raise_for_status()
+            with open(path, "wb") as output:
+                for chunk in response.iter_content(64 * 1024):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError(
+                            "That Slack attachment is too large. The current limit is 20 MB."
+                        )
+                    output.write(chunk)
+        return path, filename, file_info.get("mimetype", "")
+    except Exception:
+        Path(path).unlink(missing_ok=True)
+        raise
+
+
 def start_slack_bot(workflow: ChatWorkflow) -> None:
     """Start the Slack bot using Socket Mode with the shared ChatWorkflow."""
     global _workflow
@@ -128,12 +176,40 @@ def start_slack_bot(workflow: ChatWorkflow) -> None:
         slack_user_id = event.get("user", "unknown")
         channel_id = event.get("channel", slack_user_id)
         ts = event.get("ts", "")
-        text = event.get("text", "")
+        text = event.get("text", "") or ""
+        files = event.get("files") or []
 
-        if not text:
+        if not text and not files:
             return
 
         internal_id = _get_internal_id(slack_user_id)
+        if files:
+            say("I’m checking the attachment now, mon ami.")
+        for file_info in files[:5]:
+            media_path = None
+            try:
+                media_path, filename, content_type = _download_slack_file(
+                    file_info, bot_token
+                )
+                from services.media_ingestion import prepare_attachment_message
+
+                text = _run_async(
+                    prepare_attachment_message(
+                        media_path,
+                        filename,
+                        text,
+                        content_type=content_type,
+                        persona=_workflow.persona,
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Slack attachment processing failed: %s", exc)
+                say(str(exc))
+                return
+            finally:
+                if media_path:
+                    Path(media_path).unlink(missing_ok=True)
+
         normalized_input = {
             "platform": "slack",
             "external_user_id": slack_user_id,
@@ -147,7 +223,28 @@ def start_slack_bot(workflow: ChatWorkflow) -> None:
         # Dispatch to the persistent shared event loop so a new loop is not
         # created for every message (Bolt sync handlers run in worker threads).
         result = _run_async(_workflow.process_message(normalized_input))
-        say(result.get("text", "[Error: No response]"))
+        response_text = result.get("text", "[Error: No response]")
+        try:
+            from services.voice_delivery import synthesize_reply, voice_replies_enabled
+
+            if voice_replies_enabled(internal_id, "slack"):
+                voice_path = _run_async(
+                    synthesize_reply(response_text, _workflow.persona, internal_id)
+                )
+                if voice_path:
+                    try:
+                        slack_app.client.files_upload_v2(
+                            channel=channel_id,
+                            file=voice_path,
+                            filename=os.path.basename(voice_path),
+                            title="Curie voice reply",
+                        )
+                        return
+                    finally:
+                        Path(voice_path).unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning("Slack voice reply failed; sending text: %s", exc)
+        say(response_text)
 
     # ── App mention handler (@Curie …) ───────────────────────────────────────
 

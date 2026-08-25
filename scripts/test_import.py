@@ -11,7 +11,11 @@ try:
     print("✅ dotenv imported")
     load_dotenv()
     print(f"✅ .env loaded")
-    print(f"TELEGRAM_BOT_TOKEN: {os.getenv('TELEGRAM_BOT_TOKEN', 'NOT SET')[:20]}...")
+    print(
+        "TELEGRAM_BOT_TOKEN: configured"
+        if os.getenv("TELEGRAM_BOT_TOKEN")
+        else "TELEGRAM_BOT_TOKEN: not configured"
+    )
     print(f"RUN_TELEGRAM: {os.getenv('RUN_TELEGRAM')}")
     print(f"RUN_API: {os.getenv('RUN_API')}")
 except Exception as e:

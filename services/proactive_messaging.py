@@ -11,17 +11,56 @@ This service:
 
 import asyncio
 import logging
+import inspect
 import os
 import random
+import re
 import threading
-import time
 from datetime import datetime, timezone
 from typing import Dict
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from memory import UserManager, ConversationManager
-from llm import manager
+from memory import UserManager
+from memory.session_store import get_session_manager
+from services.proactive_policy import delivery_allowed, delivery_updates
 
 logger = logging.getLogger(__name__)
+
+_SENSORY_CLAIM = re.compile(
+    r"\b(?:i\s+(?:saw|noticed|watched|heard|felt)|today(?:'s)?\s+(?:sky|clouds?)|"
+    r"sky observation|cloud pattern|satellite imagery)\b",
+    re.I,
+)
+_WORD = re.compile(r"[a-z0-9]{3,}", re.I)
+_STOPWORDS = frozenset(
+    {
+        "about",
+        "again",
+        "another",
+        "could",
+        "from",
+        "have",
+        "help",
+        "like",
+        "make",
+        "prepare",
+        "share",
+        "that",
+        "their",
+        "them",
+        "this",
+        "today",
+        "want",
+        "with",
+        "would",
+        "your",
+    }
+)
+
+
+def _message_topic(message: str) -> str:
+    words = [word.casefold() for word in _WORD.findall(message) if word.casefold() not in _STOPWORDS]
+    return " ".join(words[:3]) or "general check-in"
 
 # ---------------------------------------------------------------------------
 # Platform column mappings — single source of truth used by both the reminder
@@ -44,6 +83,16 @@ _PLATFORM_QUERIES: dict = {
     platform: f"SELECT {col} FROM users WHERE internal_id = %s"
     for platform, col in _PLATFORM_TO_COL.items()
 }
+
+
+def _hour_in_quiet_window(hour: int, start: int, end: int) -> bool:
+    """Return whether *hour* is inside a possibly overnight quiet window."""
+    hour, start, end = hour % 24, start % 24, end % 24
+    if start == end:
+        return False
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
 
 
 def _resolve_contact_channels(facts: dict) -> dict:
@@ -86,29 +135,33 @@ class ProactiveMessagingService:
     # This limit should be sufficient for most deployments while preventing memory issues
     MAX_CONTACT_HISTORY = 1000
 
-    # Probability of sending a proactive message when interval is met (30%)
-    # This adds randomness to avoid predictable patterns
-    PROACTIVE_MESSAGE_PROBABILITY = 0.3
-
-    def __init__(self, agent, connectors: Dict = None):
+    def __init__(self, workflow, connectors: Dict = None):
         """
         Initialize the proactive messaging service.
 
         Args:
-            agent: The Agent instance with persona
+            workflow: The active ChatWorkflow used by all connectors
             connectors: Dict mapping platform names to connector instances
         """
-        self.agent = agent
+        self.workflow = workflow
         self.connectors = connectors or {}
         self.running = False
         self.thread = None
-        self.check_interval = 3600  # Check every hour
+        self.check_interval = max(
+            60, int(os.getenv("PROACTIVE_CHECK_INTERVAL", "3600"))
+        )
+        self.startup_delay = max(0, int(os.getenv("PROACTIVE_STARTUP_DELAY", "10")))
+        self.message_probability = min(
+            1.0, max(0.0, float(os.getenv("PROACTIVE_MESSAGE_PROBABILITY", "1.0")))
+        )
+        self._stop_event = threading.Event()
 
         # Tracking when we last messaged each user
         # Note: In production, this should be persisted to database
         # For now, using in-memory cache with size limit
         self.last_contact = {}
         self.last_contact_lock = threading.Lock()  # Thread-safe access
+        self._generation_reasons: dict[str, str] = {}
 
         # Cron job runner – started/stopped alongside this service
         self._cron_runner = None
@@ -122,6 +175,7 @@ class ProactiveMessagingService:
             return
 
         self.running = True
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run_service, daemon=True)
         self.thread.start()
         logger.info("✅ ProactiveMessagingService started")
@@ -130,9 +184,8 @@ class ProactiveMessagingService:
         try:
             from services.cron_runner import CronRunner  # noqa: PLC0415
 
-            workflow = getattr(self.agent, "workflow", self.agent)
             self._cron_runner = CronRunner(
-                workflow=workflow, connectors=self.connectors
+                workflow=self.workflow, connectors=self.connectors
             )
             self._cron_runner.start()
             logger.info("✅ CronRunner started")
@@ -142,6 +195,7 @@ class ProactiveMessagingService:
     def stop(self):
         """Stop the proactive messaging service."""
         self.running = False
+        self._stop_event.set()
         if self.thread:
             self.thread.join(timeout=5)
 
@@ -158,6 +212,9 @@ class ProactiveMessagingService:
         """Main service loop that runs in background thread."""
         logger.info("ProactiveMessagingService loop started")
 
+        if self._stop_event.wait(self.startup_delay):
+            return
+
         while self.running:
             try:
                 # Run async check in sync thread
@@ -165,8 +222,9 @@ class ProactiveMessagingService:
             except Exception as e:
                 logger.error(f"Error in proactive messaging loop: {e}", exc_info=True)
 
-            # Wait before next check
-            time.sleep(self.check_interval)
+            # Wait interruptibly so shutdown never blocks for a full interval.
+            if self._stop_event.wait(self.check_interval):
+                break
 
     async def _check_and_send_messages(self):
         """Check all users and send proactive messages / due reminders if appropriate."""
@@ -198,12 +256,12 @@ class ProactiveMessagingService:
     async def _deliver_due_reminders(self):
         """Check MongoDB for due reminders and deliver them to users."""
         try:
-            from memory.database import mongo_db
             from datetime import timezone as tz_module
+            from memory.repositories import get_repositories
 
             now = datetime.now(tz_module.utc)
-            col = mongo_db.reminders
-            due_docs = list(col.find({"fired": False, "due_at": {"$lte": now}}))
+            repositories = get_repositories()
+            due_docs = repositories.reminders.due(now)
 
             if not due_docs:
                 return
@@ -257,8 +315,6 @@ class ProactiveMessagingService:
                         ]
 
                     delivered = False
-                    from memory.database import get_pg_conn  # noqa: PLC0415
-
                     for attempt_platform in fallback_platforms:
                         connector = self.connectors.get(attempt_platform)
                         if not connector:
@@ -268,19 +324,11 @@ class ProactiveMessagingService:
                         if platform_col is None:
                             continue
 
-                        query = _PLATFORM_QUERIES[attempt_platform]
-                        external_user_ids: list = []
                         try:
-                            with get_pg_conn() as conn:
-                                cur = conn.cursor()
-                                cur.execute(query, (str(internal_id),))
-                                row = cur.fetchone()
-                                if row:
-                                    raw = row[platform_col]
-                                    if isinstance(raw, list):
-                                        external_user_ids = [uid for uid in raw if uid]
-                                    elif raw:
-                                        external_user_ids = [raw]
+                            external_id = repositories.identities.get_external_id(
+                                str(internal_id), attempt_platform
+                            )
+                            external_user_ids = [external_id] if external_id else []
                         except Exception as db_err:
                             logger.warning(
                                 "Could not look up external_user_id for reminder: %s",
@@ -331,31 +379,22 @@ class ProactiveMessagingService:
                     )
                     attempt_count = doc.get("attempt_count", 0)
                     if delivered:
-                        col.update_one({"_id": doc["_id"]}, {"$set": {"fired": True}})
+                        repositories.reminders.mark_fired(doc["_id"])
                         logger.info(
                             "Reminder %s marked as fired (internal_id=%s)",
                             doc["_id"],
                             internal_id,
                         )
                     elif attempt_count + 1 >= _MAX_REMINDER_ATTEMPTS:
-                        col.update_one(
-                            {"_id": doc["_id"]},
-                            {"$set": {"fired": True, "delivery_failed": True}},
-                        )
+                        repositories.reminders.mark_fired(doc["_id"], failed=True)
                         logger.warning(
                             "Reminder %s abandoned after %d failed attempt(s) — marked fired/failed",
                             doc["_id"],
                             attempt_count + 1,
                         )
                     else:
-                        col.update_one(
-                            {"_id": doc["_id"]},
-                            {
-                                "$inc": {"attempt_count": 1},
-                                "$set": {
-                                    "last_attempt_at": datetime.now(tz_module.utc)
-                                },
-                            },
+                        repositories.reminders.record_attempt(
+                            doc["_id"], datetime.now(tz_module.utc)
                         )
                         logger.debug(
                             "Reminder %s delivery attempt %d recorded — will retry next cycle",
@@ -388,110 +427,48 @@ class ProactiveMessagingService:
                 - timezone: User's timezone (default: 'UTC')
                 - busy: User's busy status (default: False)
         """
+        from memory.repositories import get_repositories
+
         try:
-            from memory.database import mongo_db, get_pg_conn
-
-            # Query MongoDB for users with proactive messaging enabled
-            cursor = mongo_db.user_profiles.find(
-                {"facts.proactive_messaging_enabled": True}
-            )
-
-            eligible_users = []
-
-            for profile in cursor:
-                internal_id = profile.get("_id")
-                if not internal_id:
+            eligible = []
+            seen = set()
+            for user in get_repositories().profiles.list_with_identities():
+                facts = user.get("facts", {})
+                key = (str(user.get("internal_id")), user.get("platform"))
+                if key in seen or not facts.get("proactive_messaging_enabled", False):
                     continue
-
-                facts = profile.get("facts", {})
-
-                # Skip if user is busy
-                if facts.get("busy", False):
+                if (
+                    facts.get("busy", False)
+                    or user.get("platform") not in self.connectors
+                ):
                     continue
-
-                # Resolve contact-channel preferences for this user.
-                cc = _resolve_contact_channels(facts)
-
-                # Get user from PostgreSQL to find their platform ID
-                try:
-                    with get_pg_conn() as conn:
-                        cur = conn.cursor()
-                        cur.execute(
-                            "SELECT telegram_id, discord_id, whatsapp_id, api_id "
-                            "FROM users WHERE internal_id = %s",
-                            (str(internal_id),),
-                        )
-                        user_row = cur.fetchone()
-                        # Normalize to a plain dict so that .get() is always available,
-                        # regardless of the exact row type returned by the cursor.
-                        user_row = dict(user_row) if user_row is not None else {}
-
-                        if not user_row:
-                            logger.warning(
-                                f"User {internal_id} found in MongoDB but not in PostgreSQL"
-                            )
-                            continue
-
-                        # Determine which platform to use, honouring the user's
-                        # contact-channel priority list and blocked-platform set.
-                        platform = None
-                        external_user_id = None
-
-                        for _platform in cc["platform_priority"]:
-                            _col = _PLATFORM_TO_COL.get(_platform)
-                            if not _col:
-                                continue
-                            ids = user_row.get(_col) or []
-                            # ids is TEXT[] from Postgres; coerce scalar fallback
-                            if not isinstance(ids, list):
-                                ids = [ids] if ids else []
-                            # Prefer accounts listed in account_priority; fall back to DB order.
-                            preferred = cc["account_priority"].get(_platform, [])
-                            if preferred:
-                                ordered = preferred + [
-                                    i for i in ids if i not in preferred
-                                ]
-                            else:
-                                ordered = ids
-                            first_id = next((uid for uid in ordered if uid), None)
-                            if first_id:
-                                platform = _platform
-                                external_user_id = first_id
-                                break
-
-                        if not platform or not external_user_id:
-                            logger.warning(
-                                f"User {internal_id} has no reachable platform ID"
-                            )
-                            continue
-
-                        # Build user info dict
-                        user_info = {
-                            "internal_id": internal_id,
-                            "platform": platform,
-                            "external_user_id": external_user_id,
-                            "proactive_interval_hours": facts.get(
-                                "proactive_interval_hours", 24
-                            ),
-                            "timezone": facts.get("timezone", "UTC"),
-                            "busy": facts.get("busy", False),
-                        }
-
-                        eligible_users.append(user_info)
-
-                except Exception as e:
-                    logger.error(
-                        f"Error querying user {internal_id} from PostgreSQL: {e}"
-                    )
+                channels = _resolve_contact_channels(facts)
+                if user.get("platform") not in channels["platform_priority"]:
                     continue
-
+                delivery_channels = set(facts.get("proactive_delivery_channels", []))
+                if delivery_channels and user.get("platform") not in delivery_channels:
+                    continue
+                seen.add(key)
+                eligible.append(
+                    {
+                        "internal_id": user["internal_id"],
+                        "platform": user["platform"],
+                        "external_user_id": user["external_user_id"],
+                        "proactive_interval_hours": facts.get(
+                            "proactive_interval_hours", 24
+                        ),
+                        "timezone": facts.get("timezone") or "UTC",
+                        "busy": False,
+                    }
+                )
             logger.info(
-                f"Found {len(eligible_users)} users eligible for proactive messaging"
+                "Found %d users eligible for proactive messaging via %s repositories",
+                len(eligible),
+                get_repositories().backend,
             )
-            return eligible_users
-
-        except Exception as e:
-            logger.error(f"Error querying eligible users: {e}", exc_info=True)
+            return eligible
+        except Exception as exc:
+            logger.error("Error querying eligible users: %s", exc, exc_info=True)
             return []
 
     def _cleanup_old_contacts(self):
@@ -538,8 +515,75 @@ class ProactiveMessagingService:
             last_contact_time = self.last_contact.get(internal_id)
         now = datetime.now(timezone.utc)  # Use timezone-aware datetime
 
+        # A previous unsolicited message with no intervening response is an
+        # ignored signal. Persist it so future topic cooldowns lengthen.
+        if user_profile.get("proactive_awaiting_response"):
+            ignored = max(0, int(user_profile.get("proactive_ignored_count", 0))) + 1
+            UserManager.update_user_profile(
+                internal_id,
+                {"proactive_ignored_count": min(ignored, 10), "proactive_awaiting_response": False},
+            )
+            user_profile = {**user_profile, "proactive_ignored_count": min(ignored, 10), "proactive_awaiting_response": False}
+
+        allowed, _reason = delivery_allowed(user_profile, "", now)
+        if not allowed:
+            return
+
+        # Quiet hours and a persisted daily cap prevent Curie from becoming
+        # intrusive even when the service restarts.
+        try:
+            timezone_name = user_profile.get("timezone") or "UTC"
+            local_now = now.astimezone(ZoneInfo(timezone_name))
+        except (ZoneInfoNotFoundError, TypeError, ValueError):
+            local_now = now
+        quiet = user_profile.get("proactive_quiet_hours", {"start": 22, "end": 8})
+        quiet_start = int(quiet.get("start", 22)) % 24
+        quiet_end = int(quiet.get("end", 8)) % 24
+        in_quiet_hours = _hour_in_quiet_window(local_now.hour, quiet_start, quiet_end)
+        if in_quiet_hours:
+            return
+
+        today = local_now.date().isoformat()
+        if user_profile.get("proactive_count_date") == today:
+            if int(user_profile.get("proactive_count_today", 0)) >= int(
+                user_profile.get("proactive_daily_max", 2)
+            ):
+                return
+
+        for persisted_key in ("last_proactive_at", "last_user_interaction_at"):
+            persisted_last = user_profile.get(persisted_key)
+            if isinstance(persisted_last, str):
+                try:
+                    persisted_last = datetime.fromisoformat(
+                        persisted_last.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    persisted_last = None
+            if isinstance(persisted_last, datetime):
+                if persisted_last.tzinfo is None:
+                    persisted_last = persisted_last.replace(tzinfo=timezone.utc)
+                if last_contact_time is None or persisted_last > last_contact_time:
+                    last_contact_time = persisted_last
+
         # Get user's preferred check-in interval (in hours)
         min_interval_hours = user_profile.get("proactive_interval_hours", 24)
+        try:
+            from memory.adaptation import get_adaptation_state
+
+            adaptation = get_adaptation_state(str(internal_id))
+            if adaptation["enabled"] and any(
+                item.get("setting") == "notification_cadence_hours"
+                for item in adaptation["history"]
+            ):
+                min_interval_hours = adaptation["preferences"][
+                    "notification_cadence_hours"
+                ]
+        except Exception:
+            pass
+        negative_signals = max(0, int(user_profile.get("proactive_rejection_count", 0))) + max(
+            0, int(user_profile.get("proactive_ignored_count", 0)) // 2
+        )
+        min_interval_hours = float(min_interval_hours) * min(4, 1 + negative_signals)
 
         # Check if enough time has passed
         if last_contact_time:
@@ -551,18 +595,25 @@ class ProactiveMessagingService:
                 return
 
         # Randomly decide whether to send (using class constant)
-        if random.random() > self.PROACTIVE_MESSAGE_PROBABILITY:
+        if random.random() > self.message_probability:
             logger.debug(
                 f"Random check skipped proactive message for user {internal_id}"
             )
             return
 
-        # Generate and send message
-        message = await self._generate_proactive_message(internal_id)
-
-        # Send via appropriate connector
         platform = user_info.get("platform")
         external_user_id = user_info.get("external_user_id")
+
+        # Generate and send message
+        message = await self._generate_proactive_message(
+            internal_id, platform or "legacy"
+        )
+        topic = _message_topic(message)
+        allowed, _reason = delivery_allowed(user_profile, topic, now)
+        if not allowed:
+            return
+
+        # Send via appropriate connector
 
         if platform and external_user_id and platform in self.connectors:
             connector = self.connectors[platform]
@@ -574,8 +625,29 @@ class ProactiveMessagingService:
                 # Update last contact time (thread-safe)
                 with self.last_contact_lock:
                     self.last_contact[internal_id] = now
-                # Save to conversation history
-                ConversationManager.save_conversation(internal_id, "assistant", message)
+                previous_count = (
+                    int(user_profile.get("proactive_count_today", 0))
+                    if user_profile.get("proactive_count_date") == today
+                    else 0
+                )
+                safe_reason = self._generation_reasons.pop(
+                    str(internal_id),
+                    "You opted in and the configured check-in interval elapsed.",
+                )
+                UserManager.update_user_profile(
+                    internal_id,
+                    {
+                        "last_proactive_at": now,
+                        "proactive_count_date": today,
+                        "proactive_count_today": previous_count + 1,
+                        **delivery_updates(user_profile, topic, safe_reason, now),
+                    },
+                )
+                # Store it in the same platform session used by normal chat so a
+                # reply such as "why did you say that?" has the right context.
+                get_session_manager().add_message(
+                    platform, internal_id, "assistant", message
+                )
                 logger.info(
                     f"✅ Sent proactive message to user {internal_id} on {platform}"
                 )
@@ -584,7 +656,9 @@ class ProactiveMessagingService:
                     f"Failed to send proactive message to user {internal_id} on {platform}"
                 )
 
-    async def _generate_proactive_message(self, internal_id: str) -> str:
+    async def _generate_proactive_message(
+        self, internal_id: str, platform: str = "legacy"
+    ) -> str:
         """
         Generate a natural, caring check-in message.
 
@@ -596,52 +670,106 @@ class ProactiveMessagingService:
         """
         # Load user profile and recent history
         user_profile = UserManager.get_user_profile(internal_id) or {}
-        history = ConversationManager.load_recent_conversation(internal_id, limit=6)
+        history_rows = get_session_manager().get_history(platform, internal_id)
+        history = [(row["role"], row["content"]) for row in history_rows[-10:]]
+        candidates = []
 
-        # Build context for LLM
-        persona = self.agent.persona
-        prompt = (
-            f"{persona.get('system_prompt', '')}\n\n"
-            "You are reaching out to a friend naturally and casually. "
-            "Generate a brief, warm check-in message (1-2 sentences max). "
-            "Be genuine, casual, and friendly like texting a friend. "
-            "DON'T be formal or overwhelming. DON'T offer multiple options. "
-            "DON'T say things like 'Would you like me to...' or 'What would you like me to do?'. "
-            "Just be natural and caring. Examples: 'Hey! How's your day going?', "
-            "'Thought of you today, hope you're doing well!', 'What's new with you?'\n"
-            "CRITICAL: Do NOT reveal you're checking in automatically. Just be natural, be a real genuine, caring friend.\n"
-            "Keep it SHORT and CASUAL - 1-2 sentences only!\n"
+        try:
+            from services.personal_ops import daily_briefing_candidate
+
+            briefing = daily_briefing_candidate(str(internal_id), user_profile)
+            if briefing:
+                candidates.append({**briefing, "kind": "deadline", "confidence": 1.0,
+                                   "urgency": .8, "usefulness": .95, "priority": .9})
+        except Exception as exc:
+            logger.debug("Personal agenda briefing unavailable: %s", exc)
+
+        # Prefer a grounded, permission-seeking helpful suggestion when the
+        # neural predictor has enough evidence. It can propose but never act.
+        if user_profile.get("proactive_predictions_enabled", True):
+            try:
+                from memory.adaptive import generate_helpful_prediction
+
+                prediction = await asyncio.to_thread(
+                    generate_helpful_prediction,
+                    internal_id,
+                    user_profile,
+                    history,
+                )
+                if prediction and self._prediction_is_grounded(
+                    prediction, user_profile, history
+                ):
+                    candidates.append({
+                        "message": str(prediction["suggestion"]).strip(),
+                        "reason": str(prediction["reason"]), "topic": _message_topic(str(prediction["suggestion"])),
+                        "kind": "routine", "confidence": prediction.get("confidence", 0),
+                        "urgency": .25, "usefulness": .7, "priority": .6,
+                    })
+            except Exception as exc:
+                logger.debug("Proactive prediction unavailable: %s", exc)
+
+        candidates.append({"message": "Salut, how’s your day going?", "reason":
+                           "You opted in and the configured check-in interval elapsed.",
+                           "topic": "general check-in", "kind": "check_in", "confidence": 1.0,
+                           "urgency": 0, "usefulness": .2, "priority": .2})
+        from services.proactive_policy import rank_candidates
+
+        selected = rank_candidates(candidates, user_profile)[0]
+        self._generation_reasons[str(internal_id)] = str(selected["reason"])[:180]
+        logger.info("Selected proactive candidate for %s: %s", internal_id, selected["ranking_reason"])
+        return str(selected["message"])
+
+    @staticmethod
+    def _prediction_is_grounded(
+        prediction: dict, profile: dict, history: list[tuple[str, str]]
+    ) -> bool:
+        suggestion = str(prediction.get("suggestion", "")).strip()
+        reason = str(prediction.get("reason", "")).strip()
+        if (
+            not suggestion.endswith("?")
+            or not reason
+            or _SENSORY_CLAIM.search(suggestion)
+        ):
+            return False
+        try:
+            from memory.adaptive import is_safe_proposed_action
+
+            if not is_safe_proposed_action(suggestion):
+                return False
+        except Exception:
+            return False
+        avoided = {
+            str(topic).casefold() for topic in profile.get("proactive_avoid_topics", [])
+        }
+        candidate_text = f"{suggestion} {reason}".casefold()
+        if any(topic and topic in candidate_text for topic in avoided):
+            return False
+        evidence = " ".join(
+            str(message) for role, message in history if role == "user"
+        ).casefold()
+        evidence += (
+            " "
+            + " ".join(
+                str(value)
+                for key, value in profile.items()
+                if key in {"interests", "projects", "routines", "reminders_preference"}
+            ).casefold()
         )
-
-        if user_profile:
-            prompt += "\nWhat you know about them:\n"
-            for k, v in user_profile.items():
-                if k not in [
-                    "_id",
-                    "internal_id",
-                    "busy",
-                    "proactive_messaging_enabled",
-                    "proactive_interval_hours",
-                ]:
-                    prompt += f"- {k}: {v}\n"
-
-        if history:
-            prompt += "\nRecent conversation snippets:\n"
-            # Last 3 messages (could be mix of user and assistant)
-            for role, msg in history[-3:]:
-                prompt += f"{role.capitalize()}: {msg[:100]}...\n"
-
-        prompt += "\nYour casual, friendly check-in (1-2 sentences max):"
-
-        # Generate message
-        message = await asyncio.to_thread(
-            manager.ask_llm,
-            prompt,
-            temperature=0.9,  # Higher temperature for more natural variation
-            max_tokens=100,  # Reduced to ensure brevity
+        evidence_words = set(_WORD.findall(evidence)) - _STOPWORDS
+        reason_words = set(_WORD.findall(reason.casefold())) - _STOPWORDS
+        shared = evidence_words & reason_words
+        if not shared:
+            return False
+        # The predictor must identify at least two observations, or point to an
+        # explicit recurring routine. One coincidental keyword is insufficient.
+        evidence_count = int(prediction.get("evidence_count", 0) or 0)
+        recurring = bool(re.search(r"\b(?:every|daily|weekly|usually|routine|often)\b", evidence, re.I))
+        matching_messages = sum(
+            bool(set(_WORD.findall(str(message).casefold())) & reason_words)
+            for role, message in history
+            if role == "user"
         )
-
-        return message.strip()
+        return evidence_count >= 2 and (matching_messages >= 2 or recurring)
 
     async def _send_via_connector(
         self, connector, external_user_id: str, message: str
@@ -665,7 +793,7 @@ class ProactiveMessagingService:
             async def _call_maybe_async(func, *args, **kwargs):
                 """Call `func` which may be sync or async, returning after it completes."""
                 # If it's declared as a coroutine function, call and await it.
-                if asyncio.iscoroutinefunction(func):
+                if inspect.iscoroutinefunction(func):
                     return await func(*args, **kwargs)
                 # If calling it returns a coroutine, await that.
                 result = func(*args, **kwargs)
@@ -676,24 +804,28 @@ class ProactiveMessagingService:
 
             # 1. Preferred interface: `send_message(external_user_id, message)`
             if hasattr(connector, "send_message"):
-                await _call_maybe_async(
+                result = await _call_maybe_async(
                     connector.send_message, external_user_id, message
                 )
-                return True
+                return result is not False
 
             # 2. Common generic interfaces on some connectors: `send` or `send_text`
             if hasattr(connector, "send"):
-                await _call_maybe_async(connector.send, external_user_id, message)
-                return True
+                result = await _call_maybe_async(
+                    connector.send, external_user_id, message
+                )
+                return result is not False
 
             if hasattr(connector, "send_text"):
-                await _call_maybe_async(connector.send_text, external_user_id, message)
-                return True
+                result = await _call_maybe_async(
+                    connector.send_text, external_user_id, message
+                )
+                return result is not False
 
             # 3. Fallback: treat the connector itself as a callable sender.
             if callable(connector):
-                await _call_maybe_async(connector, external_user_id, message)
-                return True
+                result = await _call_maybe_async(connector, external_user_id, message)
+                return result is not False
 
             # If we reach here, we don't know how to send via this connector.
             logger.warning(

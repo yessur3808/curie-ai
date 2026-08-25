@@ -23,38 +23,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # which avoids polluting the shared sys.modules cache and breaking other tests.
 # ---------------------------------------------------------------------------
 for _mod in (
-    "psycopg2",
-    "psycopg2.extras",
-    "psycopg2.extensions",
-    "pymongo",
-    "pymongo.collection",
-    "pymongo.errors",
-    "llm",
-    "llm.manager",
     "telegram",
     "telegram.ext",
-    "dotenv",
 ):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
-
-# Stub memory + related modules without unconditionally overwriting them.
-# Using `if _mod not in sys.modules` avoids clobbering the real module when
-# this file is collected after another test has already imported it.
-for _mod in (
-    "memory",
-    "memory.session_store",
-    "memory.database",
-    "memory.users",
-    "memory.conversations",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-
-# utils.persona uses dotenv at import time — provide a stub so it loads cleanly.
-if "utils.persona" not in sys.modules:
-    sys.modules["utils.persona"] = MagicMock()
-
 
 # ---------------------------------------------------------------------------
 # Telegram connector helpers

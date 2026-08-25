@@ -6,21 +6,54 @@ import threading
 import sys
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import time
 import re
+
+
+class _SecretRedactionFilter(logging.Filter):
+    _pattern = re.compile(
+        r"(?i)(bearer\s+\S+|(?:token|password|secret|api[_-]?key)\s*[:=]\s*\S+)"
+    )
+
+    def filter(self, record):
+        rendered = record.getMessage()
+        record.msg = self._pattern.sub("[REDACTED]", rendered)
+        record.args = ()
+        return True
+
+
+class _PrivateRotatingFileHandler(RotatingFileHandler):
+    def _restrict(self):
+        try:
+            os.chmod(self.baseFilename, 0o600)
+        except OSError:
+            pass
+
+    def doRollover(self):
+        super().doRollover()
+        self._restrict()
+        for index in range(1, self.backupCount + 1):
+            try:
+                os.chmod(f"{self.baseFilename}.{index}", 0o600)
+            except OSError:
+                pass
+
 
 # Check for critical dependencies early to provide helpful error messages
 try:
     from connectors.telegram import (
         start_telegram_bot,
+        send_message as send_telegram_message,
         set_workflow as set_telegram_workflow,
+        is_ready as telegram_is_ready,
     )
+    from connectors.lifecycle import ConnectorApplication, ConnectorRegistry
     from connectors.api import app as fastapi_app, set_workflow as set_api_workflow
     from memory import init_memory
     from llm import manager
     import uvicorn
 
-    from agent.core import Agent
     from agent.chat_workflow import ChatWorkflow
     from utils.persona import load_persona, list_available_personas
     import asyncio
@@ -48,6 +81,7 @@ DEFAULT_MAIN_REPO_URL = "https://github.com/yessur3808/curie-ai"
 try:
     from connectors.discord_bot import (
         start_discord_bot,
+        send_message as send_discord_message,
         set_workflow as set_discord_workflow,
     )
 
@@ -146,30 +180,52 @@ def configure_logging():
     )
 
     # Configure root logger
+    handlers = [logging.StreamHandler(sys.stdout)]
+    log_file = os.getenv("CURIE_LOG_FILE")
+    if log_file:
+        log_path = os.path.abspath(log_file)
+        os.makedirs(os.path.dirname(log_path), mode=0o700, exist_ok=True)
+        file_handler = _PrivateRotatingFileHandler(
+            log_path,
+            maxBytes=max(64_000, int(os.getenv("CURIE_LOG_MAX_BYTES", "5000000"))),
+            backupCount=max(1, int(os.getenv("CURIE_LOG_BACKUP_COUNT", "5"))),
+            encoding="utf-8",
+        )
+        file_handler._restrict()
+        handlers.append(file_handler)
+    for handler in handlers:
+        handler.addFilter(_SecretRedactionFilter())
     logging.basicConfig(
         level=log_level,
         format=log_format,
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        handlers=handlers,
     )
+
+    # httpx logs complete request URLs at INFO. Telegram embeds the bot token
+    # in that URL, so request-level transport logs must never reach daemon logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     # Log the configuration for verification
     logger = logging.getLogger(__name__)
     logger.info(f"Logging configured with level: {log_level}")
 
 
-def load_all_agents():
-    agents = {}
+def load_all_workflows():
+    """Create one active conversation workflow per available personality."""
+    workflows = {}
     for persona_info in list_available_personas():
         persona = load_persona(persona_info["filename"])
         name = persona["name"]
-        agents[name] = Agent(persona=persona)
-    return agents
+        workflows[name] = ChatWorkflow(persona=persona)
+    return workflows
 
 
-def load_default_agent(persona_filename=None):
+def load_default_workflow(persona_filename=None):
+    """Create the same workflow implementation used by every connector."""
     persona = load_persona(filename=persona_filename)
-    return Agent(persona=persona)
+    return ChatWorkflow(persona=persona)
 
 
 # Directories that are never interesting for code editing.
@@ -420,7 +476,6 @@ def parse_args():
     parser.add_argument(
         "--whatsapp", action="store_true", help="Run WhatsApp connector"
     )
-    parser.add_argument("--slack", action="store_true", help="Run Slack connector")
     parser.add_argument(
         "--api", action="store_true", help="Run API connector (FastAPI)"
     )
@@ -519,6 +574,16 @@ def init_llm_and_memory(no_init):
     # can handle any message.
     print("Initializing memory...")
     init_memory()
+    try:
+        from services.security import enforce_retention
+
+        removed = enforce_retention()
+        if any(removed.values()):
+            logger.info("Applied startup retention policy: %s", removed)
+    except Exception as exc:
+        # Retention failures must be visible without preventing the owner from
+        # reaching Curie to inspect or correct the storage configuration.
+        logger.warning("Could not apply startup retention policy: %s", exc)
 
     # Start the LLM model loading in a background daemon thread so connectors
     # (Telegram, Discord, API, …) can come online immediately.  The first
@@ -701,71 +766,75 @@ def main():
             set_kakao_workflow(workflow)
 
     threads = []
+    connector_registry = ConnectorRegistry()
 
-    # Initialize proactive messaging service (only if any connectors are running)
+    # Initialize proactive messaging after outbound connectors start below.
     proactive_service = None
     enable_proactive = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
-
-    if enable_proactive and (
-        run_telegram_flag or run_discord_flag or run_whatsapp_flag or run_api_flag
-    ):
-        try:
-            logger.info("Initializing proactive messaging service...")
-            # Proactive connectors are not yet registered in this process, so do not start the service.
-            # This avoids pretending the service might have started while no connectors are actually wired.
-            logger.info(
-                "Proactive messaging service not started because no connectors are registered yet."
-            )
-        except Exception as e:
-            logger.error(
-                f"❌ Failed to start proactive messaging service: {e}", exc_info=True
-            )
-    elif not enable_proactive:
+    if not enable_proactive:
         logger.info(
             "ℹ️  Proactive messaging is disabled via ENABLE_PROACTIVE_MESSAGING env variable"
         )
 
+    # Telegram runs in a thread so proactive delivery and other connectors can
+    # coexist in the same process.
+    if run_telegram_flag:
+        telegram_connector = ConnectorApplication(
+            "telegram",
+            run_telegram,
+            send_fn=send_telegram_message,
+            ready_probe=telegram_is_ready,
+            queue_capacity=int(os.getenv("CONNECTOR_OUTBOUND_QUEUE_SIZE", "64")),
+        )
+        connector_registry.register(telegram_connector)
+        threads.append(telegram_connector.start(workflow))
+
     # Start Discord bot in thread
     if run_discord_flag:
         if DISCORD_AVAILABLE:
-            t = threading.Thread(target=run_discord, args=(workflow,), daemon=True)
-            threads.append(t)
-            t.start()
+            connector = ConnectorApplication(
+                "discord",
+                run_discord,
+                send_fn=send_discord_message,
+                queue_capacity=int(os.getenv("CONNECTOR_OUTBOUND_QUEUE_SIZE", "64")),
+            )
+            connector_registry.register(connector)
+            threads.append(connector.start(workflow))
         else:
             logger.error("Discord connector requested but not available")
 
     # Start WhatsApp bot in thread
     if run_whatsapp_flag:
         if WHATSAPP_AVAILABLE:
-            t = threading.Thread(target=run_whatsapp, args=(workflow,), daemon=True)
-            threads.append(t)
-            t.start()
+            connector = ConnectorApplication("whatsapp", run_whatsapp)
+            connector_registry.register(connector)
+            threads.append(connector.start(workflow))
         else:
             logger.error("WhatsApp connector requested but not available")
 
     # Start Slack bot in thread
     if run_slack_flag:
         if SLACK_AVAILABLE:
-            t = threading.Thread(target=run_slack, args=(workflow,), daemon=True)
-            threads.append(t)
-            t.start()
+            connector = ConnectorApplication("slack", run_slack)
+            connector_registry.register(connector)
+            threads.append(connector.start(workflow))
         else:
             logger.error("Slack connector requested but not available")
 
     # Start Signal polling loop in thread
     if run_signal_flag:
         if SIGNAL_AVAILABLE:
-            t = threading.Thread(target=run_signal, args=(workflow,), daemon=True)
-            threads.append(t)
-            t.start()
+            connector = ConnectorApplication("signal", run_signal)
+            connector_registry.register(connector)
+            threads.append(connector.start(workflow))
         else:
             logger.error("Signal connector requested but not available")
 
     # Start API in thread (Teams / LINE / KakaoTalk webhooks are mounted on the same app)
     if run_api_flag:
-        t = threading.Thread(target=run_api, daemon=True)
-        threads.append(t)
-        t.start()
+        connector = ConnectorApplication("api", lambda _workflow: run_api())
+        connector_registry.register(connector)
+        threads.append(connector.start(workflow))
 
     # Start Coding Service in thread
     if run_coding_service_flag:
@@ -779,6 +848,41 @@ def main():
             logger.info("Coding service thread started")
         except Exception as e:
             logger.error(f"Failed to start coding service thread: {e}", exc_info=True)
+
+    readiness = connector_registry.wait_ready(
+        float(os.getenv("CONNECTOR_READY_TIMEOUT", "15"))
+    )
+    for name, ready in readiness.items():
+        health = connector_registry.get(name).health()
+        log = logger.info if ready else logger.warning
+        log(
+            "Connector %s readiness=%s state=%s thread_alive=%s",
+            name,
+            ready,
+            health.state.value,
+            health.thread_alive,
+        )
+
+    if enable_proactive:
+        proactive_connectors = connector_registry.outbound()
+        if proactive_connectors:
+            try:
+                from services.proactive_messaging import ProactiveMessagingService
+
+                proactive_service = ProactiveMessagingService(
+                    workflow, connectors=proactive_connectors
+                )
+                proactive_service.start()
+                logger.info(
+                    "✅ Proactive messaging started for: %s",
+                    ", ".join(sorted(proactive_connectors)),
+                )
+            except Exception as e:
+                logger.error(
+                    "❌ Failed to start proactive messaging: %s", e, exc_info=True
+                )
+        else:
+            logger.info("Proactive messaging has no push-capable connector to use")
 
     if run_coder_flag:
         run_coder_interactive()
@@ -795,18 +899,16 @@ def main():
         validate_coder_batch_params(goal, files_to_edit, repo_path, branch_name)
         run_coder_batch(goal, files_to_edit, repo_path, branch_name)
 
-    # Start Telegram bot last (blocking) - keeps main thread alive
-    if run_telegram_flag:
-        run_telegram(workflow)
-    else:
-        # If Telegram is not running, join other threads to prevent main from exiting
-        try:
-            for t in threads:
-                t.join()
-        except KeyboardInterrupt:
-            logger.info("Shutting down...")
-            if proactive_service:
-                proactive_service.stop()
+    # Keep the process alive while connector threads run.
+    try:
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        if proactive_service:
+            proactive_service.stop()
+        connector_registry.stop_all()
 
 
 if __name__ == "__main__":

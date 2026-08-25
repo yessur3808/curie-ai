@@ -4,13 +4,21 @@ Telegram connector - transport-only concerns.
 Receives Telegram events, normalizes to standard format, calls ChatWorkflow.
 """
 
+import asyncio
 import datetime
 import os
 import logging
+import secrets
+import hashlib
+from dataclasses import dataclass
+from pathlib import Path
+import tempfile
+import threading
+import time
 from typing import Optional
 from dotenv import load_dotenv
 
-from telegram import Update
+from telegram import Bot, BotCommand, Update
 from telegram.ext import (
     ApplicationBuilder,
     MessageHandler,
@@ -29,17 +37,45 @@ from utils.db import is_master_user
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Shared ChatWorkflow instance (initialized in main.py)
-_workflow = None
-_app = None  # Telegram Application instance (set in start_telegram_bot)
+
+@dataclass
+class TelegramRuntime:
+    workflow: Optional[ChatWorkflow] = None
+    application: object = None
+    loop: Optional[asyncio.AbstractEventLoop] = None
+
+    @property
+    def ready(self) -> bool:
+        return self.application is not None and bool(
+            getattr(self.application, "running", False)
+        )
+
+
+_runtime = TelegramRuntime()
 user_persona_map = {}
 user_session_map = {}
 
 
+@dataclass
+class PendingAttachment:
+    path: str
+    kind: str
+    filename: str
+    created_at: float
+
+
+_pending_attachments: dict[int, PendingAttachment] = {}
+_pending_lock = threading.Lock()
+_ATTACHMENT_TTL_SECONDS = 900
+
+
 def set_workflow(workflow: ChatWorkflow):
     """Set the shared ChatWorkflow instance (called from main.py)."""
-    global _workflow
-    _workflow = workflow
+    _runtime.workflow = workflow
+
+
+def is_ready() -> bool:
+    return _runtime.ready
 
 
 async def send_message(
@@ -57,21 +93,34 @@ async def send_message(
     formatting (e.g. "MarkdownV2", "HTML"). Callers are responsible for
     properly escaping any user-derived content before enabling formatting.
     """
-    if _app is None:
+    if _runtime.application is None:
         logger.warning("Telegram app not initialized; cannot send proactive message")
         return False
-    try:
+
+    async def deliver(bot) -> None:
         if parse_mode:
-            await _app.bot.send_message(
+            await bot.send_message(
                 chat_id=int(external_user_id),
                 text=message,
                 parse_mode=parse_mode,
             )
         else:
-            await _app.bot.send_message(
+            await bot.send_message(
                 chat_id=int(external_user_id),
                 text=message,
             )
+
+    try:
+        current_loop = asyncio.get_running_loop()
+        target_loop = _runtime.loop
+        if target_loop and target_loop.is_running() and target_loop is not current_loop:
+            # The Application bot's HTTP client belongs to the polling loop.
+            # A separate short-lived bot keeps proactive delivery entirely on
+            # the caller's loop instead of closing the polling transport.
+            async with Bot(token=os.environ["TELEGRAM_BOT_TOKEN"]) as outbound_bot:
+                await deliver(outbound_bot)
+        else:
+            await deliver(_runtime.application.bot)
         return True
     except Exception as exc:
         logger.error(
@@ -100,12 +149,165 @@ def get_internal_id(
 
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _workflow:
+    if not _runtime.workflow:
         await update.message.reply_text("❌ System not initialized.")
         return
 
-    greeting = _workflow.persona.get("greeting", "Hello!")
+    user = update.effective_user
+    if user:
+        get_internal_id(user.id, user.username or f"telegram_{user.id}")
+    greeting = _runtime.workflow.persona.get("greeting", "Hello!")
     await update.message.reply_text(f"{greeting}")
+
+
+def _persona_startup_message() -> str:
+    """Choose an awake message belonging to the active personality."""
+    persona = getattr(_runtime.workflow, "persona", {}) or {}
+    configured = persona.get("startup_messages", [])
+    choices = [str(item).strip() for item in configured if str(item).strip()]
+    if choices:
+        variant = os.getenv("CURIE_STARTUP_VARIANT", "").strip()
+        if variant.isdigit():
+            return choices[int(variant) % len(choices)]
+        return secrets.choice(choices)
+    name = str(persona.get("name") or os.getenv("ASSISTANT_NAME") or "Assistant")
+    return f"{name} is awake, online, and ready."
+
+
+async def handle_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show IDs needed for an owner to configure MASTER_USER_ID safely."""
+    user = update.effective_user
+    if not user or not update.message:
+        return
+    internal_id = get_internal_id(user.id, user.username or f"telegram_{user.id}")
+    assistant_name = str(
+        getattr(_runtime.workflow, "persona", {}).get("name", "Assistant")
+    )
+    await update.message.reply_text(
+        f"Your {assistant_name} internal ID is:\n"
+        f"`{internal_id}`\n\nSet this as `MASTER_USER_ID` in `.env`, then restart Curie.",
+        parse_mode="Markdown",
+    )
+
+
+async def notify_master_awake(application) -> None:
+    """Send one readiness notification after Telegram initialization succeeds."""
+    _runtime.loop = asyncio.get_running_loop()
+    set_commands = getattr(application.bot, "set_my_commands", None)
+    if set_commands:
+        await set_commands(
+            [
+                BotCommand("start", "Start Curie and show the welcome message"),
+                BotCommand("whoami", "Show your linked Curie identity"),
+                BotCommand(
+                    "identify", "Link this Telegram chat to your Curie identity"
+                ),
+                BotCommand("remember", "Save an explicit personal preference or fact"),
+                BotCommand("reset", "Reset this conversation"),
+                BotCommand("history", "Show conversation history statistics"),
+                BotCommand("reminders", "List upcoming reminders"),
+                BotCommand("busy", "Pause proactive messages temporarily"),
+                BotCommand("resume", "Resume proactive messages"),
+                BotCommand("voice", "Voice replies: on, off, or status"),
+                BotCommand(
+                    "voice_profile", "Choose clear, soft, expressive, French, or custom"
+                ),
+                BotCommand("voice_accent", "Choose neutral, subtle, or strong accent"),
+                BotCommand("voice_speed", "Choose slow, normal, or fast speech"),
+                BotCommand("voice_warmth", "Choose neutral, gentle, or warm delivery"),
+                BotCommand(
+                    "voice_expression", "Choose calm, balanced, or expressive delivery"
+                ),
+                BotCommand("voice_sample", "Hear a sample of the current voice"),
+                BotCommand(
+                    "voice_custom", "Custom voice consent, enrollment, and status"
+                ),
+                BotCommand("voice_help", "Show all voice controls"),
+                BotCommand("agenda", "Show your upcoming personal agenda"),
+                BotCommand("birthday", "Add an explicitly supplied birthday"),
+                BotCommand("task", "List or manage durable multi-step tasks"),
+                BotCommand("audit", "Inspect or export your private action audit"),
+                BotCommand("privacy", "View retention or purge expired records"),
+                BotCommand("security", "Show Curie’s active security controls"),
+                BotCommand("health", "Show independent capability readiness"),
+                BotCommand("capabilities", "Show Curie’s healthy capabilities"),
+                BotCommand("proactive", "Control proactive suggestions and quiet time"),
+                BotCommand("adaptation", "Inspect or tune Curie’s learned preferences"),
+                BotCommand("clear_memory", "Erase Curie’s saved memory for you"),
+            ]
+        )
+    if os.getenv("NOTIFY_MASTER_ON_STARTUP", "true").lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return
+    master_id = os.getenv("MASTER_USER_ID", "").strip()
+    if not master_id:
+        logger.info("Startup notification skipped: MASTER_USER_ID is not configured")
+        return
+    external_id = UserManager.get_external_id(master_id, "telegram")
+    if not external_id:
+        logger.warning(
+            "Startup notification skipped: master %s has no stored Telegram mapping",
+            master_id,
+        )
+        return
+    try:
+        await application.bot.send_message(
+            chat_id=int(external_id),
+            text=_persona_startup_message(),
+        )
+    except Exception as exc:
+        # Telegram forbids a bot from initiating the first private chat. Keep
+        # polling alive and tell the operator exactly how to establish consent.
+        logger.warning(
+            "Could not notify the master at startup: %s. The master must send "
+            "/start to this bot once before it can initiate messages.",
+            exc,
+        )
+        return
+    logger.info("Sent startup-ready notification to the configured master user")
+
+
+def split_telegram_message(text: str, limit: int = 3500) -> list[str]:
+    """Split long replies at natural boundaries below Telegram's hard limit."""
+    text = (text or "").strip()
+    if not text:
+        return [""]
+    chunks = []
+    remaining = text
+    while len(remaining) > limit:
+        window = remaining[: limit + 1]
+        split_at = max(
+            window.rfind("\n\n"),
+            window.rfind("\n"),
+            window.rfind(". "),
+            window.rfind("? "),
+            window.rfind("! "),
+            window.rfind(" "),
+        )
+        if split_at < limit // 2:
+            split_at = limit
+        elif window[split_at : split_at + 2] in {". ", "? ", "! "}:
+            split_at += 1
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+async def reply_in_chunks(message, text: str, parse_mode: Optional[str] = None) -> None:
+    """Send readable chunks and fall back to plain text on formatting errors."""
+    for chunk in split_telegram_message(text):
+        try:
+            await message.reply_text(chunk, parse_mode=parse_mode)
+        except Exception:
+            if not parse_mode:
+                raise
+            logger.debug("Telegram formatting failed; retrying chunk as plain text")
+            await message.reply_text(chunk)
 
 
 async def handle_busy(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -120,6 +322,145 @@ async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
     clear_user_busy(tg_user_id)
     await update.message.reply_text("Bienvenue! I'm here and ready to chat again. 😊")
+
+
+async def handle_voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Route /voice through the shared preference service and always answer in text."""
+    if not update.message or not update.effective_user:
+        return
+    user = update.effective_user
+    internal_id = get_internal_id(user.id, user.username or f"telegram_{user.id}")
+    argument = " ".join(getattr(context, "args", []) or []).strip()
+    command = f"/voice {argument}".strip()
+    from memory.adaptation import handle_adaptation_command
+    from services.voice_commands import voice_status
+
+    response = (
+        voice_status(internal_id, "telegram")
+        if argument.casefold() == "status"
+        else handle_adaptation_command(internal_id, command, "telegram")
+    )
+    await update.message.reply_text(
+        response or "Use /voice on, /voice off, or /voice status."
+    )
+
+
+async def handle_voice_setting_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    """Persist one validated voice profile control."""
+    if not update.message or not update.effective_user:
+        return
+    user = update.effective_user
+    internal_id = get_internal_id(user.id, user.username or f"telegram_{user.id}")
+    command = update.message.text.split()[0].split("@")[0].removeprefix("/voice_")
+    value = " ".join(getattr(context, "args", []) or []).strip()
+    from services.voice_commands import configure_voice
+
+    try:
+        response = configure_voice(internal_id, command, value)
+    except (KeyError, ValueError) as exc:
+        response = str(exc)
+    await update.message.reply_text(response)
+
+
+async def handle_voice_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from services.voice_commands import VOICE_HELP
+
+    await update.message.reply_text(VOICE_HELP)
+
+
+async def handle_voice_sample(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Synthesize a one-shot sample without changing reply modality."""
+    if not update.message or not update.effective_user or not _runtime.workflow:
+        return
+    user = update.effective_user
+    internal_id = get_internal_id(user.id, user.username or f"telegram_{user.id}")
+    from services.voice_commands import VOICE_SAMPLE_TEXT
+    from services.voice_delivery import synthesize_reply
+
+    sample_text = (
+        " ".join(getattr(context, "args", []) or []).strip() or VOICE_SAMPLE_TEXT
+    )
+    sample_text = sample_text[:500]
+    path = await synthesize_reply(sample_text, _runtime.workflow.persona, internal_id)
+    if not path:
+        await update.message.reply_text(
+            "The selected voice is not ready. Use /voice status for details."
+        )
+        return
+    try:
+        with open(path, "rb") as audio:
+            await update.message.reply_voice(voice=audio, caption="Curie voice sample")
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+async def handle_voice_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manage explicit consent and owner-scoped reference enrollment."""
+    if not update.message or not update.effective_user:
+        return
+    user = update.effective_user
+    internal_id = get_internal_id(user.id, user.username or f"telegram_{user.id}")
+    action = " ".join(getattr(context, "args", []) or []).strip().casefold() or "status"
+    from services.voice_commands import custom_voice_command
+
+    if action != "enroll":
+        await update.message.reply_text(custom_voice_command(internal_id, action))
+        return
+    from memory.adaptation import get_preferences, set_custom_voice_reference
+
+    preferences = get_preferences(internal_id)
+    if not preferences.get("custom_voice_consent"):
+        await update.message.reply_text("Use /voice_custom consent before enrollment.")
+        return
+    replied = getattr(update.message, "reply_to_message", None)
+    voice = getattr(replied, "voice", None) if replied else None
+    if not voice:
+        await update.message.reply_text(
+            "Reply to a consenting speaker’s voice note with /voice_custom enroll."
+        )
+        return
+    owner_hash = hashlib.sha256(str(internal_id).encode()).hexdigest()[:16]
+    directory = Path("models/voices/custom") / owner_hash
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    source = directory / "reference.ogg"
+    target = directory / "reference.wav"
+    telegram_file = await voice.get_file()
+    await telegram_file.download_to_drive(str(source))
+    from utils.voice import get_ffmpeg_executable
+
+    ffmpeg = get_ffmpeg_executable()
+    process = await asyncio.create_subprocess_exec(
+        ffmpeg,
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source),
+        "-ar",
+        "24000",
+        "-ac",
+        "1",
+        str(target),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, error = await process.communicate()
+    source.unlink(missing_ok=True)
+    if process.returncode or not target.is_file():
+        target.unlink(missing_ok=True)
+        logger.warning(
+            "Custom voice enrollment conversion failed: %s",
+            error.decode(errors="replace"),
+        )
+        await update.message.reply_text("I could not prepare that reference recording.")
+        return
+    target.chmod(0o600)
+    set_custom_voice_reference(internal_id, str(target.resolve()))
+    await update.message.reply_text(
+        "Reference stored locally. Custom synthesis will become available when the local XTTS model is installed."
+    )
 
 
 async def handle_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -170,7 +511,7 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Routes through process_message so the logic is in one place and works
     identically across all connectors (Discord, API, etc.).
     """
-    if not _workflow:
+    if not _runtime.workflow:
         await update.message.reply_text("❌ System not initialized.")
         return
 
@@ -187,7 +528,7 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "timestamp": datetime.datetime.utcnow(),
         "internal_id": internal_id,
     }
-    result = await _workflow.process_message(normalized_input)
+    result = await _runtime.workflow.process_message(normalized_input)
     await update.message.reply_text(result.get("text", "✅ Session reset."))
 
 
@@ -195,7 +536,7 @@ async def handle_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /history — show how many messages are stored for this user.
     """
-    if not _workflow:
+    if not _runtime.workflow:
         await update.message.reply_text("❌ System not initialized.")
         return
 
@@ -212,7 +553,7 @@ async def handle_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "timestamp": datetime.datetime.utcnow(),
         "internal_id": internal_id,
     }
-    result = await _workflow.process_message(normalized_input)
+    result = await _runtime.workflow.process_message(normalized_input)
     await update.message.reply_text(result.get("text", "📊 Could not retrieve stats."))
 
 
@@ -237,6 +578,25 @@ async def handle_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             "🧹 Your conversational memory has been cleared."
         )
+
+
+async def handle_workflow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Route deterministic owner controls through the shared workflow."""
+    if not update.message or not update.effective_user or not _runtime.workflow:
+        return
+    user = update.effective_user
+    internal_id = get_internal_id(user.id, user.username or f"telegram_{user.id}")
+    normalized_input = {
+        "platform": "telegram",
+        "external_user_id": user.id,
+        "external_chat_id": update.message.chat_id,
+        "message_id": str(update.message.message_id),
+        "text": update.message.text or "",
+        "timestamp": datetime.datetime.utcnow(),
+        "internal_id": internal_id,
+    }
+    result = await _runtime.workflow.process_message(normalized_input)
+    await reply_in_chunks(update.message, result.get("text", "Command unavailable."))
 
 
 async def handle_voice_message(update: Update, persona: dict) -> Optional[str]:
@@ -274,20 +634,128 @@ async def handle_voice_message(update: Update, persona: dict) -> Optional[str]:
             os.remove(audio_path)
 
 
+def _take_pending_attachment(chat_id: int) -> Optional[PendingAttachment]:
+    with _pending_lock:
+        attachment = _pending_attachments.pop(chat_id, None)
+    if attachment and time.time() - attachment.created_at > _ATTACHMENT_TTL_SECONDS:
+        Path(attachment.path).unlink(missing_ok=True)
+        return None
+    return attachment
+
+
+def _store_pending_attachment(chat_id: int, attachment: PendingAttachment) -> None:
+    previous = _take_pending_attachment(chat_id)
+    if previous:
+        Path(previous.path).unlink(missing_ok=True)
+    with _pending_lock:
+        _pending_attachments[chat_id] = attachment
+
+
+async def _process_and_reply(
+    update: Update, user_message: str, internal_id: str
+) -> None:
+    normalized_input = {
+        "platform": "telegram",
+        "external_user_id": update.message.from_user.id,
+        "external_chat_id": update.message.chat_id,
+        "message_id": update.message.message_id,
+        "text": user_message,
+        "timestamp": datetime.datetime.utcnow(),
+        "internal_id": internal_id,
+    }
+    result = await _runtime.workflow.process_message(normalized_input)
+    response_text = result.get("text", "[Error: No response]")
+    parse_mode = (
+        "Markdown" if result.get("model_used") in MARKDOWN_SKILL_MODELS else None
+    )
+    try:
+        from services.voice_delivery import synthesize_reply, voice_replies_enabled
+
+        if voice_replies_enabled(internal_id, "telegram"):
+            voice_path = await synthesize_reply(
+                response_text, _runtime.workflow.persona, internal_id
+            )
+            if voice_path:
+                try:
+                    with open(voice_path, "rb") as audio:
+                        if voice_path.endswith(".ogg"):
+                            await update.message.reply_voice(voice=audio)
+                        else:
+                            await update.message.reply_audio(audio=audio)
+                    return
+                finally:
+                    Path(voice_path).unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning("Telegram voice reply failed; sending text: %s", exc)
+    await reply_in_chunks(update.message, response_text, parse_mode=parse_mode)
+
+
+async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Download a bounded photo or document and process it locally."""
+    if not _runtime.workflow or not update.message:
+        return
+    message = update.message
+    await message.reply_text("I’m checking that attachment now, mon ami.")
+    media = message.photo[-1] if message.photo else message.document
+    file_size = int(getattr(media, "file_size", 0) or 0)
+    max_bytes = int(os.getenv("TELEGRAM_MAX_ATTACHMENT_BYTES", str(20 * 1024 * 1024)))
+    if file_size > max_bytes:
+        await message.reply_text(
+            "That attachment is too large. The current limit is 20 MB."
+        )
+        return
+    from services.media_ingestion import classify_attachment
+
+    content_type = (
+        getattr(media, "mime_type", None) or getattr(media, "content_type", None) or ""
+    )
+    filename = (
+        getattr(media, "file_name", None)
+        or f"telegram_{getattr(media, 'file_unique_id', media.file_id)}.jpg"
+    )
+    kind = "image" if message.photo else classify_attachment(filename, content_type)
+    suffix = Path(filename).suffix or (".jpg" if kind == "image" else ".bin")
+    fd, path = tempfile.mkstemp(prefix="curie_attachment_", suffix=suffix)
+    os.close(fd)
+    try:
+        telegram_file = await media.get_file()
+        await telegram_file.download_to_drive(path)
+        attachment = PendingAttachment(path, kind, filename, time.time())
+        caption = (message.caption or "").strip()
+        internal_id = get_internal_id(
+            message.from_user.id,
+            message.from_user.username or f"telegram_{message.from_user.id}",
+        )
+        from services.media_ingestion import prepare_attachment_message
+
+        user_message = await prepare_attachment_message(
+            path,
+            filename,
+            caption,
+            content_type=content_type,
+            persona=_runtime.workflow.persona,
+        )
+        await _process_and_reply(update, user_message, internal_id)
+    except Exception as exc:
+        logger.warning("Attachment processing failed: %s", exc)
+        await message.reply_text(str(exc))
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Main message handler - normalize and process through ChatWorkflow."""
-    if not _workflow:
+    if not _runtime.workflow:
         await update.message.reply_text("❌ System not initialized.")
         return
 
     tg_user_id = update.message.from_user.id
-    message_id = update.message.message_id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
 
     internal_id = get_internal_id(tg_user_id, telegram_username)
 
     if update.message.voice:
-        user_message = await handle_voice_message(update, _workflow.persona)
+        user_message = await handle_voice_message(update, _runtime.workflow.persona)
         if not user_message:
             await update.message.reply_text(
                 "❌ Sorry, I couldn't understand the voice message."
@@ -297,29 +765,83 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         user_message = update.message.text
 
-    normalized_input = {
-        "platform": "telegram",
-        "external_user_id": tg_user_id,
-        "external_chat_id": update.message.chat_id,
-        "message_id": message_id,
-        "text": user_message,
-        "timestamp": datetime.datetime.utcnow(),
-        "internal_id": internal_id,
-    }
+    # A text reply to an earlier photo/document explicitly refers to that
+    # attachment. Re-download it for this turn instead of asking the model to
+    # infer what “it” means from text-only history.
+    replied = getattr(update.message, "reply_to_message", None)
+    replied_media = None
+    replied_is_photo = False
+    if replied:
+        replied_photos = getattr(replied, "photo", None) or []
+        replied_media = (
+            replied_photos[-1] if replied_photos else getattr(replied, "document", None)
+        )
+        replied_is_photo = bool(replied_photos)
+    if replied_media and user_message:
+        file_size = int(getattr(replied_media, "file_size", 0) or 0)
+        max_bytes = int(
+            os.getenv("TELEGRAM_MAX_ATTACHMENT_BYTES", str(20 * 1024 * 1024))
+        )
+        if file_size > max_bytes:
+            await update.message.reply_text(
+                "That referenced attachment is larger than 20 MB."
+            )
+            return
+        filename = (
+            getattr(replied_media, "file_name", None)
+            or f"telegram_reply_{getattr(replied_media, 'file_unique_id', replied_media.file_id)}.jpg"
+        )
+        content_type = getattr(replied_media, "mime_type", None) or (
+            "image/jpeg" if replied_is_photo else ""
+        )
+        suffix = Path(filename).suffix or (".jpg" if replied_is_photo else ".bin")
+        fd, replied_path = tempfile.mkstemp(
+            prefix="curie_replied_attachment_", suffix=suffix
+        )
+        os.close(fd)
+        try:
+            telegram_file = await replied_media.get_file()
+            await telegram_file.download_to_drive(replied_path)
+            from services.media_ingestion import prepare_attachment_message
 
-    result = await _workflow.process_message(normalized_input)
+            user_message = await prepare_attachment_message(
+                replied_path,
+                filename,
+                user_message,
+                content_type=content_type,
+                persona=_runtime.workflow.persona,
+            )
+        except Exception as exc:
+            logger.warning("Referenced attachment processing failed: %s", exc)
+            await update.message.reply_text(str(exc))
+            return
+        finally:
+            Path(replied_path).unlink(missing_ok=True)
 
-    # Enable Markdown for skill responses that return formatted content
-    response_text = result.get("text", "[Error: No response]")
-    parse_mode = (
-        "Markdown" if result.get("model_used") in MARKDOWN_SKILL_MODELS else None
-    )
-    await update.message.reply_text(response_text, parse_mode=parse_mode)
+    pending = _take_pending_attachment(update.message.chat_id)
+    if pending:
+        try:
+            from services.media_ingestion import prepare_attachment_message
+
+            user_message = await prepare_attachment_message(
+                pending.path,
+                pending.filename,
+                user_message,
+                persona=_runtime.workflow.persona,
+            )
+        except Exception as exc:
+            logger.warning("Pending attachment processing failed: %s", exc)
+            await update.message.reply_text(str(exc))
+            return
+        finally:
+            Path(pending.path).unlink(missing_ok=True)
+
+    await _process_and_reply(update, user_message, internal_id)
 
 
 async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/reminders — list the user's upcoming reminders."""
-    if not _workflow:
+    if not _runtime.workflow:
         await update.message.reply_text("❌ System not initialized.")
         return
 
@@ -336,15 +858,14 @@ async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "timestamp": datetime.datetime.utcnow(),
         "internal_id": internal_id,
     }
-    result = await _workflow.process_message(normalized_input)
+    result = await _runtime.workflow.process_message(normalized_input)
     response_text = result.get("text", "📅 No reminders found.")
     await update.message.reply_text(response_text, parse_mode="Markdown")
 
 
 def start_telegram_bot(workflow: ChatWorkflow):
     """Start Telegram bot with shared ChatWorkflow."""
-    global _workflow
-    _workflow = workflow
+    _runtime.workflow = workflow
 
     telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not telegram_token:
@@ -352,22 +873,58 @@ def start_telegram_bot(workflow: ChatWorkflow):
             "Telegram bot token not found in .env file or environment variables."
         )
 
-    app = ApplicationBuilder().token(telegram_token).build()
+    app = (
+        ApplicationBuilder()
+        .token(telegram_token)
+        .post_init(notify_master_awake)
+        .build()
+    )
     # Store the application so send_message() can use it for proactive delivery
-    global _app
-    _app = app
+    _runtime.application = app
 
     app.add_handler(CommandHandler("start", handle_start))
+    app.add_handler(CommandHandler("whoami", handle_whoami))
     app.add_handler(CommandHandler("identify", handle_identify))
     app.add_handler(CommandHandler("busy", handle_busy))
     app.add_handler(CommandHandler("resume", handle_resume))
+    app.add_handler(CommandHandler("voice", handle_voice_command))
+    for voice_setting in (
+        "voice_profile",
+        "voice_accent",
+        "voice_speed",
+        "voice_warmth",
+        "voice_expression",
+    ):
+        app.add_handler(CommandHandler(voice_setting, handle_voice_setting_command))
+    app.add_handler(CommandHandler("voice_sample", handle_voice_sample))
+    app.add_handler(CommandHandler("voice_custom", handle_voice_custom))
+    app.add_handler(CommandHandler("voice_help", handle_voice_help))
     app.add_handler(CommandHandler("remember", handle_remember))
     app.add_handler(CommandHandler("reset", handle_reset))
     app.add_handler(CommandHandler("history", handle_history))
     app.add_handler(CommandHandler("reminders", handle_reminders))
     app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
+    for workflow_command in (
+        "agenda",
+        "birthday",
+        "task",
+        "audit",
+        "privacy",
+        "security",
+        "health",
+        "readiness",
+        "capabilities",
+        "proactive",
+        "adaptation",
+    ):
+        app.add_handler(CommandHandler(workflow_command, handle_workflow_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_message))
+    app.add_handler(
+        MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media_message)
+    )
 
     print("🤖 Telegram bot is running...")
-    app.run_polling(drop_pending_updates=True)
+    # main.py may run this connector in a worker thread alongside proactive
+    # delivery. Signal handlers can only be installed from Python's main thread.
+    app.run_polling(drop_pending_updates=True, stop_signals=None)

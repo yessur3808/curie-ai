@@ -1,0 +1,7 @@
+{
+  "correctness_pass_rate": 1.0,
+  "personality_pass_rate": 0.95,
+  "security_pass_rate": 1.0,
+  "connector_conformance_pass_rate": 1.0,
+  "known_regression_pass_rate": 1.0
+}

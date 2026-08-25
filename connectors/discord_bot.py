@@ -8,6 +8,7 @@ Supports text messages, voice channels, and DMs.
 import datetime
 import os
 import logging
+import tempfile
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -185,22 +186,34 @@ if commands is not None:
                 # Get internal ID
                 internal_id = get_internal_id(discord_user_id, discord_username)
 
-                # Handle voice/audio attachments
+                # Handle images, readable documents, and voice/audio attachments.
                 user_message = message.content
                 if message.attachments:
+                    await message.channel.send(
+                        "I’m checking the attachment now, mon ami."
+                    )
                     for attachment in message.attachments:
-                        if (
-                            attachment.content_type
-                            and "audio" in attachment.content_type
-                        ):
-                            transcribed = await handle_voice_attachment(
-                                attachment, self.workflow.persona
+                        suffix = os.path.splitext(attachment.filename)[1]
+                        fd, media_path = tempfile.mkstemp(
+                            prefix="curie_discord_", suffix=suffix
+                        )
+                        os.close(fd)
+                        try:
+                            await attachment.save(media_path)
+                            from services.media_ingestion import (
+                                prepare_attachment_message,
                             )
-                            if transcribed:
-                                user_message += (
-                                    f"\n[Voice message transcribed]: {transcribed}"
-                                )
-                                await message.channel.send(f"🎤 I heard: {transcribed}")
+
+                            user_message = await prepare_attachment_message(
+                                media_path,
+                                attachment.filename,
+                                user_message,
+                                content_type=attachment.content_type or "",
+                                persona=self.workflow.persona,
+                            )
+                        finally:
+                            if os.path.exists(media_path):
+                                os.remove(media_path)
 
                 if not user_message:
                     return
@@ -221,6 +234,30 @@ if commands is not None:
 
                 # Send response (Discord has 2000 char limit)
                 response_text = result.get("text", "[Error: No response]")
+
+                try:
+                    from services.voice_delivery import (
+                        synthesize_reply,
+                        voice_replies_enabled,
+                    )
+
+                    if voice_replies_enabled(internal_id, "discord"):
+                        voice_path = await synthesize_reply(
+                            response_text, self.workflow.persona, internal_id
+                        )
+                        if voice_path:
+                            try:
+                                await message.channel.send(
+                                    file=discord.File(
+                                        voice_path,
+                                        filename=os.path.basename(voice_path),
+                                    )
+                                )
+                                return
+                            finally:
+                                os.remove(voice_path)
+                except Exception as exc:
+                    logger.warning("Discord voice reply failed; sending text: %s", exc)
 
                 # Split long messages
                 if len(response_text) > 2000:

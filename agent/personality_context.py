@@ -2,6 +2,7 @@ from typing import Dict, List, Optional
 
 from agent.personality_adapter import PersonalityAdapter
 from agent.personality_speech import PersonalitySpeechEngine
+from agent.response_planner import plan_response, planner_directives
 
 
 class PersonalityContext:
@@ -27,6 +28,9 @@ class PersonalityContext:
         history: Optional[List] = None,
     ) -> List[str]:
         runtime = self.infer_runtime_context(user_text, user_profile, history)
+        response_plan = plan_response(
+            user_text, (user_profile or {}).get("_adaptation", {})
+        )
 
         values = self.persona.get("core_values", [])
         decision = self.persona.get("decision_profile", {})
@@ -38,7 +42,18 @@ class PersonalityContext:
         directives = [
             f"- Active mode: {mode}",
             f"- Detected user context: {runtime.get('user_emotion', 'neutral')}",
+            f"- Response depth: {runtime.get('response_depth', 'brief')}",
         ]
+        directives.extend(planner_directives(response_plan))
+
+        depth = runtime.get("response_depth", "brief")
+        depth_rules = {
+            "social": "Reply casually in 1–2 short sentences, normally under 25 words. No list, speech, or elaborate self-description.",
+            "brief": "Answer directly in 1–3 sentences, normally under 85 words. Do not add generic advice or a follow-up question unless it is genuinely useful.",
+            "focused": "Give a complete, practical answer with enough explanation for the task; use structure only when it improves clarity.",
+            "deep": "Give a thorough, well-structured answer with rationale, caveats, examples, and actionable detail where useful.",
+        }
+        directives.append(f"- Length target: {depth_rules[depth]}")
 
         if values:
             directives.append("- Core values to preserve: " + ", ".join(values[:5]))
@@ -57,9 +72,22 @@ class PersonalityContext:
             )
 
         if response_style:
-            tone = response_style.get("tone", "warm")
+            tone = runtime.get("adaptation_tone") or response_style.get("tone", "warm")
             humor = response_style.get("humor", "balanced")
-            directives.append(f"- Tone target: {tone}; humor target: {humor}")
+            care = response_style.get("care_and_concern", "attentive")
+            formality = response_style.get("formality", "casual")
+            directives.append(
+                f"- Tone target: {tone}. Humor target: {humor}. "
+                f"Care target: {care}. Formality: {formality}."
+            )
+
+        preferred_tools = runtime.get("preferred_tools", [])
+        if preferred_tools:
+            directives.append(
+                "- User presentation preference favors these tools when equally suitable: "
+                + ", ".join(preferred_tools[:10])
+                + ". Never let this override capability fit, permissions, or safety policy."
+            )
 
         if mode_cfg:
             directives.append(
@@ -73,7 +101,9 @@ class PersonalityContext:
             secondary = language.get("secondary_language")
             if secondary:
                 directives.append(
-                    f"- Language: keep {primary} dominant; lightly blend {secondary} naturally."
+                    f"- Language: keep {primary} dominant, but let Curie's {secondary} identity be clearly present. "
+                    f"In casual conversation, usually include one short, natural {secondary} expression or mannerism. "
+                    "Use less during technical answers and none when clarity or urgency would suffer."
                 )
 
         return directives

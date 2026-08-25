@@ -128,6 +128,20 @@ def _server_ready() -> bool:
         return False
 
 
+def _npu_owned_by_another_server() -> bool:
+    """Detect Lemonade so direct startup never waits on an occupied NPU."""
+    conflict_port = _env("LLM_NPU_CONFLICT_PORT", "13305")
+    if not conflict_port:
+        return False
+    try:
+        response = requests.get(
+            f"http://127.0.0.1:{int(conflict_port)}/v1/models", timeout=0.5
+        )
+        return response.ok
+    except (requests.RequestException, ValueError):
+        return False
+
+
 def _stop_fastflow() -> None:
     global _flm_process
     if _flm_process and _flm_process.poll() is None:
@@ -149,6 +163,11 @@ def ensure_fastflow_server() -> bool:
         return False
     if _server_ready():
         return True
+    if _npu_owned_by_another_server():
+        logger.warning(
+            "NPU is occupied by another local model server; using GPU/CPU fallback"
+        )
+        return False
 
     with _flm_lock:
         if _server_ready():

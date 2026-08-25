@@ -6,15 +6,27 @@ Uses exchangerate.host API (free, no authentication required).
 
 import logging
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Dict, Any
+from utils.ttl_cache import TTLCache
 
 logger = logging.getLogger(__name__)
 
 # Cache exchange rates to minimize API calls
 # Format: {base_currency: {'rates': {...}, 'timestamp': datetime}}
-_rate_cache = {}
-_cache_duration = timedelta(hours=1)
+_rate_cache = TTLCache(
+    ttl_seconds=3600,
+    max_size=32,
+    name="public_exchange_rates",
+    owner_scope="public",
+    invalidation_event="TTL expiry or currency provider change",
+    sensitivity="public",
+)
+
+
+def reset_cache() -> None:
+    """Clear process-local exchange rates for tests and runtime reloads."""
+    _rate_cache.clear()
 
 
 async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, float]]:
@@ -27,15 +39,11 @@ async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, f
     Returns:
         Dictionary of currency codes to exchange rates, or None if failed
     """
-    global _rate_cache
-
-    # Check if cache is still valid for this base currency
-    now = datetime.now(datetime.UTC) if hasattr(datetime, "UTC") else datetime.utcnow()
-    if base_currency in _rate_cache:
-        cache_entry = _rate_cache[base_currency]
-        if (now - cache_entry["timestamp"]) < _cache_duration:
-            logger.debug(f"Using cached exchange rates for {base_currency}")
-            return cache_entry["rates"]
+    base_currency = base_currency.upper()
+    cached = _rate_cache.get(base_currency)
+    if cached is not None:
+        logger.debug("Using cached exchange rates for %s", base_currency)
+        return cached
 
     try:
         url = f"https://api.exchangerate.host/latest?base={base_currency.upper()}"
@@ -46,7 +54,7 @@ async def get_exchange_rates(base_currency: str = "USD") -> Optional[Dict[str, f
                 if data.get("success", False) and "rates" in data:
                     rates = data["rates"]
                     # Update cache with per-base timestamp
-                    _rate_cache[base_currency] = {"rates": rates, "timestamp": now}
+                    _rate_cache.set(base_currency, rates)
                     logger.info(
                         f"Fetched {len(rates)} exchange rates for {base_currency}"
                     )

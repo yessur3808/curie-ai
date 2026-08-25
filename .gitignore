@@ -9,6 +9,7 @@ __pycache__/
 .env
 .env.local
 .env.development
+instances/*.env
 .venv/
 env/
 venv/
@@ -118,3 +119,13 @@ dmypy.json
 *.bak
 *.backup
 *.old
+
+# Zero-configuration local memory backend
+.curie_memory.sqlite3
+.curie_memory.sqlite3-shm
+.curie_memory.sqlite3-wal
+.curie_*.sqlite3-shm
+.curie_*.sqlite3-wal
+*.ses
+models/**/*.onnx
+projects/

@@ -1,0 +1,8 @@
+# Optional stage-3 custom multilingual voice runtime.
+# XTTS model weights have a separate Coqui Public Model License and must be
+# provisioned only after the owner reviews and accepts it.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+torchaudio==2.11.0+cpu
+coqui-tts[codec]==0.27.5
+transformers>=4.57,<5
