@@ -17,7 +17,47 @@ from agent.chat_workflow import ChatWorkflow  # noqa: E402
 from agent.chat_workflow import (
     _is_predominantly_french,
     _naturalize_prose_punctuation,
+    _select_relevant_facts,
 )  # noqa: E402
+
+
+def test_unrelated_profile_topics_are_not_injected_into_every_request():
+    selected = _select_relevant_facts(
+        {
+            "preferred_name": "Yaser",
+            "favorite_old_topic": "coffee roasting and Japanese houses",
+        },
+        "Please turn off the TV light",
+    )
+
+    assert selected == {"preferred_name": "Yaser"}
+
+
+def test_prompt_advertises_portable_rich_text_syntax():
+    workflow = ChatWorkflow(
+        persona={"name": "Curie", "system_prompt": "Be helpful."}
+    )
+
+    prompt = workflow._build_structured_prompt({}, [], "Compare the devices")
+
+    assert "**bold**" in prompt
+    assert "++underline++" in prompt
+    assert "Markdown tables" in prompt
+
+
+def test_prompt_uses_direct_casual_command_style_without_forced_french():
+    workflow = ChatWorkflow(
+        persona={"name": "Curie", "system_prompt": "Be helpful."}
+    )
+
+    prompt = workflow._build_structured_prompt({}, [], "Turn off the DreamView")
+
+    assert "lead with the verified result or blocker" in prompt
+    assert "one or two crisp sentences" in prompt
+    assert "It is optional, never a quota" in prompt
+    assert "usually be omitted from commands and technical replies" in prompt
+    assert "like a good, trusted friend" in prompt
+    assert "lightly romantic" not in prompt
 
 
 class TestOutputSanitization:

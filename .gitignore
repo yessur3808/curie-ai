@@ -129,3 +129,5 @@ dmypy.json
 *.ses
 models/**/*.onnx
 projects/
+.curie_credentials.enc
+.curie-browser/

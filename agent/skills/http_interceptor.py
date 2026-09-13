@@ -13,7 +13,7 @@ session handling.
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urljoin, urlparse
 
@@ -280,7 +280,7 @@ class HttpInterceptor:
             return {"error": str(exc)}
 
         result: Dict[str, Any] = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "url": url,
         }
 
@@ -524,7 +524,7 @@ class HttpInterceptor:
                     logger.debug("Crawl error at %s: %s", url, exc)
 
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "start_url": start_url,
             "pages_visited": len(visited),
             "pages": pages,
@@ -741,7 +741,7 @@ class HttpInterceptor:
         findings.sort(key=lambda f: _sev_order.get(f["severity"], 9))
 
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "target": url,
             "requests_made": request_count,
             "total_findings": len(findings),

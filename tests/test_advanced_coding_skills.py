@@ -386,6 +386,27 @@ class TestCodingAssistantIntentDetection:
         assert assistant.detect_coding_intent("create a function") == "code_generation"
         assert assistant.detect_coding_intent("write a class") == "code_generation"
 
+    def test_detect_own_repository_capability_questions(self, assistant):
+        assert (
+            assistant.detect_coding_intent(
+                "Can you enhance your own code on your own repo?"
+            )
+            == "capability_query"
+        )
+        assert (
+            assistant.detect_coding_intent("You can code your own tools")
+            == "capability_query"
+        )
+
+    @pytest.mark.asyncio
+    async def test_capability_answer_is_concrete_and_non_mutating(self, assistant):
+        answer = await assistant.handle_message(
+            "Can you enhance your own code on your own repo?"
+        )
+        assert "configured repository" in answer
+        assert "does not change code" in answer
+        assert "/poll" in answer
+
     def test_no_coding_intent_returns_none(self, assistant):
         """Test that non-coding messages return None"""
         assert assistant.detect_coding_intent("hello world") is None

@@ -171,23 +171,39 @@ class TestPreferencesInjection:
 
     def test_dietary_preferences_injected(self):
         wf = _make_workflow()
-        prompt = _build(wf, {"dietary_preferences": "vegan"})
+        prompt = _build(wf, {"dietary_preferences": "vegan"}, "dietary preferences")
         assert "vegan" in prompt
 
     def test_travel_style_injected(self):
         wf = _make_workflow()
-        prompt = _build(wf, {"travel_style": "budget"})
+        prompt = _build(wf, {"travel_style": "budget"}, "travel style")
         assert "budget" in prompt
 
     def test_occupation_injected(self):
         wf = _make_workflow()
-        prompt = _build(wf, {"occupation": "software engineer"})
+        prompt = _build(wf, {"occupation": "software engineer"}, "occupation")
         assert "software engineer" in prompt
 
     def test_interests_injected(self):
         wf = _make_workflow()
-        prompt = _build(wf, {"interests": ["hiking", "cooking"]})
+        prompt = _build(wf, {"interests": ["hiking", "cooking"]}, "interests")
         assert "hiking" in prompt or "cooking" in prompt
+
+    def test_unrelated_preferences_are_not_injected_into_small_talk(self):
+        wf = _make_workflow()
+        prompt = _build(
+            wf,
+            {
+                "name": "Alice",
+                "dietary_preferences": "vegan",
+                "interests": ["hiking"],
+            },
+            "hello",
+        )
+
+        assert "Alice" in prompt
+        assert "vegan" not in prompt
+        assert "hiking" not in prompt
 
     def test_empty_profile_no_facts_block(self):
         """A genuinely empty profile must not produce a [VERIFIED FACTS ABOUT USER] block."""
@@ -224,10 +240,41 @@ class TestSelectRelevantFacts:
         result = _select_relevant_facts(profile, "just chatting")
         assert "location" in result
 
-    def test_dietary_always_returned(self):
+    def test_dietary_preference_is_only_returned_when_relevant(self):
         profile = {"dietary_preferences": "vegan", "unrelated_fact": "x"}
-        result = _select_relevant_facts(profile, "hello")
-        assert "dietary_preferences" in result
+        assert "dietary_preferences" not in _select_relevant_facts(profile, "hello")
+        assert "dietary_preferences" in _select_relevant_facts(
+            profile, "dietary preferences"
+        )
 
     def test_empty_profile_returns_empty(self):
         assert _select_relevant_facts({}, "hello") == {}
+
+
+class TestHierarchicalMemoryPrompt:
+    def test_recalled_memory_is_labelled_and_guarded_against_topic_drift(self):
+        wf = _make_workflow()
+        recalled = [
+            {
+                "key": "work_project",
+                "value": "compiler optimization",
+                "kind": "project",
+                "status": "verified",
+                "source": "explicit_user_statement",
+                "confirmation_count": 2,
+                "_memory_tier": "archival",
+                "_relevance": 0.81,
+                "_retrieval_reason": "strong topic match",
+            }
+        ]
+        with (
+            patch("memory.adaptive.get_relevant_memories", return_value=recalled),
+            patch("memory.adaptive.get_pending_memory_conflicts", return_value=[]),
+            patch("memory.adaptive.get_matching_abilities", return_value=[]),
+        ):
+            prompt = _build(wf, {}, "How is my compiler project going?")
+
+        assert "[RELEVANT LONG-TERM MEMORY]" in prompt
+        assert "[archival] work_project" in prompt
+        assert "Never mention it merely to demonstrate recall" in prompt
+        assert "episodic item describes a past exchange" in prompt

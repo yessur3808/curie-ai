@@ -29,6 +29,33 @@ def test_explicit_detail_request_is_deep_depth():
     assert context["response_depth"] == "deep"
 
 
+def test_technical_request_stays_casual_and_precise_by_default():
+    context = PersonalityAdapter().infer_context("Debug this Python API error")
+
+    assert context["user_emotion"] == "technical"
+    assert context["mode"] == "casual"
+    assert context["response_depth"] == "focused"
+
+
+def test_explicit_formal_request_uses_professional_mode():
+    context = PersonalityAdapter().infer_context(
+        "Write a formal report about the database migration"
+    )
+
+    assert context["mode"] == "professional"
+    assert context["explicitly_formal"] is True
+
+
+def test_simple_command_is_brief_even_with_detailed_preference():
+    context = PersonalityAdapter().infer_context(
+        "Please turn off the DreamView",
+        {"_adaptation": {"verbosity": "detailed"}},
+    )
+
+    assert context["interaction_kind"] == "command"
+    assert context["response_depth"] == "brief"
+
+
 def test_social_reply_is_trimmed_without_forced_french():
     persona = load_persona("curie.json")
     response = (
@@ -91,3 +118,6 @@ def test_curie_persona_is_source_independent_and_balanced():
     assert 0.25 <= casual["humor_level"] <= 0.5
     assert 0.5 <= casual["care_level"] <= 0.7
     assert "relaxed" in casual["formality"]
+    assert "never a quota" in serialized
+    assert "result or blocker first" in serialized
+    assert "deeply valued person" not in serialized

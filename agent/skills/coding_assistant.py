@@ -55,9 +55,18 @@ class CodingAssistant:
             - 'bug_detection': User wants to detect bugs
             - 'performance_analysis': User wants performance analysis
             - 'code_generation': User wants code generation
+            - 'capability_query': User asks whether Curie can work on its own tools/repo
             - None: Not a coding-related query
         """
         message_lower = message.lower()
+
+        capability_patterns = [
+            r"\bcan\s+you\s+(?:enhance|edit|modify|change|update|inspect|work\s+on)\b.*\b(?:your|curie(?:'s)?)\b.*\b(?:code|repo|repository|tools?)\b",
+            r"\bcan\s+you\s+(?:code|build|create)\b.*\b(?:your\s+own|curie(?:'s)?)\b.*\btools?\b",
+            r"\byou\s+can\s+(?:code|build|create)\s+your\s+own\s+tools?\b",
+        ]
+        if any(re.search(pattern, message_lower) for pattern in capability_patterns):
+            return "capability_query"
 
         # Git operations (commit, push, pull, fetch, cherry-pick, add)
         git_op_patterns = [
@@ -280,6 +289,17 @@ class CodingAssistant:
         except Exception as e:
             logger.error(f"Error getting coding service status: {e}", exc_info=True)
             return f"❌ Error getting service status: {str(e)}"
+
+    @staticmethod
+    def handle_capability_query() -> str:
+        """Describe local coding capabilities without implying an action ran."""
+        return (
+            "Yes. I can inspect Curie’s configured repository, propose code changes, "
+            "apply an approved change inside the allowed workspace, and run its tests in "
+            "the secure command sandbox. I can also format replies with Markdown bullets "
+            "and tables. On Telegram, use `/poll Question | Option 1 | Option 2` to create "
+            "an interactive poll. Asking whether I can do this does not change code by itself."
+        )
 
     def handle_review_request(self, message: str) -> str:
         """
@@ -791,6 +811,8 @@ class CodingAssistant:
 
         if intent == "status":
             return self.get_service_status()
+        elif intent == "capability_query":
+            return self.handle_capability_query()
         elif intent == "review":
             return self.handle_review_request(message)
         elif intent == "update":

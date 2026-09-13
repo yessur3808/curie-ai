@@ -269,11 +269,17 @@ def learn_from_exchange(
     if _DO_NOT_REMEMBER.search(user_message):
         return
     try:
-        from memory.adaptive import propose_learned_ability
+        from memory.adaptive import propose_learned_ability, record_conversation_episode
 
         propose_learned_ability(internal_id, user_message)
+        record_conversation_episode(
+            internal_id,
+            user_message,
+            source_message_id=source_message_id,
+            source_channel=source_channel,
+        )
     except Exception as exc:
-        logger.debug("Ability proposal skipped: %s", exc)
+        logger.debug("Ability or episodic memory capture skipped: %s", exc)
     if not _should_attempt_extraction(user_message):
         return
 

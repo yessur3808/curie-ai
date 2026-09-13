@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 import uuid
 
 from agent.intent_router import ToolRequest, classify_request, resolve_request
@@ -122,8 +122,10 @@ def _specialist(text: str) -> str | None:
     return selected.name if selected else None
 
 
-def _deterministic_clause(text: str) -> RoutingDecision | None:
-    request = classify_request(text)
+def _deterministic_clause(
+    text: str, history: Sequence[Any] | None = None
+) -> RoutingDecision | None:
+    request = classify_request(text, history=history)
     if request:
         return _from_tool_request(request)
     from agent.skills.system_commands import detect_system_command
@@ -158,11 +160,13 @@ def _deterministic_clause(text: str) -> RoutingDecision | None:
     return None
 
 
-async def route_request(text: str, owner_id: str = "") -> RoutingDecision:
+async def route_request(
+    text: str, owner_id: str = "", history: Sequence[Any] | None = None
+) -> RoutingDecision:
     """Return exactly one explainable decision; model inference is read-only only."""
     clauses = [part for part in _MULTI_SPLIT.split(text.strip()) if part]
     if len(clauses) > 1:
-        clause_decisions = [_deterministic_clause(part) for part in clauses]
+        clause_decisions = [_deterministic_clause(part, history) for part in clauses]
         routed = [
             item for item in clause_decisions if item and item.intent != "conversation"
         ]
@@ -183,7 +187,7 @@ async def route_request(text: str, owner_id: str = "") -> RoutingDecision:
             )
             _record(owner_id, text, decision)
             return decision
-    deterministic = _deterministic_clause(text)
+    deterministic = _deterministic_clause(text, history)
     if deterministic:
         _record(owner_id, text, deterministic)
         return deterministic

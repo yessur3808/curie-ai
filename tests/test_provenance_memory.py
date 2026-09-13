@@ -36,11 +36,13 @@ def test_contradiction_waits_for_owner_confirmation(tmp_path, monkeypatch):
     assert new["status"] == "pending_confirmation"
     assert old["id"] in new["contradicts"]
     assert adaptive.get_relevant_memories("u1", "favorite drink")[0]["value"] == "tea"
+    assert local_store.get_profile("u1")["favorite_drink"] == "tea"
     response = adaptive.handle_adaptive_command("u1", f"/memory confirm {new['id']}")
     assert response.startswith("Confirmed")
     assert (
         adaptive.get_relevant_memories("u1", "favorite drink")[0]["value"] == "coffee"
     )
+    assert local_store.get_profile("u1")["favorite_drink"] == "coffee"
 
 
 def test_sensitive_and_opt_out_turns_are_not_stored(tmp_path, monkeypatch):
@@ -132,3 +134,43 @@ def test_natural_controls_channel_pause_timeline_and_rollback(tmp_path, monkeypa
     assert adaptive.record_memories(
         "u1", {"hobby": "cycling"}, "I cycle", source_channel="telegram"
     ) == []
+
+
+def test_memory_stats_search_and_safe_ambiguous_forget(tmp_path, monkeypatch):
+    monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
+    adaptive.record_memories(
+        "u1", {"favorite_drink": "coffee"}, "I prefer coffee"
+    )
+
+    stats = adaptive.handle_adaptive_command("u1", "/memory stats")
+    search = adaptive.handle_adaptive_command("u1", "/memory search coffee")
+
+    assert "1 active" in stats
+    assert "1 core" in stats
+    assert "favorite_drink" in search
+    assert "favorite_drink" in adaptive.handle_adaptive_command(
+        "u1", "what do you remember about me?"
+    )
+    assert "which memory" in adaptive.handle_adaptive_command(
+        "u1", "forget that"
+    )
+
+
+def test_forget_removes_core_fact_but_preserves_runtime_controls(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
+    local_store.update_profile(
+        "u1",
+        {"proactive_messaging_enabled": False, "legacy_hobby": "cycling"},
+    )
+    adaptive.record_memories(
+        "u1", {"favorite_drink": "tea"}, "I prefer tea"
+    )
+
+    adaptive.handle_adaptive_command("u1", "/memory forget all")
+    profile = local_store.get_profile("u1")
+
+    assert "favorite_drink" not in profile
+    assert "legacy_hobby" not in profile
+    assert profile["proactive_messaging_enabled"] is False

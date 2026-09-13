@@ -14,6 +14,7 @@ _DEFAULTS = {
     "tone": "warm",
     "notification_cadence_hours": 24,
     "research_depth": "balanced",
+    "response_layout": "adaptive",
     "preferred_tools": [],
     "voice_reply": False,
     "voice_reply_channels": {},
@@ -30,6 +31,7 @@ _ALLOWED = {
     "verbosity": {"concise", "balanced", "detailed"},
     "tone": {"warm", "neutral", "professional"},
     "research_depth": {"quick", "balanced", "deep"},
+    "response_layout": {"adaptive", "structured"},
     "voice_speed": {"slow", "normal", "fast"},
     "voice_warmth": {"neutral", "gentle", "warm"},
     "voice_expressiveness": {"calm", "balanced", "expressive"},
@@ -48,11 +50,16 @@ _TOO_SHORT = re.compile(
     r"\b(?:too short|more detail|be more detailed|expand on that)\b", re.I
 )
 _WRONG = re.compile(
-    r"\b(?:that's wrong|that is wrong|incorrect|you got that wrong)\b", re.I
+    r"\b(?:wrong answer|that's wrong|that is wrong|incorrect|you got that wrong)\b", re.I
 )
 _CORRECTION = re.compile(r"\b(?:actually|correction|i meant|use this instead)\b", re.I)
 _STYLE = re.compile(
     r"\buse (?:a |this )?(warm|neutral|professional) (?:tone|style)\b", re.I
+)
+_STRUCTURED = re.compile(
+    r"\b(?:format|structure)\b.{0,60}\b(?:cleaner|better|clearly|bullets?|tables?)\b|"
+    r"\buse\b.{0,40}\b(?:bullets?|tables?)\b.{0,40}\b(?:when needed|as needed|where useful)\b",
+    re.I,
 )
 _COMMAND = re.compile(
     r"^/?adaptation(?:\s+(inspect|pause|resume|set))?(?:\s+(.*))?$", re.I
@@ -221,6 +228,8 @@ def record_explicit_feedback(owner_id: str, text: str) -> dict | None:
         signal, setting, value = "too_long", "verbosity", "concise"
     elif _TOO_SHORT.search(text):
         signal, setting, value = "too_short", "verbosity", "detailed"
+    elif _STRUCTURED.search(text):
+        signal, setting, value = "structured_layout", "response_layout", "structured"
     else:
         style = _STYLE.search(text)
         if style:

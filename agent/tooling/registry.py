@@ -23,6 +23,30 @@ def _schema_for(name: str) -> Mapping[str, Any]:
         "create_python_project": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
         "run_tests": {"type": "object", "properties": {"path": {"type": "string"}}},
         "project_change": {"type": "object", "properties": {"request": {"type": "string"}, "path": {"type": "string"}, "run_tests": {"type": "boolean"}}, "required": ["request"]},
+        "gmail_search": {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]},
+        "gmail_read": {"type": "object", "properties": {"message_id": {"type": "string"}}, "required": ["message_id"]},
+        "gmail_send": {"type": "object", "properties": {"recipient": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["recipient", "subject", "body"]},
+        "x_search": {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]},
+        "x_read": {"type": "object", "properties": {"post_id": {"type": "string"}}, "required": ["post_id"]},
+        "x_post": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+        "x_reply": {"type": "object", "properties": {"post_id": {"type": "string"}, "text": {"type": "string"}}, "required": ["post_id", "text"]},
+        "x_dm_read": {"type": "object", "properties": {"limit": {"type": "integer"}}},
+        "x_dm_send": {"type": "object", "properties": {"participant_id": {"type": "string"}, "text": {"type": "string"}}, "required": ["participant_id", "text"]},
+        "browser_open": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+        "browser_snapshot": _OBJECT,
+        "browser_click": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+        "browser_fill": {"type": "object", "properties": {"label": {"type": "string"}, "value": {"type": "string"}}, "required": ["label", "value"]},
+        "browser_close": _OBJECT,
+        "home_status": {"type": "object", "properties": {"target": {"type": "string"}, "provider": {"type": "string"}}},
+        "home_control": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "state": {"type": "string", "enum": ["on", "off"]},
+                "provider": {"type": "string"},
+            },
+            "required": ["target", "state"],
+        },
     }.get(name, _OBJECT)
 
 
@@ -36,6 +60,8 @@ def _validate(schema: Mapping[str, Any], value: Mapping[str, Any]) -> None:
     for key, item in schema.get("properties", {}).items():
         if key in value and item.get("type") in types and not isinstance(value[key], types[item["type"]]):
             raise ValueError(f"Parameter {key!r} must be {item['type']}")
+        if key in value and item.get("enum") and value[key] not in item["enum"]:
+            raise ValueError(f"Parameter {key!r} must be one of {', '.join(map(str, item['enum']))}")
 
 
 def definition(tool: Tool, **overrides: Any) -> CapabilityDefinition:
@@ -45,7 +71,8 @@ def definition(tool: Tool, **overrides: Any) -> CapabilityDefinition:
         description=overrides.pop("description", f"Execute Curie's {name.replace('_', ' ')} capability."),
         examples=tuple(overrides.pop("examples", ())), input_schema=overrides.pop("input_schema", _schema_for(name)),
         output_schema=overrides.pop("output_schema", _TEXT_OUTPUT), executor=tool,
-        risk="read_only" if read_only else "mutating", approval_policy="never" if read_only else "per_invocation",
+        risk="read_only" if read_only else "mutating",
+        approval_policy=overrides.pop("approval_policy", "never" if read_only else "per_invocation"),
         required_permissions=frozenset(overrides.pop("required_permissions", ())),
         resource_policy=overrides.pop("resource_policy", ResourcePolicy(network=name in {"weather", "research"})),
         **overrides,
@@ -167,22 +194,61 @@ def _coding_service_probe() -> tuple[bool, str | None]:
 
 
 def _build_runtime_registry() -> ToolRegistry:
+    from agent.tooling.account_tools import GmailReadTool, GmailSearchTool, GmailSendTool, XPostTool, XReadDMsTool, XReadTool, XReplyTool, XSearchTool, XSendDMTool
+    from agent.tooling.browser_tools import BrowserClickTool, BrowserCloseTool, BrowserFillTool, BrowserOpenTool, BrowserSnapshotTool
     from agent.tooling.project_tools import CreateDirectoryTool, CreatePythonProjectTool, InspectProjectTool, ProjectChangeTool, RunTestsTool
     from agent.tooling.conversion_tool import ConversionTool
     from agent.tooling.research_tool import ResearchTool
     from agent.tooling.specialist_tools import SpecialistTool, browser, coding, http_interceptor, navigation, network_analyzer, network_scanner, scheduler, trip_planner
-    from agent.tooling.system_tools import HardwareTool, RamUsageTool
+    from agent.tooling.system_tools import HardwareTool, NetworkSpeedTool, RamUsageTool
+    from agent.tooling.smart_home_tools import HomeControlTool, HomeStatusTool
     from agent.tooling.weather_tool import WeatherTool
     capabilities = [
         definition(WeatherTool(), description="Get weather from a live source.", tags=("weather", "live")),
         definition(RamUsageTool(), description="Inspect current memory usage.", chat_routable=False, tags=("system",)),
         definition(HardwareTool(), description="Inspect local hardware.", chat_routable=False, tags=("system", "hardware")),
+        definition(
+            NetworkSpeedTool(),
+            description="Measure current download speed, upload speed, and latency from Curie's host.",
+            resource_policy=ResourcePolicy(timeout_seconds=50, concurrency_limit=1, network=True),
+            tags=("system", "network", "live"),
+        ),
+        definition(GmailSearchTool(), resource_policy=ResourcePolicy(timeout_seconds=45, concurrency_limit=2, network=True), tags=("gmail", "email", "read")),
+        definition(GmailReadTool(), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("gmail", "email", "read")),
+        definition(GmailSendTool(), required_permissions=("gmail_send",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"body"}), tags=("gmail", "email", "write")),
+        definition(XSearchTool(), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("x", "social", "read")),
+        definition(XReadTool(), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("x", "social", "read")),
+        definition(XPostTool(), required_permissions=("x_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "social", "write")),
+        definition(XReplyTool(), required_permissions=("x_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "social", "write")),
+        definition(XReadDMsTool(), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "dm", "read")),
+        definition(XSendDMTool(), required_permissions=("x_dm_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "dm", "write")),
+        definition(BrowserOpenTool(), availability_probe=_module_probe("playwright.async_api"), resource_policy=ResourcePolicy(timeout_seconds=45, concurrency_limit=2, network=True), tags=("browser", "interactive", "read")),
+        definition(BrowserSnapshotTool(), availability_probe=_module_probe("playwright.async_api"), resource_policy=ResourcePolicy(timeout_seconds=20, concurrency_limit=2), tags=("browser", "interactive", "read")),
+        definition(BrowserClickTool(), availability_probe=_module_probe("playwright.async_api"), required_permissions=("browser_interact",), resource_policy=ResourcePolicy(timeout_seconds=45, concurrency_limit=1, network=True), tags=("browser", "interactive", "write")),
+        definition(BrowserFillTool(), availability_probe=_module_probe("playwright.async_api"), required_permissions=("browser_interact",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1), audit_redactions=frozenset({"value"}), tags=("browser", "interactive", "write")),
+        definition(BrowserCloseTool(), availability_probe=_module_probe("playwright.async_api"), resource_policy=ResourcePolicy(timeout_seconds=20, concurrency_limit=2), tags=("browser", "interactive")),
         definition(ResearchTool(), description="Research current information using live sources.", tags=("web", "research")),
         definition(InspectProjectTool(), description="Inspect an allowed project root.", tags=("coding", "filesystem")),
         definition(CreateDirectoryTool(), required_permissions=("write_project",), tags=("coding", "filesystem")),
         definition(CreatePythonProjectTool(), required_permissions=("write_project",), tags=("coding",)),
         definition(RunTestsTool(), description="Run tests inside the command sandbox.", tags=("coding", "testing")),
         definition(ProjectChangeTool(), required_permissions=("write_project",), tags=("coding", "filesystem")),
+        definition(
+            HomeStatusTool(),
+            description="Read and analyze normalized status and telemetry across Curie's configured home devices.",
+            examples=("What's running at home?", "Is the bedroom lamp on?"),
+            resource_policy=ResourcePolicy(timeout_seconds=60, concurrency_limit=2, network=True),
+            tags=("smart-home", "iot", "status"),
+        ),
+        definition(
+            HomeControlTool(),
+            description="Turn one unambiguously named smart-home device on or off and verify its resulting state.",
+            examples=("Turn off the desk plug", "Switch the living-room lights on"),
+            approval_policy="never",
+            required_permissions=("home_control",),
+            resource_policy=ResourcePolicy(timeout_seconds=60, concurrency_limit=1, network=True),
+            tags=("smart-home", "iot", "control"),
+        ),
         definition(
             ConversionTool(), display_name="Unit and Currency Conversion",
             description="Convert units deterministically or currencies from a live rate source.",

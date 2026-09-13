@@ -59,6 +59,10 @@ def settings(profile: dict) -> dict:
         "daily_max": max(0, min(int(profile.get("proactive_daily_max", 1)), 10)),
         "weekly_max": max(0, min(int(profile.get("proactive_weekly_max", 7)), 50)),
         "topic_cooldown_hours": max(1, min(int(profile.get("proactive_topic_cooldown_hours", 72)), 720)),
+        "interval_hours": max(
+            1.0, min(float(profile.get("proactive_interval_hours", 24)), 168.0)
+        ),
+        "style": str(profile.get("proactive_style", "balanced")),
         "snoozed_until": profile.get("proactive_snoozed_until"),
         "excluded_topics": list(profile.get("proactive_avoid_topics", []))[:20],
         "delivery_channels": list(profile.get("proactive_delivery_channels", []))[:10],
@@ -91,8 +95,9 @@ def delivery_allowed(profile: dict, topic: str, now: datetime | None = None) -> 
         return False, "weekly_limit"
     last_topic = _parse_time((profile.get("proactive_topic_last_sent") or {}).get(topic))
     rejection_count = max(0, int(profile.get("proactive_rejection_count", 0)))
-    ignored_count = max(0, int(profile.get("proactive_ignored_count", 0)))
-    multiplier = min(4, 1 + rejection_count + ignored_count // 2)
+    # Silence is ambiguous and must not be treated as rejection. Only explicit
+    # negative feedback lengthens a topic cooldown.
+    multiplier = min(4, 1 + rejection_count)
     if last_topic and now - last_topic < timedelta(hours=cfg["topic_cooldown_hours"] * multiplier):
         return False, "topic_cooldown"
     return True, "allowed"
@@ -156,6 +161,50 @@ def handle_proactive_command(internal_id: str, text: str) -> str | None:
             return "Choose telegram, discord, whatsapp, slack, or api."
         UserManager.update_user_profile(internal_id, {"proactive_delivery_channels": [channel]})
         return f"Proactive messages will prefer {channel}."
+    if action.startswith("mode "):
+        mode = action.split(maxsplit=1)[1].strip().casefold()
+        presets = {
+            "quiet": {
+                "proactive_style": "quiet",
+                "proactive_interval_hours": 24,
+                "proactive_daily_max": 1,
+                "proactive_weekly_max": 7,
+                "proactive_topic_cooldown_hours": 72,
+                "proactive_generation_cooldown_hours": 6,
+            },
+            "balanced": {
+                "proactive_style": "balanced",
+                "proactive_interval_hours": 8,
+                "proactive_daily_max": 2,
+                "proactive_weekly_max": 12,
+                "proactive_topic_cooldown_hours": 36,
+                "proactive_generation_cooldown_hours": 4,
+            },
+            "companion": {
+                "proactive_style": "companion",
+                "proactive_interval_hours": 3,
+                "proactive_daily_max": 4,
+                "proactive_weekly_max": 24,
+                "proactive_topic_cooldown_hours": 12,
+                "proactive_generation_cooldown_hours": 2,
+            },
+        }
+        if mode not in presets:
+            return "Choose proactive mode: quiet, balanced, or companion."
+        UserManager.update_user_profile(
+            internal_id,
+            {
+                **presets[mode],
+                "proactive_messaging_enabled": True,
+                "proactive_ignored_count": 0,
+                "proactive_awaiting_response": False,
+            },
+        )
+        return (
+            f"Proactive mode is now {mode}: up to {presets[mode]['proactive_daily_max']} "
+            f"messages per day, normally at least {presets[mode]['proactive_interval_hours']} "
+            "hours apart, with quiet hours still respected."
+        )
     if action in {"why", "why did you send this?", "settings", "status"}:
         if action.startswith("why"):
             reason = profile.get("proactive_last_reason") or "No proactive message reason is available."
@@ -163,9 +212,10 @@ def handle_proactive_command(internal_id: str, text: str) -> str | None:
         cfg = settings(profile)
         quiet = cfg["quiet_hours"]
         return (f"Proactive: {'enabled' if cfg['enabled'] else 'disabled'}; timezone {cfg['timezone']}; "
-                f"quiet hours {quiet['start']:02d}:00–{quiet['end']:02d}:00; limits {cfg['daily_max']}/day, "
+                f"mode {cfg['style']}; quiet hours {quiet['start']:02d}:00–{quiet['end']:02d}:00; "
+                f"cadence {cfg['interval_hours']:g}h; limits {cfg['daily_max']}/day, "
                 f"{cfg['weekly_max']}/week; topic cooldown {cfg['topic_cooldown_hours']}h; "
                 f"snoozed until {cfg['snoozed_until'] or 'not snoozed'}. Excluded topics: "
                 f"{', '.join(cfg['excluded_topics']) or 'none'}; channels: "
                 f"{', '.join(cfg['delivery_channels']) or 'identity-linked default'}.")
-    return "Use /proactive, enable, disable, snooze 1d, exclude <topic>, channel <name>, or why."
+    return "Use /proactive, enable, disable, mode quiet|balanced|companion, snooze 1d, exclude <topic>, channel <name>, or why."

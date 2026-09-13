@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from agent.tooling import policies
+from agent.tooling.errors import SandboxCommandError
 from agent.tooling.project_tools import _apply_project_change, _code_context
 
 pytestmark = pytest.mark.security
@@ -126,6 +127,28 @@ def test_generated_secret_write_is_rejected_before_any_change(monkeypatch, tmp_p
     with pytest.raises(PermissionError, match="escaped|Secret"):
         _apply_project_change("unsafe", tmp_path)
     assert existing.read_text(encoding="utf-8") == "original\n"
+
+
+def test_nonzero_sandbox_exit_is_a_typed_safe_failure(monkeypatch, tmp_path):
+    workspace, _ = configure_roots(monkeypatch, tmp_path)
+
+    class FakeProcess:
+        pid = 4321
+        returncode = 1
+
+        def __init__(self, argv, **kwargs):
+            pass
+
+        def communicate(self, timeout=None):
+            return b"", b"bwrap: Creating new namespace failed: Resource temporarily unavailable"
+
+    monkeypatch.setattr(policies.shutil, "which", lambda _name: "/usr/bin/bwrap")
+    monkeypatch.setattr(policies.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(SandboxCommandError) as caught:
+        policies.run_sandboxed(["pytest", "-q"], workspace)
+    assert "nothing is still running" in caught.value.user_message.lower()
+    assert "bwrap" not in caught.value.user_message.lower()
 
 
 def test_approved_change_returns_diff_and_retains_rollback(monkeypatch, tmp_path):

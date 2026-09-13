@@ -6,7 +6,7 @@ Uses exchangerate.host API (free, no authentication required).
 
 import logging
 import httpx
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from utils.ttl_cache import TTLCache
 
@@ -112,11 +112,7 @@ async def convert_currency(
             "converted_amount": amount,
             "converted_currency": to_currency,
             "exchange_rate": 1.0,
-            "timestamp": (
-                datetime.now(datetime.UTC)
-                if hasattr(datetime, "UTC")
-                else datetime.utcnow()
-            ),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     # Fetch exchange rates with from_currency as base
@@ -139,11 +135,7 @@ async def convert_currency(
         "converted_amount": round(converted_amount, 2),
         "converted_currency": to_currency,
         "exchange_rate": round(exchange_rate, 6),
-        "timestamp": (
-            datetime.now(datetime.UTC)
-            if hasattr(datetime, "UTC")
-            else datetime.utcnow()
-        ),
+        "timestamp": datetime.now(timezone.utc),
     }
 
 

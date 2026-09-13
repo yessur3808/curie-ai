@@ -152,6 +152,11 @@ def extract_city_from_message(message: str) -> Optional[str]:
     str | None
         Title-cased city name, or ``None`` if no recognisable city was found.
     """
+    # Keep the common uppercase abbreviation strict.  Treating every lowercase
+    # "la" as Los Angeles would create false matches in French conversation.
+    if re.search(r"\bL\.?A\.?\b", message):
+        return "Los Angeles"
+
     message_lower = message.lower()
 
     # Ordered list of (regex, canonical city name) pairs.

@@ -13,6 +13,11 @@ class PersonalityAdapter:
         r"\b(code|python|bug|error|stack|api|database|algorithm|optimi[sz]e|debug|architecture|model)\b",
         re.IGNORECASE,
     )
+    _FORMAL_PATTERNS = re.compile(
+        r"\b(?:formal|professional tone|business tone|official wording|executive summary|"
+        r"cover letter|legal memo|formal report)\b",
+        re.IGNORECASE,
+    )
     _CELEBRATION_PATTERNS = re.compile(
         r"\b(yes|yay|great|awesome|amazing|won|success|passed|done|finally)\b",
         re.IGNORECASE,
@@ -34,7 +39,14 @@ class PersonalityAdapter:
     )
     _SUBSTANTIVE_PATTERNS = re.compile(
         r"\b(?:why|how|compare|analy[sz]e|research|plan|design|implement|debug|fix|"
-        r"review|architecture|tradeoffs?|recommend|explain)\b",
+        r"review|architecture|tradeoffs?|recommend|explain|projects?|ideas?|brainstorm|"
+        r"build|create|draft|write|summari[sz]e|evaluate|investigate)\b",
+        re.IGNORECASE,
+    )
+    _COMMAND_PATTERNS = re.compile(
+        r"^(?:(?:please\s+)|(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?))?"
+        r"(?:turn|switch|set|start|stop|open|close|lock|unlock|"
+        r"enable|disable|run|send|show|check|cancel|pause|resume|remind|schedule)\b",
         re.IGNORECASE,
     )
 
@@ -55,11 +67,21 @@ class PersonalityAdapter:
             user_emotion = "technical"
 
         urgency = bool(self._URGENT_PATTERNS.search(text))
+        explicitly_formal = bool(self._FORMAL_PATTERNS.search(text))
         mode = (
             "urgent"
             if urgency
-            else ("professional" if user_emotion == "technical" else "casual")
+            else ("professional" if explicitly_formal else "casual")
         )
+
+        if self._SOCIAL_PATTERNS.fullmatch(text):
+            interaction_kind = "social"
+        elif self._COMMAND_PATTERNS.search(text):
+            interaction_kind = "command"
+        elif self._SUBSTANTIVE_PATTERNS.search(text):
+            interaction_kind = "explanation"
+        else:
+            interaction_kind = "conversation"
 
         trust_signal = "new"
         history_len = len(history or [])
@@ -72,7 +94,9 @@ class PersonalityAdapter:
             response_depth = "social"
         elif self._DEEP_PATTERNS.search(text):
             response_depth = "deep"
-        elif self._SUBSTANTIVE_PATTERNS.search(text) or len(text.split()) > 20:
+        elif interaction_kind == "command":
+            response_depth = "brief"
+        elif self._SUBSTANTIVE_PATTERNS.search(text) or len(text.split()) > 28:
             response_depth = "focused"
         else:
             response_depth = "brief"
@@ -82,8 +106,10 @@ class PersonalityAdapter:
         if response_depth not in {"social", "deep"} and not urgency:
             if verbosity == "concise":
                 response_depth = "brief"
-            elif verbosity == "detailed":
-                response_depth = "deep" if response_depth == "focused" else "focused"
+            elif verbosity == "detailed" and interaction_kind != "command":
+                response_depth = (
+                    "deep" if response_depth == "focused" else "focused"
+                )
         if adaptation.get("research_depth") == "deep" and re.search(
             r"\b(?:research|investigate|compare sources?)\b", text, re.I
         ):
@@ -96,6 +122,8 @@ class PersonalityAdapter:
             "history_len": history_len,
             "trust_signal": trust_signal,
             "response_depth": response_depth,
+            "interaction_kind": interaction_kind,
+            "explicitly_formal": explicitly_formal,
             "adaptation_tone": adaptation.get("tone"),
             "preferred_tools": list(adaptation.get("preferred_tools", [])),
             "user_profile_keys": sorted(list((user_profile or {}).keys())),

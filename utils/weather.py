@@ -1,7 +1,8 @@
 """Keyless live weather and forecast data backed by Open-Meteo."""
 
 from __future__ import annotations
-import re
+
+from datetime import date
 import aiohttp
 import httpx
 from utils.ttl_cache import TTLCache
@@ -117,7 +118,10 @@ async def get_weather(city: str, unit: str = "metric", day_offset: int = 0):
                 _FORECAST_URL,
                 params={
                     **common,
-                    "current": "temperature_2m,apparent_temperature,precipitation,rain,showers,weather_code",
+                    "current": (
+                        "temperature_2m,apparent_temperature,relative_humidity_2m,"
+                        "precipitation,rain,showers,weather_code"
+                    ),
                 },
             )
             response.raise_for_status()
@@ -130,6 +134,7 @@ async def get_weather(city: str, unit: str = "metric", day_offset: int = 0):
             result = {
                 "observed_at": current.get("time"),
                 "apparent_temperature": current.get("apparent_temperature"),
+                "relative_humidity": current.get("relative_humidity_2m"),
             }
     is_raining = rain > 0 or code in _WET_CODES
     tips = []
@@ -156,12 +161,71 @@ async def get_weather(city: str, unit: str = "metric", day_offset: int = 0):
 
 
 def extract_city_from_message(message):
-    match = re.search(
-        r"(?:weather|rain(?:ing)?|forecast|temperature|hot|cold|humid|sunny).*?\b(?:in|at|for)\s+([A-Za-z][A-Za-z .'-]{1,80}?)[?!.]*$",
-        message,
-        re.I,
-    )
-    return match.group(1).strip().title() if match else None
+    """Compatibility wrapper around the canonical city recognizer."""
+    from utils.datetime_info import extract_city_from_message as extract_city
+
+    return extract_city(message)
+
+
+async def get_weather_range(
+    city: str, start_date: date, end_date: date, unit: str = "metric"
+) -> dict:
+    """Return one bounded daily forecast range in a single provider request."""
+    if end_date < start_date:
+        raise ValueError("Forecast end date must not be before its start date")
+    today = date.today()
+    start_offset = (start_date - today).days
+    end_offset = (end_date - today).days
+    if start_offset < 0:
+        raise ValueError("Historical weather is not available through this forecast tool")
+    if end_offset > 15:
+        raise ValueError("Forecast is not available that far ahead")
+
+    temp_unit = "fahrenheit" if unit == "imperial" else "celsius"
+    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=False) as client:
+        place = await _geocode(client, city)
+        response = await client.get(
+            _FORECAST_URL,
+            params={
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "temperature_unit": temp_unit,
+                "timezone": "auto",
+                "forecast_days": end_offset + 1,
+                "daily": (
+                    "weather_code,temperature_2m_max,temperature_2m_min,"
+                    "precipitation_probability_max,rain_sum"
+                ),
+            },
+        )
+        response.raise_for_status()
+        daily = response.json()["daily"]
+
+    days = []
+    for index in range(start_offset, end_offset + 1):
+        code = int(daily["weather_code"][index])
+        rain = float(daily["rain_sum"][index] or 0)
+        days.append(
+            {
+                "date": daily["time"][index],
+                "low": daily["temperature_2m_min"][index],
+                "high": daily["temperature_2m_max"][index],
+                "precipitation_probability": daily[
+                    "precipitation_probability_max"
+                ][index],
+                "description": _WMO.get(code, "Unknown conditions"),
+                "rain_mm": rain,
+                "is_raining": rain > 0 or code in _WET_CODES,
+            }
+        )
+    return {
+        "city": place.get("name", city),
+        "country": place.get("country"),
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "days": days,
+        "source": "Open-Meteo",
+    }
 
 
 async def get_hko_typhoon_signal():

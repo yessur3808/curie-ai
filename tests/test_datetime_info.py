@@ -139,6 +139,11 @@ def test_extract_city_multi_word():
     assert extract_city_from_message("How is Hong Kong today?") == "Hong Kong"
 
 
+def test_extract_city_los_angeles_abbreviation_is_case_sensitive():
+    assert extract_city_from_message("What will the weather in LA be?") == "Los Angeles"
+    assert extract_city_from_message("la météo à Paris") == "Paris"
+
+
 def test_timezone_and_city_extraction_together():
     """Both timezone and city can be extracted from the same message."""
     message = "What's the weather in Hong Kong?"

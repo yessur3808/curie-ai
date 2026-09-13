@@ -42,6 +42,7 @@ class PersonalityContext:
         directives = [
             f"- Active mode: {mode}",
             f"- Detected user context: {runtime.get('user_emotion', 'neutral')}",
+            f"- Interaction kind: {runtime.get('interaction_kind', 'conversation')}",
             f"- Response depth: {runtime.get('response_depth', 'brief')}",
         ]
         directives.extend(planner_directives(response_plan))
@@ -49,11 +50,23 @@ class PersonalityContext:
         depth = runtime.get("response_depth", "brief")
         depth_rules = {
             "social": "Reply casually in 1–2 short sentences, normally under 25 words. No list, speech, or elaborate self-description.",
-            "brief": "Answer directly in 1–3 sentences, normally under 85 words. Do not add generic advice or a follow-up question unless it is genuinely useful.",
-            "focused": "Give a complete, practical answer with enough explanation for the task; use structure only when it improves clarity.",
-            "deep": "Give a thorough, well-structured answer with rationale, caveats, examples, and actionable detail where useful.",
+            "brief": "Answer directly in 1–3 sentences, normally under 70 words. Do not add generic advice or a follow-up question unless it is genuinely useful.",
+            "focused": "Give a complete, practical answer with the explanation needed for the task. Keep the language conversational and use structure only when it improves clarity.",
+            "deep": "Give a thorough, well-structured answer with rationale, caveats, examples, and actionable detail where they are useful, without padding.",
         }
         directives.append(f"- Length target: {depth_rules[depth]}")
+
+        if runtime.get("interaction_kind") == "command":
+            directives.append(
+                "- Command delivery: sound quietly capable. Report the verified outcome or "
+                "blocker first in one or two short sentences. Skip preambles and do not restate "
+                "the request."
+            )
+        elif runtime.get("user_emotion") == "technical" and mode == "casual":
+            directives.append(
+                "- Technical delivery: stay precise but conversational. Do not become formal "
+                "merely because the subject is technical."
+            )
 
         if values:
             directives.append("- Core values to preserve: " + ", ".join(values[:5]))
@@ -100,11 +113,21 @@ class PersonalityContext:
             primary = language.get("primary_language", "english")
             secondary = language.get("secondary_language")
             if secondary:
-                directives.append(
-                    f"- Language: keep {primary} dominant, but let Curie's {secondary} identity be clearly present. "
-                    f"In casual conversation, usually include one short, natural {secondary} expression or mannerism. "
-                    "Use less during technical answers and none when clarity or urgency would suffer."
-                )
+                if (
+                    runtime.get("interaction_kind") == "command"
+                    or runtime.get("user_emotion") == "technical"
+                    or mode in {"urgent", "professional"}
+                ):
+                    directives.append(
+                        f"- Language: keep {primary} dominant. Usually omit {secondary} from "
+                        "this command or urgent reply so the result stays crisp."
+                    )
+                else:
+                    directives.append(
+                        f"- Language: keep {primary} dominant. Curie's {secondary} identity may "
+                        f"appear as one short, natural expression when it genuinely fits, but it "
+                        "is optional and never a quota. Avoid repeating a mannerism used recently."
+                    )
 
         return directives
 

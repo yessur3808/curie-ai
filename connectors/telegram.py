@@ -29,7 +29,7 @@ from telegram.ext import (
 from agent.chat_workflow import ChatWorkflow
 
 from utils.session import set_busy_temporarily, clear_user_busy
-from utils.formatting import MARKDOWN_SKILL_MODELS
+from utils.formatting import strip_markdown, telegram_html
 from memory import UserManager
 from memory.session_store import get_session_manager
 from utils.db import is_master_user
@@ -160,6 +160,39 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"{greeting}")
 
 
+async def handle_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Create a Telegram poll from `/poll Question | Option 1 | Option 2`."""
+    if not update.message:
+        return
+    raw = " ".join(context.args or []).strip()
+    parts = [part.strip() for part in raw.split("|") if part.strip()]
+    if len(parts) < 3:
+        await update.message.reply_text(
+            "Use `/poll Question | Option 1 | Option 2` (up to 10 options).",
+            parse_mode="Markdown",
+        )
+        return
+    question, options = parts[0], parts[1:]
+    if len(question) > 300 or len(options) > 10 or any(len(option) > 100 for option in options):
+        await update.message.reply_text(
+            "Polls support a 300-character question and 2 to 10 options of up to 100 characters each."
+        )
+        return
+    await update.message.reply_poll(question=question, options=options)
+
+
+async def handle_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Keep transient Telegram transport failures concise while retaining retries."""
+    error = getattr(context, "error", None)
+    error_types = {base.__name__ for base in type(error).__mro__} if error else set()
+    if error_types & {"NetworkError", "TimedOut", "RetryAfter"}:
+        logger.warning("Transient Telegram network error; polling will retry: %s", error)
+        return
+    logger.error(
+        "Unhandled Telegram update error: %s", error, exc_info=error if error else True
+    )
+
+
 def _persona_startup_message() -> str:
     """Choose an awake message belonging to the active personality."""
     persona = getattr(_runtime.workflow, "persona", {}) or {}
@@ -206,6 +239,7 @@ async def notify_master_awake(application) -> None:
                 BotCommand("reset", "Reset this conversation"),
                 BotCommand("history", "Show conversation history statistics"),
                 BotCommand("reminders", "List upcoming reminders"),
+                BotCommand("poll", "Create a poll: question | option | option"),
                 BotCommand("busy", "Pause proactive messages temporarily"),
                 BotCommand("resume", "Resume proactive messages"),
                 BotCommand("voice", "Voice replies: on, off, or status"),
@@ -270,15 +304,18 @@ async def notify_master_awake(application) -> None:
     logger.info("Sent startup-ready notification to the configured master user")
 
 
-def split_telegram_message(text: str, limit: int = 3500) -> list[str]:
+def split_telegram_message(
+    text: str, limit: int = 3500, preferred_limit: int = 1400
+) -> list[str]:
     """Split long replies at natural boundaries below Telegram's hard limit."""
     text = (text or "").strip()
     if not text:
         return [""]
     chunks = []
     remaining = text
-    while len(remaining) > limit:
-        window = remaining[: limit + 1]
+    target_limit = min(limit, max(400, preferred_limit))
+    while len(remaining) > target_limit:
+        window = remaining[: target_limit + 1]
         split_at = max(
             window.rfind("\n\n"),
             window.rfind("\n"),
@@ -287,8 +324,8 @@ def split_telegram_message(text: str, limit: int = 3500) -> list[str]:
             window.rfind("! "),
             window.rfind(" "),
         )
-        if split_at < limit // 2:
-            split_at = limit
+        if split_at < target_limit // 2:
+            split_at = target_limit
         elif window[split_at : split_at + 2] in {". ", "? ", "! "}:
             split_at += 1
         chunks.append(remaining[:split_at].strip())
@@ -298,16 +335,19 @@ def split_telegram_message(text: str, limit: int = 3500) -> list[str]:
     return chunks
 
 
-async def reply_in_chunks(message, text: str, parse_mode: Optional[str] = None) -> None:
-    """Send readable chunks and fall back to plain text on formatting errors."""
-    for chunk in split_telegram_message(text):
+async def reply_in_chunks(
+    message, text: str, parse_mode: Optional[str] = "HTML"
+) -> None:
+    """Send readable rich-text chunks and safely fall back to plain text."""
+    for raw_chunk in split_telegram_message(text):
+        chunk = telegram_html(raw_chunk) if parse_mode == "HTML" else raw_chunk
         try:
             await message.reply_text(chunk, parse_mode=parse_mode)
         except Exception:
             if not parse_mode:
                 raise
             logger.debug("Telegram formatting failed; retrying chunk as plain text")
-            await message.reply_text(chunk)
+            await message.reply_text(strip_markdown(raw_chunk))
 
 
 async def handle_busy(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -665,9 +705,6 @@ async def _process_and_reply(
     }
     result = await _runtime.workflow.process_message(normalized_input)
     response_text = result.get("text", "[Error: No response]")
-    parse_mode = (
-        "Markdown" if result.get("model_used") in MARKDOWN_SKILL_MODELS else None
-    )
     try:
         from services.voice_delivery import synthesize_reply, voice_replies_enabled
 
@@ -687,7 +724,7 @@ async def _process_and_reply(
                     Path(voice_path).unlink(missing_ok=True)
     except Exception as exc:
         logger.warning("Telegram voice reply failed; sending text: %s", exc)
-    await reply_in_chunks(update.message, response_text, parse_mode=parse_mode)
+    await reply_in_chunks(update.message, response_text)
 
 
 async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -860,7 +897,7 @@ async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     result = await _runtime.workflow.process_message(normalized_input)
     response_text = result.get("text", "📅 No reminders found.")
-    await update.message.reply_text(response_text, parse_mode="Markdown")
+    await reply_in_chunks(update.message, response_text)
 
 
 def start_telegram_bot(workflow: ChatWorkflow):
@@ -903,6 +940,7 @@ def start_telegram_bot(workflow: ChatWorkflow):
     app.add_handler(CommandHandler("reset", handle_reset))
     app.add_handler(CommandHandler("history", handle_history))
     app.add_handler(CommandHandler("reminders", handle_reminders))
+    app.add_handler(CommandHandler("poll", handle_poll))
     app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
     for workflow_command in (
         "agenda",
@@ -923,6 +961,7 @@ def start_telegram_bot(workflow: ChatWorkflow):
     app.add_handler(
         MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media_message)
     )
+    app.add_error_handler(handle_telegram_error)
 
     print("🤖 Telegram bot is running...")
     # main.py may run this connector in a worker thread alongside proactive

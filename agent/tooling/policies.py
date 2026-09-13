@@ -12,6 +12,8 @@ import subprocess
 import tempfile
 import uuid
 
+from agent.tooling.errors import SandboxCommandError
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_ROOT = Path(os.getenv("CURIE_WORKSPACE_ROOT", str(REPO_ROOT))).resolve()
@@ -270,4 +272,6 @@ def run_sandboxed(
         .decode("utf-8", errors="replace")
         .strip()
     )
+    if process.returncode != 0:
+        raise SandboxCommandError(executable, process.returncode, output)
     return f"Exit code: {process.returncode}\n{output}".strip()

@@ -1,0 +1,2 @@
+# Optional interactive browser capability for headless Ubuntu servers.
+playwright>=1.50,<2

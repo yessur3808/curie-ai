@@ -9,7 +9,7 @@ suspicious or malicious communications across a network.
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -202,7 +202,7 @@ class NetworkAnalyzer:
                 suspicious.append(entry)
 
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "total_connections": len(connections),
             "status_breakdown": status_counts,
             "suspicious_count": len(suspicious),
@@ -225,7 +225,7 @@ class NetworkAnalyzer:
             return {"error": "psutil is not available."}
 
         stats: Dict[str, Any] = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "interfaces": {},
         }
 
@@ -344,7 +344,9 @@ class NetworkAnalyzer:
                 summaries.append(summary)
 
             return {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
                 "packet_count": len(summaries),
                 "interface": iface or "default",
                 "filter": bpf_filter or "none",

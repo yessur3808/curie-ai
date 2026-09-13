@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 from agent.orchestration.contracts import ResponseCandidate
 from agent.tooling import ToolContext, get_runtime_registry
+from agent.tooling.errors import user_facing_tool_error
 
 
 class SpecialistRouter:
@@ -40,9 +41,12 @@ class SpecialistRouter:
             if inspect.isawaitable(result):
                 result = await result
             return ResponseCandidate(str(result), route) if result else None
-        result = await self.registry.execute(
-            route, {"text": text}, ToolContext(str(internal_id), platform=platform)
-        )
+        try:
+            result = await self.registry.execute(
+                route, {"text": text}, ToolContext(str(internal_id), platform=platform)
+            )
+        except Exception as exc:
+            return ResponseCandidate(user_facing_tool_error(exc, route), route)
         return ResponseCandidate(result.text, route) if result.text else None
 
     @staticmethod

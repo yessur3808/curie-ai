@@ -27,6 +27,15 @@ MIGRATIONS = (
             "DROP INDEX IF EXISTS idx_messages_owner_time",
         ),
     ),
+    Migration(
+        2,
+        "adaptive_memory_owner_index",
+        (
+            "CREATE INDEX IF NOT EXISTS idx_adaptive_memories_owner "
+            "ON adaptive_memories(internal_id)",
+        ),
+        ("DROP INDEX IF EXISTS idx_adaptive_memories_owner",),
+    ),
 )
 
 

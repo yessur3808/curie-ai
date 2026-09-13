@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 from types import SimpleNamespace
 
@@ -11,6 +12,26 @@ def test_split_telegram_message_preserves_content_and_limits_chunks():
     assert len(chunks) > 1
     assert all(len(chunk) <= 500 for chunk in chunks)
     assert " ".join(chunks).replace("  ", " ") == text
+
+
+def test_long_telegram_answer_is_split_into_separate_readable_messages():
+    text = "\n\n".join(f"Section {index}: " + "useful detail " * 18 for index in range(8))
+    chunks = telegram.split_telegram_message(text)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 1400 for chunk in chunks)
+
+
+def test_reply_in_chunks_uses_safe_telegram_html():
+    replies = []
+
+    async def reply_text(text, parse_mode=None):
+        replies.append((text, parse_mode))
+
+    message = SimpleNamespace(reply_text=reply_text)
+    asyncio.run(telegram.reply_in_chunks(message, "**Ready**\n- Lamp is off"))
+
+    assert replies == [("<b>Ready</b>\n• Lamp is off", "HTML")]
 
 
 def test_proactive_send_uses_client_owned_by_calling_loop(monkeypatch):
@@ -64,6 +85,28 @@ def test_voice_off_command_has_dedicated_telegram_handler(tmp_path, monkeypatch)
     context = SimpleNamespace(args=["off"])
     asyncio.run(telegram.handle_voice_command(update, context))
     assert replies == ["Voice replies are now disabled on telegram."]
+
+
+def test_poll_command_creates_native_telegram_poll():
+    polls = []
+
+    async def reply_poll(**kwargs):
+        polls.append(kwargs)
+
+    update = SimpleNamespace(message=SimpleNamespace(reply_poll=reply_poll))
+    context = SimpleNamespace(args=["Best", "snack?", "|", "Fruit", "|", "Cake"])
+    asyncio.run(telegram.handle_poll(update, context))
+    assert polls == [{"question": "Best snack?", "options": ["Fruit", "Cake"]}]
+
+
+def test_transient_telegram_error_is_handled_without_traceback(caplog):
+    class NetworkError(Exception):
+        pass
+
+    caplog.set_level(logging.WARNING, logger="connectors.telegram")
+    context = SimpleNamespace(error=NetworkError("Bad Gateway"))
+    asyncio.run(telegram.handle_telegram_error(None, context))
+    assert "polling will retry" in caplog.text
 
 
 def test_text_reply_to_photo_reprocesses_referenced_attachment(monkeypatch):

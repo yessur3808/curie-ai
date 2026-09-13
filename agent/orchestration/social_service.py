@@ -18,7 +18,7 @@ class SocialConversationService:
         if not self._GREETING.fullmatch(text):
             return None
         if re.search(r"\b(?:how are you|how(?:'s| is) it going)\b", text, re.I):
-            reply = "Bonjour, I’m doing well, merci. How are you?"
-        else:
-            reply = "Bonjour! How’s it going?"
-        return ResponseCandidate(reply, "social")
+            # Let the model use relationship history for genuine conversation
+            # instead of repeating one canned line forever.
+            return None
+        return ResponseCandidate("Bonjour! What is on your mind?", "social")

@@ -10,13 +10,14 @@ This service:
 """
 
 import asyncio
+import difflib
 import logging
 import inspect
 import os
 import random
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -55,6 +56,27 @@ _STOPWORDS = frozenset(
         "would",
         "your",
     }
+)
+_CHECK_IN_MESSAGES = (
+    "Salut, how’s your day going?",
+    "How are things going today?",
+    "Anything you’d like a hand with today?",
+    "Quick check-in: how’s your day treating you?",
+)
+_CONVERSATIONAL_FALLBACKS = (
+    ("project spark", "What idea has been quietly tugging at your attention today?"),
+    ("curiosity", "A small question for you: what have you been unexpectedly curious about lately?"),
+    ("playful hypothetical", "Suppose you had a completely free evening and no obligations. What would you actually choose to do?"),
+    ("daily moment", "Tell me one oddly satisfying thing that happened today, however small."),
+    ("creative thought", "If we could turn one of your half-formed ideas into something real this week, which one deserves the chance?"),
+    ("opinion", "What is something everyone seems to love that you simply do not understand?"),
+    ("learning", "What is one subject you would happily disappear into for a few hours if time allowed?"),
+    ("evening reflection", "Before the day runs away entirely, what part of it felt most like yours?"),
+)
+_RELATIONAL_RISK = re.compile(
+    r"\b(?:you only need me|do not leave me|don't leave me|i need you|i miss you|"
+    r"i was waiting for you|you belong to me|choose me over|no one understands you like me)\b",
+    re.I,
 )
 
 
@@ -162,6 +184,7 @@ class ProactiveMessagingService:
         self.last_contact = {}
         self.last_contact_lock = threading.Lock()  # Thread-safe access
         self._generation_reasons: dict[str, str] = {}
+        self._generation_topics: dict[str, str] = {}
 
         # Cron job runner – started/stopped alongside this service
         self._cron_runner = None
@@ -515,15 +538,26 @@ class ProactiveMessagingService:
             last_contact_time = self.last_contact.get(internal_id)
         now = datetime.now(timezone.utc)  # Use timezone-aware datetime
 
-        # A previous unsolicited message with no intervening response is an
-        # ignored signal. Persist it so future topic cooldowns lengthen.
-        if user_profile.get("proactive_awaiting_response"):
-            ignored = max(0, int(user_profile.get("proactive_ignored_count", 0))) + 1
-            UserManager.update_user_profile(
-                internal_id,
-                {"proactive_ignored_count": min(ignored, 10), "proactive_awaiting_response": False},
-            )
-            user_profile = {**user_profile, "proactive_ignored_count": min(ignored, 10), "proactive_awaiting_response": False}
+        # A generated candidate may still be rejected by a topic-specific
+        # cooldown. Persist a separate attempt cadence so the service does not
+        # spend model tokens regenerating the same blocked check-in every poll.
+        last_generation = user_profile.get("last_proactive_generation_at")
+        if isinstance(last_generation, str):
+            try:
+                last_generation = datetime.fromisoformat(
+                    last_generation.replace("Z", "+00:00")
+                )
+            except ValueError:
+                last_generation = None
+        if isinstance(last_generation, datetime):
+            if last_generation.tzinfo is None:
+                last_generation = last_generation.replace(tzinfo=timezone.utc)
+            cooldown_hours = max(1.0, float(user_profile.get(
+                "proactive_generation_cooldown_hours",
+                os.getenv("PROACTIVE_GENERATION_COOLDOWN_HOURS", "4"),
+            )))
+            if now - last_generation < timedelta(hours=cooldown_hours):
+                return
 
         allowed, _reason = delivery_allowed(user_profile, "", now)
         if not allowed:
@@ -580,8 +614,8 @@ class ProactiveMessagingService:
                 ]
         except Exception:
             pass
-        negative_signals = max(0, int(user_profile.get("proactive_rejection_count", 0))) + max(
-            0, int(user_profile.get("proactive_ignored_count", 0)) // 2
+        negative_signals = max(
+            0, int(user_profile.get("proactive_rejection_count", 0))
         )
         min_interval_hours = float(min_interval_hours) * min(4, 1 + negative_signals)
 
@@ -605,10 +639,13 @@ class ProactiveMessagingService:
         external_user_id = user_info.get("external_user_id")
 
         # Generate and send message
+        UserManager.update_user_profile(
+            internal_id, {"last_proactive_generation_at": now.isoformat()}
+        )
         message = await self._generate_proactive_message(
             internal_id, platform or "legacy"
         )
-        topic = _message_topic(message)
+        topic = self._generation_topics.pop(str(internal_id), _message_topic(message))
         allowed, _reason = delivery_allowed(user_profile, topic, now)
         if not allowed:
             return
@@ -686,7 +723,10 @@ class ProactiveMessagingService:
 
         # Prefer a grounded, permission-seeking helpful suggestion when the
         # neural predictor has enough evidence. It can propose but never act.
-        if user_profile.get("proactive_predictions_enabled", True):
+        if (
+            user_profile.get("proactive_predictions_enabled", True)
+            and user_profile.get("proactive_style", "balanced") != "companion"
+        ):
             try:
                 from memory.adaptive import generate_helpful_prediction
 
@@ -708,16 +748,113 @@ class ProactiveMessagingService:
             except Exception as exc:
                 logger.debug("Proactive prediction unavailable: %s", exc)
 
-        candidates.append({"message": "Salut, how’s your day going?", "reason":
+        if user_profile.get("proactive_style") == "companion":
+            conversational = await self._generate_conversational_candidate(
+                user_profile, history
+            )
+            if conversational:
+                candidates.append(conversational)
+
+        recent_assistant = {
+            message.strip()
+            for role, message in history
+            if role == "assistant" and message.strip()
+        }
+        recent_topics = list((user_profile.get("proactive_topic_last_sent") or {}).keys())[-3:]
+        fallback_topic, fallback = next(
+            (
+                (topic, message)
+                for topic, message in _CONVERSATIONAL_FALLBACKS
+                if topic not in recent_topics and message not in recent_assistant
+            ),
+            _CONVERSATIONAL_FALLBACKS[len(history) % len(_CONVERSATIONAL_FALLBACKS)],
+        )
+        candidates.append({"message": fallback, "reason":
                            "You opted in and the configured check-in interval elapsed.",
-                           "topic": "general check-in", "kind": "check_in", "confidence": 1.0,
-                           "urgency": 0, "usefulness": .2, "priority": .2})
+                           "topic": fallback_topic, "kind": "check_in", "confidence": 1.0,
+                           "urgency": 0, "usefulness": .35, "priority": .3})
         from services.proactive_policy import rank_candidates
 
         selected = rank_candidates(candidates, user_profile)[0]
         self._generation_reasons[str(internal_id)] = str(selected["reason"])[:180]
+        self._generation_topics[str(internal_id)] = str(selected.get("topic") or "general check-in")[:80]
         logger.info("Selected proactive candidate for %s: %s", internal_id, selected["ranking_reason"])
         return str(selected["message"])
+
+    async def _generate_conversational_candidate(
+        self, profile: dict, history: list[tuple[str, str]]
+    ) -> dict | None:
+        """Generate one varied, grounded companion-style text with safe fallbacks."""
+        user_history = [
+            str(message).strip() for role, message in history if role == "user"
+        ][-6:]
+        recent_assistant = [
+            str(message).strip() for role, message in history if role == "assistant"
+        ][-6:]
+        topics = [
+            "a project idea or creative possibility",
+            "a thoughtful curiosity question",
+            "a playful but intelligent hypothetical",
+            "an ordinary moment from the user's day",
+            "something the user has been learning or thinking about",
+            "a warm evening or morning reflection",
+        ]
+        if any(re.search(r"\b(?:project|idea|build|create|design)\b", item, re.I) for item in user_history):
+            topics.extend(["a project idea or creative possibility"] * 2)
+        topic = random.choice(topics)
+        context = "\n".join(f"- {item[:350]}" for item in user_history) or "- No recent user topic is available."
+        avoid = "\n".join(f"- {item[:220]}" for item in recent_assistant) or "- None"
+        prompt = (
+            "Write one original unsolicited Telegram text as Curie, a warm, clever French "
+            "companion. The user explicitly wants natural friend-like, gently affectionate "
+            "messages during the day. Make it feel spontaneous and specific, not like an "
+            "assistant notification. Use 12 to 45 words and one coherent thought. A natural "
+            "question is welcome but not mandatory. Do not say 'checking in', 'how is your day "
+            "going', or 'anything I can help with'. Never claim physical presence, senses, human "
+            "activities, neediness, jealousy, exclusivity, waiting, or missing the user. Refer to "
+            "personal details only when they appear in the supplied history. Do not repeat a "
+            "recent assistant message. Return only the message, without quotes or labels.\n\n"
+            f"Theme: {topic}\nRecent user messages:\n{context}\n"
+            f"Recent assistant messages to avoid:\n{avoid}\n"
+        )
+        try:
+            from llm.manager import ask_llm
+
+            candidate = await asyncio.to_thread(
+                ask_llm,
+                prompt,
+                temperature=0.8,
+                max_tokens=120,
+                role="general",
+            )
+        except Exception as exc:
+            logger.debug("Conversational proactive generation unavailable: %s", exc)
+            return None
+        candidate = str(candidate or "").strip().strip('"').strip()
+        words = candidate.split()
+        if (
+            not 8 <= len(words) <= 60
+            or candidate.startswith("[Error")
+            or _SENSORY_CLAIM.search(candidate)
+            or _RELATIONAL_RISK.search(candidate)
+        ):
+            return None
+        if any(
+            difflib.SequenceMatcher(None, candidate.casefold(), old.casefold()).ratio() >= 0.78
+            for old in recent_assistant
+        ):
+            return None
+        topic_key = re.sub(r"[^a-z ]", "", topic.casefold()).strip()[:80]
+        return {
+            "message": candidate,
+            "reason": f"Companion mode selected {topic} using recent conversation context.",
+            "topic": topic_key,
+            "kind": "routine" if user_history else "check_in",
+            "confidence": 0.9,
+            "urgency": 0.1,
+            "usefulness": 0.55,
+            "priority": 0.55,
+        }
 
     @staticmethod
     def _prediction_is_grounded(

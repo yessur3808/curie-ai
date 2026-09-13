@@ -12,11 +12,11 @@ import hashlib
 import json
 import os
 import re
-import math
 from typing import Any, Optional
 import uuid
 
 from memory.database import mongo_db
+from memory.hierarchy import default_importance, memory_stats, rank_memories
 
 _MEMORY_MIN_CONFIDENCE = float(os.getenv("ADAPTIVE_MEMORY_MIN_CONFIDENCE", "0.8"))
 _PREDICTION_MIN_CONFIDENCE = float(
@@ -24,6 +24,36 @@ _PREDICTION_MIN_CONFIDENCE = float(
 )
 _INFERRED_TTL_DAYS = int(os.getenv("ADAPTIVE_INFERRED_TTL_DAYS", "45"))
 _TEMPORARY_TTL_DAYS = int(os.getenv("ADAPTIVE_TEMPORARY_TTL_DAYS", "14"))
+
+# Keep Mongo recall reads lean. Evidence is intentionally excluded because the
+# prompt builder uses provenance metadata, not the original conversation text.
+_RETRIEVAL_PROJECTION = {
+    "_id": 1,
+    "id": 1,
+    "owner_id": 1,
+    "internal_id": 1,
+    "kind": 1,
+    "tier": 1,
+    "key": 1,
+    "value": 1,
+    "summary": 1,
+    "tags": 1,
+    "source": 1,
+    "source_message_id": 1,
+    "source_channel": 1,
+    "confidence": 1,
+    "importance": 1,
+    "contradicts": 1,
+    "status": 1,
+    "sensitivity": 1,
+    "created_at": 1,
+    "updated_at": 1,
+    "last_confirmed_at": 1,
+    "last_seen_at": 1,
+    "expires_at": 1,
+    "active": 1,
+    "confirmation_count": 1,
+}
 
 _KINDS = frozenset(
     {
@@ -36,11 +66,15 @@ _KINDS = frozenset(
         "temporary_context",
         "assistant_setting",
         "hypothesis",
+        "episode",
     }
 )
 _SENSITIVE = re.compile(
     r"\b(?:password|passcode|api[_ -]?key|secret|private[_ -]?key|credit[_ -]?card|"
-    r"bank[_ -]?account|social security|passport number|medical record|diagnosis)\b",
+    r"access[_ -]?token|auth[_ -]?token|bearer token|credential|session cookie|"
+    r"recovery code|two.factor|2fa|bank[_ -]?account|social security|passport number|"
+    r"medical record|diagnosis)\b|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+    r"\b(?:sk|ghp|xox[baprs])[-_][A-Za-z0-9_-]{16,}\b",
     re.I,
 )
 _DO_NOT_REMEMBER = re.compile(
@@ -110,13 +144,41 @@ _TEACH_PATTERN = re.compile(
 _APPROVE_PATTERN = re.compile(r"^/?approve\s+skill\s+([a-z0-9_-]{2,64})$", re.I)
 _REJECT_PATTERN = re.compile(r"^/?reject\s+skill\s+([a-z0-9_-]{2,64})$", re.I)
 _MEMORY_COMMAND = re.compile(
-    r"^/?memory(?:\s+(?P<action>inspect|timeline|why|forget|export|pause|resume|disable|correct|confirm|rollback))?(?:\s+(?P<argument>.*))?$",
+    r"^/?memory(?:\s+(?P<action>inspect|stats|search|timeline|why|forget|export|pause|resume|disable|correct|confirm|rollback))?(?:\s+(?P<argument>.*))?$",
     re.I,
 )
 _NATURAL_MEMORY = re.compile(
     r"^(?:what do you remember(?: about me)?|forget that|forget everything|"
     r"do not learn from this chat|don't learn from this chat|resume learning from this chat)$",
     re.I,
+)
+_NATURAL_MEMORY_SEARCH = re.compile(r"^what do you remember about\s+(.+?)[?.!]*$", re.I)
+_EPISODE_SIGNAL = re.compile(
+    r"\b(?:remember this|keep track of|for future reference|we (?:decided|agreed)|"
+    r"the plan is|next step|from now on|my project|our project|working on|"
+    r"i (?:want|need|plan) to|(?:can|could) we (?:build|create|make)|let's (?:build|create)|"
+    r"milestone|shipped|deployed|resolved|fixed)\b",
+    re.I,
+)
+_EPISODE_TTL_DAYS = int(os.getenv("MEMORY_EPISODE_TTL_DAYS", "180"))
+_PROFILE_RUNTIME_KEYS = frozenset(
+    {
+        "memory_enabled",
+        "memory_paused_channels",
+        "contact_channels",
+        "proactive_messaging_enabled",
+        "proactive_interval_hours",
+        "proactive_predictions_enabled",
+        "proactive_quiet_hours",
+        "proactive_daily_max",
+        "proactive_weekly_max",
+        "proactive_topic_cooldown_hours",
+        "proactive_avoid_topics",
+        "proactive_rejection_count",
+        "roles",
+        "permissions",
+        "is_master",
+    }
 )
 
 
@@ -134,6 +196,23 @@ def is_safe_proposed_action(text: str) -> bool:
     return bool(text.strip()) and not _UNSAFE_ACTIONS.search(text)
 
 
+def _sync_core_profile(internal_id: str, key: str, value: Any) -> None:
+    """Mirror a verified fact into the small always-available profile."""
+    if os.getenv("MONGODB_URI"):
+        mongo_db.user_profiles.update_one(
+            {"_id": str(internal_id)},
+            {
+                "$set": {f"facts.{key}": value},
+                "$currentDate": {"last_updated": True},
+            },
+            upsert=True,
+        )
+        return
+    from memory.users import UserManager
+
+    UserManager.update_user_profile(str(internal_id), {str(key): value})
+
+
 def record_memories(
     internal_id: str,
     facts: dict[str, Any],
@@ -146,17 +225,22 @@ def record_memories(
     """Persist facts with provenance and reinforcement counts."""
     if not internal_id or not facts:
         return []
-    if not _memory_enabled(internal_id, source_channel) or _DO_NOT_REMEMBER.search(evidence):
+    if not _memory_enabled(internal_id, source_channel) or _DO_NOT_REMEMBER.search(
+        evidence
+    ):
         return []
     now = _now()
     results = []
+    # Fact extraction commonly returns several fields. Loading the owner's
+    # store once avoids one complete database scan per field.
+    owner_memories = _all_owner_memories(str(internal_id))
     for key, value in facts.items():
         if _SENSITIVE.search(f"{key} {value}"):
             continue
         kind = _memory_kind(str(key), source)
         existing = [
             item
-            for item in _all_owner_memories(internal_id)
+            for item in owner_memories
             if item.get("active", True)
             and str(item.get("key", "")).casefold() == str(key).casefold()
         ]
@@ -190,7 +274,9 @@ def record_memories(
             ],
             "status": status,
             "sensitivity": "ordinary",
+            "importance": default_importance(kind),
             "created_at": same.get("created_at", now) if same else now,
+            "updated_at": now,
             "last_confirmed_at": now if source == "explicit_user_statement" else None,
             "last_seen_at": now,
             "expires_at": (
@@ -208,50 +294,120 @@ def record_memories(
             from memory.local_store import upsert_adaptive_memory
 
             upsert_adaptive_memory(document)
-            results.append(document)
-            continue
-        mongo_db.adaptive_memories.update_one(
-            {"_id": memory_id},
-            {
-                "$set": {
-                    **{
-                        k: v
-                        for k, v in document.items()
-                        if k not in {"_id", "created_at"}
+        else:
+            mongo_db.adaptive_memories.update_one(
+                {"_id": memory_id},
+                {
+                    "$set": {
+                        **{
+                            k: v
+                            for k, v in document.items()
+                            if k not in {"_id", "created_at"}
+                        },
                     },
+                    "$inc": {"confirmation_count": 1},
+                    "$setOnInsert": {"created_at": document["created_at"]},
                 },
-                "$inc": {"confirmation_count": 1},
-                "$setOnInsert": {"created_at": document["created_at"]},
-            },
-            upsert=True,
-        )
+                upsert=True,
+            )
+        if document["active"] and document["status"] == "verified":
+            _sync_core_profile(str(internal_id), str(key), value)
+        owner_memories = [
+            item
+            for item in owner_memories
+            if str(item.get("id") or item.get("_id")) != memory_id
+        ]
+        owner_memories.append(document)
         results.append(document)
     return results
 
 
-class LocalEmbeddingModel:
-    """Small dependency-free feature-hashing embedding model for private retrieval."""
+def record_conversation_episode(
+    internal_id: str,
+    user_message: str,
+    *,
+    source_message_id: str = "",
+    source_channel: str = "unknown",
+) -> Optional[dict]:
+    """Store only a salient user-authored decision, goal, or milestone.
 
-    dimensions = 128
+    Episodes are bounded excerpts, not model-authored summaries, so an assistant
+    hallucination cannot silently become long-term truth.
+    """
+    clean = re.sub(r"\s+", " ", str(user_message or "")).strip()
+    if (
+        not internal_id
+        or len(clean.split()) < 5
+        or not _EPISODE_SIGNAL.search(clean)
+        or _SENSITIVE.search(clean)
+        or _DO_NOT_REMEMBER.search(clean)
+        or not _memory_enabled(str(internal_id), source_channel)
+    ):
+        return None
+    now = _now()
+    content = clean[:350]
+    digest = hashlib.sha256(f"{internal_id}:{content.casefold()}".encode()).hexdigest()[
+        :24
+    ]
+    memory_id = f"episode-{digest}"
+    existing = next(
+        (
+            item
+            for item in _all_owner_memories(str(internal_id))
+            if str(item.get("id") or item.get("_id")) == memory_id
+        ),
+        None,
+    )
+    document = {
+        "_id": memory_id,
+        "id": memory_id,
+        "owner_id": str(internal_id),
+        "internal_id": str(internal_id),
+        "kind": "episode",
+        "tier": "episodic",
+        "key": f"episode_{_slug(content[:90])}"[:64],
+        "value": content,
+        "source": "explicit_conversation_episode",
+        "source_message_id": str(source_message_id)[:128],
+        "source_channel": str(source_channel)[:64],
+        "confidence": 0.95,
+        "importance": default_importance("episode"),
+        "evidence": content,
+        "contradicts": [],
+        "status": "recorded",
+        "sensitivity": "ordinary",
+        "created_at": existing.get("created_at", now) if existing else now,
+        "updated_at": now,
+        "last_seen_at": now,
+        "last_confirmed_at": now,
+        "expires_at": now + timedelta(days=max(1, _EPISODE_TTL_DAYS)),
+        "active": True,
+    }
+    if not os.getenv("MONGODB_URI"):
+        from memory.local_store import upsert_adaptive_memory
 
-    def encode(self, text: str) -> list[float]:
-        vector = [0.0] * self.dimensions
-        tokens = re.findall(r"[a-z0-9]+", text.casefold())
-        features = tokens + [
-            token[i : i + 3] for token in tokens for i in range(max(0, len(token) - 2))
-        ]
-        for feature in features:
-            digest = hashlib.blake2b(feature.encode(), digest_size=4).digest()
-            vector[int.from_bytes(digest, "big") % self.dimensions] += 1.0
-        norm = math.sqrt(sum(value * value for value in vector)) or 1.0
-        return [value / norm for value in vector]
-
-
-_EMBEDDER = LocalEmbeddingModel()
+        upsert_adaptive_memory(document)
+        return document
+    mongo_db.adaptive_memories.update_one(
+        {"_id": memory_id},
+        {
+            "$set": {
+                **{
+                    key: value
+                    for key, value in document.items()
+                    if key not in {"_id", "created_at"}
+                }
+            },
+            "$inc": {"confirmation_count": 1},
+            "$setOnInsert": {"created_at": document["created_at"]},
+        },
+        upsert=True,
+    )
+    return document
 
 
 def get_relevant_memories(internal_id: str, query: str, limit: int = 8) -> list[dict]:
-    """Owner-filter first, then semantically rank active non-expired memories."""
+    """Owner-filter first, then return a gated, budgeted hierarchical recall."""
     if not _memory_enabled(internal_id):
         return []
     now = _now()
@@ -292,19 +448,11 @@ def get_relevant_memories(internal_id: str, query: str, limit: int = 8) -> list[
                         {"$or": [{"expires_at": None}, {"expires_at": {"$gt": now}}]},
                     ],
                     "active": True,
-                }
-            ).limit(100)
+                },
+                _RETRIEVAL_PROJECTION,
+            ).limit(max(100, min(int(os.getenv("MEMORY_MAX_CANDIDATES", "500")), 2000)))
         )
-    query_vector = _EMBEDDER.encode(query)
-    for doc in docs:
-        text = f"{doc.get('key', '')} {doc.get('value', '')}".lower()
-        vector = _EMBEDDER.encode(text)
-        similarity = sum(left * right for left, right in zip(query_vector, vector))
-        doc["_relevance"] = similarity + 0.1 * float(doc.get("confidence", 0))
-    docs.sort(
-        key=lambda d: (d["_relevance"], d.get("confirmation_count", 0)), reverse=True
-    )
-    return docs[:limit]
+    return rank_memories(query, docs, limit=limit)
 
 
 def get_pending_memory_conflicts(internal_id: str) -> list[dict]:
@@ -349,6 +497,12 @@ def handle_adaptive_command(
     skill_response = handle_skill_command(str(internal_id), text)
     if skill_response is not None:
         return skill_response
+    natural_search = _NATURAL_MEMORY_SEARCH.fullmatch(text.strip())
+    if natural_search:
+        subject = natural_search.group(1).strip()
+        if subject.casefold() == "me":
+            return _handle_memory_command(str(internal_id), "inspect", "")
+        return _handle_memory_command(str(internal_id), "search", subject)
     natural = _NATURAL_MEMORY.fullmatch(text.strip())
     if natural:
         from memory.repositories import get_repositories
@@ -356,17 +510,23 @@ def handle_adaptive_command(
         lowered = text.strip().casefold()
         if lowered.startswith("what do you remember"):
             return _handle_memory_command(str(internal_id), "inspect", "")
-        if lowered in {"forget that", "forget everything"}:
+        if lowered == "forget everything":
             return _handle_memory_command(str(internal_id), "forget", "all")
+        if lowered == "forget that":
+            return "Tell me which memory to forget, so I don't remove the wrong thing."
         profile = get_repositories().profiles.get(str(internal_id))
         paused = set(profile.get("memory_paused_channels", []))
         if lowered.startswith(("do not", "don't")) and channel:
             paused.add(channel)
-            get_repositories().profiles.update(str(internal_id), {"memory_paused_channels": sorted(paused)})
+            get_repositories().profiles.update(
+                str(internal_id), {"memory_paused_channels": sorted(paused)}
+            )
             return f"I won’t learn from this {channel} chat. Existing memories are unchanged."
         if channel:
             paused.discard(channel)
-            get_repositories().profiles.update(str(internal_id), {"memory_paused_channels": sorted(paused)})
+            get_repositories().profiles.update(
+                str(internal_id), {"memory_paused_channels": sorted(paused)}
+            )
             return f"Memory learning resumed for this {channel} chat."
     memory_match = _MEMORY_COMMAND.fullmatch(text.strip())
     if memory_match:
@@ -418,6 +578,24 @@ def _forget_memories(internal_id: str, key: str | None = None) -> int:
     )
 
 
+def _forget_core_profile(internal_id: str, key: str | None = None) -> int:
+    from memory.users import UserManager
+
+    if key is not None:
+        keys = {key}
+    else:
+        profile = UserManager.get_user_profile(str(internal_id)) or {}
+        keys = {
+            item
+            for item in profile
+            if item not in _PROFILE_RUNTIME_KEYS
+            and not item.startswith("_")
+            and not item.startswith("proactive_")
+            and not item.startswith("last_")
+        }
+    return UserManager.delete_user_profile_facts(str(internal_id), keys)
+
+
 def _update_memory(internal_id: str, memory_id: str, updates: dict) -> bool:
     if not os.getenv("MONGODB_URI"):
         from memory.local_store import update_adaptive_memory
@@ -445,17 +623,50 @@ def _handle_memory_command(internal_id: str, action: str, argument: str) -> str:
         return json.dumps(
             {"owner_id": internal_id, "memories": exportable}, default=str, indent=2
         )
+    if action == "stats":
+        stats = memory_stats(memories)
+        tiers = stats["tiers"]
+        return (
+            f"Memory has {stats['active']} active item(s): {tiers['core']} core, "
+            f"{tiers['episodic']} episodic, and {tiers['archival']} archival. "
+            f"There are {stats['pending']} pending conflict(s) and "
+            f"{stats['expired']} expired item(s)."
+        )
+    if action == "search":
+        if not argument:
+            return "Tell me what to search for, for example `/memory search travel`."
+        matches = rank_memories(
+            argument,
+            memories,
+            limit=10,
+            char_budget=4000,
+            explicit_search=True,
+        )
+        if not matches:
+            return f"I couldn't find a relevant memory for `{argument}`."
+        lines = [f"Memory matches for `{argument}`:"]
+        for item in matches:
+            lines.append(
+                f"- [{item.get('_memory_tier', 'archival')}] "
+                f"{item.get('key')} = {item.get('value')}"
+            )
+        return "\n".join(lines)
     if action == "timeline":
-        ordered = sorted(memories, key=lambda item: str(item.get("created_at", "")), reverse=True)
+        ordered = sorted(
+            memories, key=lambda item: str(item.get("created_at", "")), reverse=True
+        )
         if not ordered:
             return "Your memory timeline is empty."
         return "Your memory timeline:\n" + "\n".join(
             f"- {item.get('created_at')}: {item.get('key')} = {item.get('value')} "
-            f"[{item.get('status', 'verified')}]" for item in ordered[:50]
+            f"[{item.get('status', 'verified')}]"
+            for item in ordered[:50]
         )
     if action == "forget":
         key = None if argument.casefold() in {"", "all", "everything"} else argument
-        count = _forget_memories(internal_id, key)
+        stored_count = _forget_memories(internal_id, key)
+        profile_count = _forget_core_profile(internal_id, key)
+        count = max(stored_count, profile_count)
         return f"Forgot {count} memory record(s)."
     if action == "correct":
         match = re.fullmatch(
@@ -500,21 +711,42 @@ def _handle_memory_command(internal_id: str, action: str, argument: str) -> str:
             argument,
             {"active": True, "status": "verified", "last_confirmed_at": _now()},
         )
+        _sync_core_profile(internal_id, str(target.get("key", "")), target.get("value"))
         return (
             f"Confirmed `{target.get('key')}` and superseded the contradictory record."
         )
     if action == "rollback":
         key = argument.strip().casefold()
-        matching = [item for item in memories if str(item.get("key", "")).casefold() == key]
-        current = next((item for item in reversed(matching) if item.get("active", True)), None)
+        matching = [
+            item for item in memories if str(item.get("key", "")).casefold() == key
+        ]
+        current = next(
+            (item for item in reversed(matching) if item.get("active", True)), None
+        )
         previous = next(
-            (item for item in reversed(matching) if not item.get("active", True) and item.get("status") in {"corrected", "superseded"}),
+            (
+                item
+                for item in reversed(matching)
+                if not item.get("active", True)
+                and item.get("status") in {"corrected", "superseded"}
+            ),
             None,
         )
         if not current or not previous:
             return f"I could not find a prior value to restore for `{argument}`."
-        _update_memory(internal_id, str(current.get("id") or current.get("_id")), {"active": False, "status": "rolled_back"})
-        _update_memory(internal_id, str(previous.get("id") or previous.get("_id")), {"active": True, "status": "verified", "last_confirmed_at": _now()})
+        _update_memory(
+            internal_id,
+            str(current.get("id") or current.get("_id")),
+            {"active": False, "status": "rolled_back"},
+        )
+        _update_memory(
+            internal_id,
+            str(previous.get("id") or previous.get("_id")),
+            {"active": True, "status": "verified", "last_confirmed_at": _now()},
+        )
+        _sync_core_profile(
+            internal_id, str(previous.get("key", "")), previous.get("value")
+        )
         return f"Restored `{previous.get('key')}` to `{previous.get('value')}`."
     if action == "why":
         matching = [
@@ -536,7 +768,8 @@ def _handle_memory_command(internal_id: str, action: str, argument: str) -> str:
     lines = ["Your typed memories:"]
     for item in memories[:50]:
         lines.append(
-            f"- [{item.get('kind', 'biography')}] {item.get('key')} = {item.get('value')} "
+            f"- [{item.get('tier') or item.get('kind', 'biography')}] "
+            f"{item.get('key')} = {item.get('value')} "
             f"({item.get('status', 'verified')}, source: {item.get('source_channel', 'unknown')})"
         )
     return "\n".join(lines)
@@ -632,8 +865,10 @@ def generate_helpful_prediction(
         evidence_count = int(data.get("evidence_count", 0) or 0)
         suggestion = str(data.get("suggestion", "")).strip()
         reason = str(data.get("reason", "")).strip()
-        if evidence_count < 2 or confidence < _PREDICTION_MIN_CONFIDENCE or not is_safe_proposed_action(
-            suggestion
+        if (
+            evidence_count < 2
+            or confidence < _PREDICTION_MIN_CONFIDENCE
+            or not is_safe_proposed_action(suggestion)
         ):
             return None
         if not suggestion.endswith("?"):

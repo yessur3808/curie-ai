@@ -254,6 +254,33 @@ class UserManager:
         )
 
     @staticmethod
+    def delete_user_profile_facts(internal_id, keys) -> int:
+        """Remove selected facts from the core profile for one owner."""
+        safe_keys = {
+            str(key)
+            for key in keys
+            if str(key) and "." not in str(key) and "$" not in str(key)
+        }
+        if not safe_keys:
+            return 0
+        if not os.getenv("MONGODB_URI"):
+            from .local_store import delete_profile_facts
+
+            return delete_profile_facts(str(internal_id), safe_keys)
+        profile = UserManager.get_user_profile(str(internal_id))
+        existing = [key for key in safe_keys if key in profile]
+        if not existing:
+            return 0
+        mongo_db.user_profiles.update_one(
+            {"_id": str(internal_id)},
+            {
+                "$unset": {f"facts.{key}": "" for key in existing},
+                "$currentDate": {"last_updated": True},
+            },
+        )
+        return len(existing)
+
+    @staticmethod
     def get_contact_channels(internal_id: str) -> dict:
         """Return the contact channel preferences for a user.
 

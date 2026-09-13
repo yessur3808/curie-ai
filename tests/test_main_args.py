@@ -30,3 +30,10 @@ def test_logging_suppresses_token_bearing_http_urls():
     main.configure_logging()
     assert logging.getLogger("httpx").level >= logging.WARNING
     assert logging.getLogger("httpcore").level >= logging.WARNING
+
+
+def test_logging_survives_unavailable_stack_dump_signal():
+    with patch.object(
+        main.faulthandler, "register", side_effect=OSError("unsupported")
+    ):
+        main.configure_logging()

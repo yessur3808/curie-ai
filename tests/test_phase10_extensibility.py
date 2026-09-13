@@ -54,10 +54,11 @@ def test_sqlite_migrations_support_forward_and_rollback():
     connection.executescript(
         "CREATE TABLE messages(internal_id TEXT, created_at TEXT);"
         "CREATE TABLE action_audit(internal_id TEXT, created_at TEXT);"
+        "CREATE TABLE adaptive_memories(id TEXT PRIMARY KEY, internal_id TEXT, document_json TEXT);"
         "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT, applied_at TEXT);"
     )
-    assert apply_migrations(connection) == 1
-    assert current_version(connection) == 1
+    assert apply_migrations(connection) == 2
+    assert current_version(connection) == 2
     indexes = {
         row[0]
         for row in connection.execute(
@@ -65,6 +66,7 @@ def test_sqlite_migrations_support_forward_and_rollback():
         )
     }
     assert "idx_messages_owner_time" in indexes
+    assert "idx_adaptive_memories_owner" in indexes
     assert rollback_migrations(connection, 0) == 0
     assert apply_migrations(connection, 1) == 1
 

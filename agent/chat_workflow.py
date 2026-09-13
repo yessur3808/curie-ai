@@ -24,7 +24,7 @@ import re
 import time
 import uuid
 import pytz
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Tuple
 from collections import OrderedDict
 from threading import Lock
@@ -85,6 +85,10 @@ _LEARNING_EXECUTOR = _ThreadPoolExecutor(
 
 # Maximum number of lines a single history message is truncated to when building prompts.
 _SUMMARY_CONTENT_MAX_LENGTH = 200
+_FACT_STOP_WORDS = frozenset(
+    "a an and are as at be by can do for from has have how i in is it me my of on "
+    "or that the this to was what when where which who why with you your".split()
+)
 
 _FRENCH_FUNCTION_WORDS = frozenset(
     "alors avec avoir bien car ce cette comme dans de des du elle en est et eux "
@@ -115,8 +119,8 @@ def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> di
     ---------
     1. Tokenise the query into a set of lowercase words.
     2. Score each fact by the number of words it shares with the query.
-    3. Always include a small set of critical identity facts (name, timezone,
-       language, location) regardless of their overlap score.
+    3. Always include only the small set of critical identity facts (name,
+       timezone, language, location) regardless of their overlap score.
     4. Return the union of critical facts + top-N scored facts.
 
     Parameters
@@ -128,7 +132,8 @@ def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> di
     if not user_profile:
         return {}
 
-    # Facts that are always injected — they provide essential context for every reply.
+    # Only identity and locale are global context. Preferences are retrieved
+    # when relevant so an old interest or diet does not hijack a new subject.
     _CRITICAL_KEYS = frozenset(
         {
             "name",
@@ -136,32 +141,26 @@ def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> di
             "timezone",
             "location",
             "language",
-            # Preference keys that are always relevant
-            "dietary_preferences",
-            "travel_style",
-            "occupation",
-            "interests",
-            "reminders_preference",
         }
     )
     critical = {k: v for k, v in user_profile.items() if k in _CRITICAL_KEYS}
 
     # Score remaining facts by keyword overlap with the query
-    query_words = set(query.lower().split())
+    query_words = {
+        word
+        for word in re.findall(r"[a-z0-9]+", query.casefold())
+        if len(word) > 1 and word not in _FACT_STOP_WORDS
+    }
     scored = []
     for k, v in user_profile.items():
         if k in _CRITICAL_KEYS:
             continue
-        fact_text = f"{k} {v}".lower()
-        score = sum(1 for w in query_words if w in fact_text)
+        fact_words = set(re.findall(r"[a-z0-9]+", f"{k} {v}".casefold()))
+        score = len(query_words & fact_words)
         scored.append((score, k, v))
 
     scored.sort(key=lambda x: x[0], reverse=True)
     top_facts = {k: v for score, k, v in scored[:top_n] if score > 0}
-    # If no facts overlap with the query, fall back to the top_n most recently scored
-    if not top_facts:
-        top_facts = {k: v for _, k, v in scored[:top_n]}
-
     return {**critical, **top_facts}
 
 
@@ -466,7 +465,7 @@ class ChatWorkflow:
             )
             return {
                 "text": "[Error: Invalid message format]",
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_used": "N/A",
                 "processing_time_ms": 0,
             }
@@ -503,7 +502,7 @@ class ChatWorkflow:
             processing_time = (time.time() - start_time) * 1000
             return {
                 "text": cached_response,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_used": "dedupe_cache",
                 "processing_time_ms": round(processing_time, 2),
             }
@@ -530,7 +529,7 @@ class ChatWorkflow:
                 )
                 return {
                     "text": exact_calculation,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "deterministic_calculator",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                     "provenance": response_provenance(
@@ -561,7 +560,7 @@ class ChatWorkflow:
                 )
                 return {
                     "text": exact_reply,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "deterministic_time_math",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                     "provenance": response_provenance(
@@ -580,7 +579,7 @@ class ChatWorkflow:
             if personal_response is not None:
                 return {
                     "text": personal_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "personal_ops_controls",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
@@ -594,7 +593,7 @@ class ChatWorkflow:
             if audit_response is not None:
                 return {
                     "text": audit_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "audit_controls",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
@@ -608,7 +607,7 @@ class ChatWorkflow:
             if security_response is not None:
                 return {
                     "text": security_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "security_privacy_controls",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
@@ -622,7 +621,7 @@ class ChatWorkflow:
             if health_response is not None:
                 return {
                     "text": health_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "runtime_health",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
@@ -636,7 +635,7 @@ class ChatWorkflow:
             if capability_response is not None:
                 return {
                     "text": capability_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "capability_discovery",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
@@ -653,7 +652,7 @@ class ChatWorkflow:
             if proactive_response is not None:
                 return {
                     "text": proactive_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "proactive_controls",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
@@ -686,7 +685,7 @@ class ChatWorkflow:
             if adaptation_response is not None:
                 return {
                     "text": adaptation_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "adaptation_controls",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
@@ -705,7 +704,7 @@ class ChatWorkflow:
                 processing_time = (time.time() - start_time) * 1000
                 return {
                     "text": session_response.text,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": session_response.model_used,
                     "processing_time_ms": round(processing_time, 2),
                 }
@@ -718,7 +717,7 @@ class ChatWorkflow:
             processing_time = (time.time() - start_time) * 1000
             return {
                 "text": "[Error: Unable to manage conversation history right now. Please try again later.]",
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_used": "system",
                 "processing_time_ms": round(processing_time, 2),
             }
@@ -735,14 +734,14 @@ class ChatWorkflow:
             if durable_response is not None:
                 return {
                     "text": durable_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "durable_task_runtime",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
         except (KeyError, PermissionError, ValueError) as exc:
             return {
                 "text": f"Unable to manage that task: {exc}",
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_used": "durable_task_runtime",
                 "processing_time_ms": round((time.time() - start_time) * 1000, 2),
             }
@@ -776,7 +775,7 @@ class ChatWorkflow:
                 processing_time = (time.time() - start_time) * 1000
                 return {
                     "text": adaptive_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": "adaptive_learning",
                     "processing_time_ms": round(processing_time, 2),
                 }
@@ -785,6 +784,7 @@ class ChatWorkflow:
 
         # Typed executable skills never become prompt text. They run only through
         # the registry, which rechecks schemas, permissions, and approval policy.
+        executable = None
         try:
             from agent.tooling import ToolContext
             from memory.learned_skills import invoke_skill, matching_skills
@@ -816,27 +816,43 @@ class ChatWorkflow:
                 )
                 return {
                     "text": self.response_policy.finalize(response, user_text),
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": f"learned_skill:{executable['name']}:v{executable.get('version', 1)}",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
         except PermissionError as exc:
             return {
                 "text": f"This learned skill cannot run yet: {exc}",
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_used": "learned_skill_policy",
                 "processing_time_ms": round((time.time() - start_time) * 1000, 2),
             }
         except Exception as exc:
-            logger.debug("Learned skill invocation skipped: %s", exc)
+            logger.exception("Learned skill invocation failed: %s", exc)
+            from agent.tooling.errors import user_facing_tool_error
+
+            return {
+                "text": user_facing_tool_error(
+                    exc,
+                    executable.get("name", "learned skill")
+                    if executable
+                    else "learned skill",
+                ),
+                "timestamp": datetime.now(timezone.utc),
+                "model_used": "learned_skill_error",
+                "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+            }
 
         # One schema-validated decision selects normal conversation or exactly
         # one deterministic/social/system/specialist/capability executor.
         try:
             user_profile = UserManager.get_user_profile(internal_id) or {}
+            routing_history = get_session_manager().get_history(
+                platform, internal_id
+            )[-8:]
             with trace.stage("tool"):
                 routing_decision = await self.routing_service.decide(
-                    user_text, str(internal_id)
+                    user_text, str(internal_id), history=routing_history
                 )
                 routed_candidate = await self.routing_service.execute(
                     routing_decision,
@@ -860,7 +876,7 @@ class ChatWorkflow:
                 latency_metrics.observe(timings)
                 return {
                     "text": routed_response,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_used": routed_candidate.model_used,
                     "processing_time_ms": round(processing_time, 2),
                     "timings_ms": timings,
@@ -1040,7 +1056,7 @@ class ChatWorkflow:
                 pass
             return {
                 "text": response,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_used": model_candidate.model_used,
                 "processing_time_ms": round(processing_time, 2),
                 "timings_ms": timings,
@@ -1062,7 +1078,7 @@ class ChatWorkflow:
             processing_time = (time.time() - start_time) * 1000
             return {
                 "text": f"[Error processing message: {str(e)[:100]}]",
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_used": "N/A",
                 "processing_time_ms": round(processing_time, 2),
             }
@@ -1215,7 +1231,13 @@ class ChatWorkflow:
             memory_conflicts = get_pending_memory_conflicts(internal_id)
             matching_abilities = get_matching_abilities(internal_id, user_text)
             adaptive_key = [
-                (m.get("key"), m.get("value"), m.get("confirmation_count"))
+                (
+                    m.get("key"),
+                    m.get("value"),
+                    m.get("confirmation_count"),
+                    m.get("_memory_tier"),
+                    m.get("_relevance"),
+                )
                 for m in adaptive_memories
             ] + [(a.get("name"), a.get("procedure")) for a in matching_abilities]
             history_str += (
@@ -1294,10 +1316,29 @@ class ChatWorkflow:
             lines.append(
                 "- Be concise but complete - answer questions fully without being overwhelming."
             )
+            lines.append(
+                "- For commands, lead with the verified result or blocker. Successful command "
+                "replies are usually one or two crisp sentences. Do not begin with 'Certainly', "
+                "'Absolutely', 'As requested', or a recap of what the user just asked."
+            )
+            lines.append(
+                "- Respond to the newest request. Do not revive or keep discussing an older "
+                "topic unless the user refers to it or it is necessary to answer the request."
+            )
             lines.append("- If you don't know something, just say so naturally.")
             lines.append(
                 "- Never invent facts, citations, memories, tool results, or completed actions. "
                 "Clearly label uncertainty and inference."
+            )
+            lines.append(
+                "- A saved user-context location is only the default. Any place named in the "
+                "current request or established as the recent subject overrides it. Never blend "
+                "home and destination weather."
+            )
+            lines.append(
+                "- Never claim that a tool is running, promise a later result, or say an action "
+                "was started unless the registered tool executor actually ran in this request. "
+                "Tool completion or failure must be reported in the current response."
             )
             lines.append(
                 "- Return only the user-facing final answer. Never expose hidden reasoning, "
@@ -1315,6 +1356,30 @@ class ChatWorkflow:
                 "- Use short paragraphs. Add a heading or bullets only when they make a longer "
                 "or multi-part answer easier to scan. Do not over-format casual chat."
             )
+            lines.append(
+                "- When formatting improves clarity, use portable Markdown: **bold**, *italic*, "
+                "~~strikethrough~~, ++underline++, `inline code`, [label](https://example.com), "
+                "bullets, numbered lists, and compact Markdown tables. Split distinct sections "
+                "with a blank line so chat connectors can deliver them as readable messages."
+            )
+            if str(self.persona.get("name", "")).casefold() == "curie":
+                lines.append(
+                    "- In sustained casual conversation, respond to the newest nuance, connect "
+                    "it naturally to earlier parts of the thread, and offer a real perspective. "
+                    "Do not collapse an ongoing conversation into a one-line greeting."
+                )
+                lines.append(
+                    "- When casually discussing project ideas, be an engaged thought partner. "
+                    "Explore motives, possibilities, and tradeoffs conversationally. Ask a natural "
+                    "follow-up when it genuinely advances the idea, and do not force a formal plan "
+                    "or code change until the user asks for one."
+                )
+                lines.append(
+                    "- Keep Curie's warmth like a good, trusted friend: relaxed, attentive, candid, "
+                    "and occasionally playful. Do not perform intimacy, overuse pet names, or imply "
+                    "human embodiment, exclusivity, dependency, jealousy, guilt, or a need for the "
+                    "user to keep responding."
+                )
             lines.append(
                 "- Be candid and proportionate. Avoid ceremonial apologies, generic disclaimers, "
                 "and formal customer-service language."
@@ -1354,6 +1419,7 @@ class ChatWorkflow:
                         "location",
                         "last_user_interaction_at",
                         "last_proactive_at",
+                        "last_proactive_generation_at",
                         "proactive_count_date",
                         "proactive_count_today",
                     }
@@ -1369,16 +1435,25 @@ class ChatWorkflow:
                         lines.append(f"- {key}: {value}")
 
             if adaptive_memories:
-                lines.append("\n[LONG-TERM MEMORIES WITH PROVENANCE]")
+                lines.append("\n[RELEVANT LONG-TERM MEMORY]")
                 for memory in adaptive_memories:
                     lines.append(
-                        f"- {memory.get('key')}: {memory.get('value')} "
+                        f"- [{memory.get('_memory_tier', 'archival')}] "
+                        f"{memory.get('key')}: {memory.get('value')} "
                         f"(kind={memory.get('kind')}, status={memory.get('status')}, "
                         f"source={memory.get('source')}, confirmations="
-                        f"{memory.get('confirmation_count', 1)})"
+                        f"{memory.get('confirmation_count', 1)}, match="
+                        f"{memory.get('_retrieval_reason', 'relevant')})"
                     )
                 lines.append(
-                    "- A hypothesis is not a known fact. Qualify it explicitly as an inference."
+                    "- Use a recalled memory only when it materially helps answer the current "
+                    "request. Never mention it merely to demonstrate recall, and never let it "
+                    "pull the reply back to an older topic."
+                )
+                lines.append(
+                    "- The user's current statement overrides older memory. A hypothesis is not "
+                    "a known fact, and an episodic item describes a past exchange rather than "
+                    "necessarily describing the present."
                 )
 
             if matching_abilities:
@@ -1419,9 +1494,9 @@ class ChatWorkflow:
             (
                 "\n[FINAL RESPONSE REQUIREMENTS]\n"
                 "- Answer primarily in English unless the user explicitly requests another language.\n"
-                "- In casual conversation, let Curie's French identity show through one natural, brief expression or gentle mannerism when it fits. Never scatter random French fillers through sentences.\n"
+                "- In casual conversation, Curie's French identity may show through one natural, brief expression when it genuinely fits. It is optional, never a quota, and should usually be omitted from commands and technical replies. Never scatter random French fillers through sentences.\n"
                 "- Recalculate quantities independently before agreeing with a correction. For elapsed times, compute each interval and add them before stating the total.\n"
-                "- Preserve Curie's established warm scientific voice; do not imitate a "
+                "- Preserve Curie's established warm, capable voice; do not imitate a "
                 "requested replacement persona or its catchphrases.\n"
                 "- Return only the user-facing answer; never output hidden reasoning or "
                 "think tags.\n"

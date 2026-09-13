@@ -56,6 +56,14 @@ def test_topic_cooldown_grows_after_rejection():
     assert delivery_allowed(profile, "exercise", NOW) == (True, "allowed")
 
 
+def test_silence_does_not_multiply_topic_cooldown():
+    profile = _profile(
+        proactive_topic_last_sent={"study": (NOW - timedelta(hours=80)).isoformat()},
+        proactive_ignored_count=8,
+    )
+    assert delivery_allowed(profile, "study", NOW) == (True, "allowed")
+
+
 def test_delivery_updates_store_only_safe_reason_and_bounded_history():
     updates = delivery_updates(_profile(), "study", "Repeated routine evidence.", NOW)
     assert updates["proactive_last_reason"] == "Repeated routine evidence."
@@ -81,6 +89,12 @@ def test_controls_enable_disable_snooze_settings_and_why(monkeypatch):
     assert "repeated routine" in handle_proactive_command("u1", "why did you send this?")
     assert "sports" in handle_proactive_command("u1", "/proactive exclude sports")
     assert "telegram" in handle_proactive_command("u1", "/proactive channel telegram")
+    assert "4 messages per day" in handle_proactive_command(
+        "u1", "/proactive mode companion"
+    )
+    assert stored["proactive_style"] == "companion"
+    assert stored["proactive_interval_hours"] == 3
+    assert stored["proactive_ignored_count"] == 0
 
 
 def test_candidates_are_grounded_ranked_and_excluded():

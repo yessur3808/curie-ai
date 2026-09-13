@@ -466,6 +466,13 @@ LLM_PROVIDER_PRIORITY=anthropic,openai,gemini,llama.cpp
 
 Simple queries are automatically routed to the local model (cost optimization) unless `LLM_CLOUD_SIMPLE_TASKS=true`.
 
+### Smart-home providers
+
+Curie can summarize and control Tapo, Nanoleaf, LG ThinQ air devices,
+SmartThings, Petlibro (through Home Assistant), Mi Home, and Govee. Provider
+credentials, LAN device entries, optional dependencies, and command examples
+are documented in [docs/SMART_HOME_INTEGRATIONS.md](docs/SMART_HOME_INTEGRATIONS.md).
+
 ### Code Repository Integrations
 
 | Platform | Required Variables |
@@ -782,8 +789,34 @@ Missing specialist files fall back to the next available local model. At most
 | `ENABLE_LEARNING` | `true` | Auto-extract user preferences from conversations |
 | `LEARNING_MAX_FACTS` | `50` | Max stored facts per user |
 | `CURIE_LOCAL_MEMORY_DB` | `.curie_memory.sqlite3` | Durable fallback when Mongo/Postgres are unset |
+| `MEMORY_RELEVANCE_MIN_SCORE` | `0.28` | Minimum hybrid relevance required before a memory enters the prompt |
+| `MEMORY_CONTEXT_CHAR_BUDGET` | `1600` | Maximum long-term-memory characters injected into one request |
+| `MEMORY_MAX_CANDIDATES` | `500` | Maximum owner-filtered records ranked during one recall |
+| `MEMORY_RERANK_CANDIDATES` | `96` | Maximum plausible candidates receiving vector reranking |
+| `MEMORY_RETRIEVAL_CACHE_SIZE` | `4096` | Bounded in-process cache of compiled retrieval features |
+| `MEMORY_EPISODE_TTL_DAYS` | `180` | Retention window for salient conversation episodes |
 | `PROACTIVE_PREDICTIONS_ENABLED` | `true` | Offer grounded, permission-seeking predicted help |
 | `PROACTIVE_PREDICTION_MIN_CONFIDENCE` | `0.82` | Minimum confidence before suggesting predicted help |
+
+Curie uses bounded hierarchical memory inspired by MemGPT/Letta: recent session
+messages form working memory, stable facts and preferences form core memory,
+salient user-authored goals or decisions form time-limited episodic memory, and
+older project or biographical facts remain archival. Recall uses lexical,
+fuzzy, recency, confidence, and reinforcement signals with a hard relevance
+floor and prompt-size budget. A cheap relevance gate runs before vector
+reranking, and unchanged memory features are reused from a bounded LRU cache.
+Routine operational commands bypass long-term recall so unrelated memories
+cannot pull a reply back to an old topic.
+
+Run `python scripts/benchmark_memory.py` for a deterministic synthetic recall
+quality and latency check. The benchmark never reads stored conversations.
+
+All long-term items retain owner scope, provenance, confidence, expiry, and
+correction history. Use `/memory stats` for content-free tier counts,
+`/memory search TOPIC` for explicit recall, `/memory inspect` or `/memory why KEY`
+for provenance, and `/memory forget KEY` to remove an item. “What do you remember
+about TOPIC?” performs the same gated search. Ambiguous “forget that” requests a
+specific target instead of deleting every memory.
 
 Curie stores explicit memories with provenance and reinforcement counts. You can
 teach a safe declarative ability with a phrase such as “When I say morning
@@ -818,6 +851,9 @@ explicit evidence. They always ask permission before work begins and are bounded
 by quiet hours, a daily cap, persisted contact cadence, and safety filters.
 
 ### Personal operations
+
+Account setup for Gmail, X, GitHub, and the optional headless browser is
+documented in [docs/ACCOUNT_INTEGRATIONS.md](docs/ACCOUNT_INTEGRATIONS.md).
 
 Use `/birthday add NAME MM-DD[-YYYY]` to store an explicitly supplied private
 birthday and `/agenda` to combine birthdays, reminders, cached OAuth calendar

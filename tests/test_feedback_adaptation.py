@@ -33,6 +33,20 @@ def test_explicit_feedback_versions_bounded_preferences(tmp_path, monkeypatch):
     assert local_store.get_adaptation_profile("u1")["version"] == 2
 
 
+def test_explicit_structured_format_preference_is_persisted(tmp_path, monkeypatch):
+    monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
+    preferences = record_explicit_feedback(
+        "u1", "Please format responses better, using bullets and tables when needed"
+    )
+    assert preferences["response_layout"] == "structured"
+
+
+def test_plain_wrong_answer_is_recorded_as_explicit_feedback(tmp_path, monkeypatch):
+    monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
+    assert record_explicit_feedback("u1", "Wrong answer") is not None
+    assert local_store.list_adaptation_events("u1", "wrong")
+
+
 def test_protected_trait_feedback_is_not_recorded(tmp_path, monkeypatch):
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
     assert (
@@ -68,6 +82,7 @@ def test_response_time_is_clamped_and_never_changes_authority(tmp_path, monkeypa
         "tone",
         "notification_cadence_hours",
         "research_depth",
+        "response_layout",
         "preferred_tools",
         "voice_reply",
         "voice_reply_channels",

@@ -11,7 +11,9 @@ Different chat platforms render text differently:
   - API / WebSocket: returns raw text; clients decide how to render it.
 """
 
+import html
 import re
+from urllib.parse import urlparse
 
 # Platforms that natively render Markdown [text](url) links.
 _MARKDOWN_LINK_PLATFORMS = {"telegram", "discord", "api", "websocket"}
@@ -25,6 +27,115 @@ MARKDOWN_SKILL_MODELS = frozenset(
         "trip_planner_skill",
     }
 )
+
+
+def _safe_telegram_link(url: str) -> bool:
+    parsed = urlparse(html.unescape(url).strip())
+    return parsed.scheme.casefold() in {"http", "https"} and bool(parsed.netloc)
+
+
+def _render_markdown_table(lines: list[str]) -> str | None:
+    """Render a small Markdown table as an aligned Telegram ``pre`` block."""
+    if len(lines) < 2:
+        return None
+    rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
+    if not all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in rows[1]):
+        return None
+    rows = [rows[0], *rows[2:]]
+    columns = max((len(row) for row in rows), default=0)
+    if not columns:
+        return None
+    normalized = [row + [""] * (columns - len(row)) for row in rows]
+    widths = [
+        min(24, max(len(row[index]) for row in normalized))
+        for index in range(columns)
+    ]
+    rendered = []
+    for row_index, row in enumerate(normalized):
+        rendered.append(
+            " | ".join(
+                value[: widths[index]].ljust(widths[index])
+                for index, value in enumerate(row)
+            ).rstrip()
+        )
+        if row_index == 0:
+            rendered.append("-+-".join("-" * width for width in widths))
+    return "<pre>" + html.escape("\n".join(rendered)) + "</pre>"
+
+
+def telegram_html(text: str) -> str:
+    """Convert conservative Markdown into safe Telegram Bot API HTML.
+
+    Telegram HTML supports bold, italic, underline, strikethrough, code,
+    links, block quotes, and preformatted blocks. All other HTML is escaped.
+    ``++text++`` is Curie's portable source syntax for underline.
+    """
+    source = str(text or "").replace("\r\n", "\n")
+    protected: list[str] = []
+
+    def token(rendered: str) -> str:
+        marker = f"\x00TG{len(protected)}\x00"
+        protected.append(rendered)
+        return marker
+
+    def code_block(match: re.Match) -> str:
+        language = (match.group(1) or "").strip()
+        body = match.group(2).strip("\n")
+        language_attr = (
+            f' class="language-{html.escape(language, quote=True)}"'
+            if re.fullmatch(r"[A-Za-z0-9_+.-]{1,30}", language)
+            else ""
+        )
+        return token(
+            f"<pre><code{language_attr}>{html.escape(body)}</code></pre>"
+        )
+
+    source = re.sub(r"```([^\n`]*)\n([\s\S]*?)```", code_block, source)
+
+    lines = source.split("\n")
+    rebuilt: list[str] = []
+    index = 0
+    while index < len(lines):
+        if "|" in lines[index] and index + 1 < len(lines):
+            end = index + 1
+            while end < len(lines) and "|" in lines[end] and lines[end].strip():
+                end += 1
+            table = _render_markdown_table(lines[index:end])
+            if table:
+                rebuilt.append(token(table))
+                index = end
+                continue
+        rebuilt.append(lines[index])
+        index += 1
+    source = "\n".join(rebuilt)
+
+    def link(match: re.Match) -> str:
+        label, url = match.group(1), html.unescape(match.group(2)).strip()
+        if not _safe_telegram_link(url):
+            return f"{label} ({url})"
+        return token(
+            f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>'
+        )
+
+    source = re.sub(r"\[([^\]\n]+)\]\(([^)\s]+)\)", link, source)
+    source = re.sub(
+        r"`([^`\n]+)`", lambda match: token(f"<code>{html.escape(match.group(1))}</code>"), source
+    )
+    source = html.escape(source)
+
+    source = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", source, flags=re.MULTILINE)
+    source = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", source)
+    source = re.sub(r"__([^_\n]+)__", r"<b>\1</b>", source)
+    source = re.sub(r"~~([^~\n]+)~~", r"<s>\1</s>", source)
+    source = re.sub(r"\+\+([^+\n]+)\+\+", r"<u>\1</u>", source)
+    source = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", source)
+    source = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"<i>\1</i>", source)
+    source = re.sub(r"^\s*[-*]\s+", "• ", source, flags=re.MULTILINE)
+    source = re.sub(r"^&gt;\s?(.+)$", r"<blockquote>\1</blockquote>", source, flags=re.MULTILINE)
+
+    for index, rendered in enumerate(protected):
+        source = source.replace(f"\x00TG{index}\x00", rendered)
+    return source.strip()
 
 
 def plain_links(text: str) -> str:
@@ -67,6 +178,8 @@ def strip_markdown(text: str) -> str:
     text = re.sub(r"(?<!\w)_([^_\n]+?)_(?!\w)", r"\1", text)
     # Strikethrough: ~~text~~
     text = re.sub(r"~~([^~\n]+)~~", r"\1", text)
+    # Portable underline syntax used by Telegram's rich renderer.
+    text = re.sub(r"\+\+([^+\n]+)\+\+", r"\1", text)
     # Inline code: `code`
     text = re.sub(r"`([^`]+)`", r"\1", text)
     # Markdown links

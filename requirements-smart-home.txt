@@ -1,0 +1,6 @@
+# Optional adapters for LAN devices and LG ThinQ. SmartThings, Govee,
+# Nanoleaf, and the Petlibro/Home Assistant bridge use core httpx.
+python-kasa>=0.10,<1
+python-miio>=0.5.12,<1
+thinqconnect>=1.0,<2
+aiohttp>=3.10,<4

@@ -4,7 +4,12 @@ from .database import init_databases
 from .users import UserManager
 from .conversations import ConversationManager
 from .research import ResearchManager
-from .adaptive import get_matching_abilities, get_relevant_memories
+from .adaptive import (
+    get_matching_abilities,
+    get_relevant_memories,
+    record_conversation_episode,
+)
+from .hierarchy import memory_stats, memory_tier, rank_memories
 from .repositories import get_repositories
 
 
@@ -20,5 +25,9 @@ __all__ = [
     "ResearchManager",
     "get_matching_abilities",
     "get_relevant_memories",
+    "record_conversation_episode",
+    "rank_memories",
+    "memory_stats",
+    "memory_tier",
     "get_repositories",
 ]

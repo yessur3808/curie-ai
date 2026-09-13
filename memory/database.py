@@ -242,6 +242,16 @@ def init_mongo():
     try:
         mongo_db.research_memory.create_index([("topic", 1)])
         mongo_db.research_memory.create_index([("user_id", 1)])
+        # Both owner fields are supported during the schema transition. These
+        # compound indexes keep recall owner-scoped before active/expiry gates.
+        mongo_db.adaptive_memories.create_index(
+            [("owner_id", 1), ("active", 1), ("expires_at", 1)],
+            name="idx_adaptive_owner_active_expiry",
+        )
+        mongo_db.adaptive_memories.create_index(
+            [("internal_id", 1), ("active", 1), ("expires_at", 1)],
+            name="idx_adaptive_internal_active_expiry",
+        )
         logger.info("MongoDB indexes created successfully.")
     except mongo_errors.PyMongoError as e:
         logger.error(f"Error creating MongoDB indexes: {e}")
@@ -281,4 +291,6 @@ def init_databases():
         logger.info("✅ MongoDB initialized successfully")
     except Exception as e:
         logger.warning(f"⚠️  MongoDB unavailable: {e}")
-        logger.warning("Continuing without MongoDB - in-memory operations only")
+        logger.warning(
+            "Continuing without MongoDB; local SQLite persistence remains available"
+        )

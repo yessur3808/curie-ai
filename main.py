@@ -7,6 +7,8 @@ import sys
 import json
 import logging
 from logging.handlers import RotatingFileHandler
+import faulthandler
+import signal
 import time
 import re
 
@@ -202,13 +204,21 @@ def configure_logging():
         handlers=handlers,
     )
 
+    # SIGUSR1 produces a stack dump without terminating Curie. This makes a
+    # process that is alive but stuck during startup diagnosable under PM2.
+    try:
+        faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
+    except (AttributeError, OSError, RuntimeError):
+        logger.debug("Runtime stack-dump signal is unavailable", exc_info=True)
+
     # httpx logs complete request URLs at INFO. Telegram embeds the bot token
     # in that URL, so request-level transport logs must never reach daemon logs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    # Log the configuration for verification
-    logger = logging.getLogger(__name__)
+    # Use the module logger here. Keeping a function-local assignment made the
+    # earlier exception handler reference an uninitialized local variable when
+    # faulthandler registration was unavailable.
     logger.info(f"Logging configured with level: {log_level}")
 
 
@@ -730,7 +740,7 @@ def main():
     minimal_sanitization = os.getenv("MINIMAL_SANITIZATION", "true").lower() == "true"
     workflow = ChatWorkflow(
         persona=persona,
-        max_history=5,
+        max_history=max(5, int(os.getenv("CHAT_MAX_HISTORY", "25"))),
         enable_small_talk=False,
         minimal_sanitization=minimal_sanitization,
     )

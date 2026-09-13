@@ -1,6 +1,59 @@
 import json
+import time
+from types import SimpleNamespace
 
 from cli import dashboard
+
+
+def test_pm2_status_reports_named_managed_instance(monkeypatch, tmp_path):
+    started_ms = int((time.time() - 42) * 1000)
+    payload = [
+        {
+            "name": "curie-main",
+            "pid": 4321,
+            "pm2_env": {
+                "status": "online",
+                "pm_uptime": started_ms,
+                "pm_out_log_path": str(tmp_path / "pm2-out.log"),
+                "CURIE_INSTANCE": "curie",
+                "RUN_API": "false",
+                "RUN_TELEGRAM": "true",
+            },
+        }
+    ]
+    monkeypatch.setattr(
+        dashboard.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout=json.dumps(payload)
+        ),
+    )
+
+    statuses = dashboard._pm2_statuses()
+    status = statuses["curie"]
+
+    assert status is not None
+    assert status["running"] is True
+    assert status["pid"] == 4321
+    assert 40 <= status["uptime_seconds"] <= 44
+    assert status["supervisor"] == "pm2"
+    assert status["connector_env"]["RUN_TELEGRAM"] == "true"
+
+
+def test_pm2_status_returns_empty_when_pm2_is_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        dashboard.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=""),
+    )
+    assert dashboard._pm2_statuses() == {}
+
+
+def test_connectors_use_runtime_supervisor_environment(monkeypatch):
+    monkeypatch.setattr(dashboard.daemon, "read_daemon_state", lambda name: {})
+    assert dashboard._connectors(
+        "default", {}, {"RUN_API": "false", "RUN_TELEGRAM": "true"}
+    ) == "telegram"
 
 
 def test_discover_instances_from_configs_and_runtime(monkeypatch, tmp_path):

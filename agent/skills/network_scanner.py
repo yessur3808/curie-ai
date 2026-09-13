@@ -17,7 +17,7 @@ import os
 import re
 import socket
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -492,7 +492,7 @@ class NetworkScanner:
                 open_ports.append(entry)
 
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "target": target,
             "resolved_ip": host,
             "ports_scanned": len(ports),
@@ -579,7 +579,7 @@ class NetworkScanner:
 
         elapsed = time.monotonic() - start_time
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "cidr": cidr,
             "hosts_checked": len(hosts),
             "live_hosts": len(live_hosts),
@@ -701,7 +701,7 @@ class NetworkScanner:
             total_live_hosts += item.get("live_hosts", 0)
 
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "auto_detected_networks": networks,
             "networks_scanned": len(network_reports),
             "total_hosts_checked": total_hosts_checked,

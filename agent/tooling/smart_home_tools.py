@@ -1,0 +1,63 @@
+"""Chat-facing smart-home status and device control capabilities."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from typing import Any
+
+from agent.tooling.contracts import ToolContext, ToolResult
+from agent.tooling.errors import ToolExecutionError
+
+
+def _require_home_owner(context: ToolContext) -> None:
+    configured = os.getenv("MASTER_USER_ID", "").strip()
+    if configured and configured != str(context.internal_id):
+        raise PermissionError(
+            "Smart-home data and controls are available only to Curie's configured owner"
+        )
+
+
+class HomeStatusTool:
+    name, read_only = "home_status", True
+
+    async def execute(
+        self, params: Mapping[str, Any], context: ToolContext
+    ) -> ToolResult:
+        _require_home_owner(context)
+        from services.smart_home import get_smart_home_hub
+
+        try:
+            text, data = await get_smart_home_hub().status(
+                context.internal_id,
+                str(params.get("target") or "") or None,
+                str(params.get("provider") or "") or None,
+            )
+        except (ValueError, LookupError) as exc:
+            raise ToolExecutionError(
+                str(exc), user_message=str(exc), retryable=False
+            ) from exc
+        return ToolResult(text, data, "Smart-home providers")
+
+
+class HomeControlTool:
+    name, read_only = "home_control", False
+
+    async def execute(
+        self, params: Mapping[str, Any], context: ToolContext
+    ) -> ToolResult:
+        _require_home_owner(context)
+        from services.smart_home import get_smart_home_hub
+
+        try:
+            text, data = await get_smart_home_hub().control(
+                context.internal_id,
+                str(params["target"]),
+                str(params["state"]),
+                str(params.get("provider") or "") or None,
+            )
+        except (ValueError, LookupError, ConnectionError) as exc:
+            raise ToolExecutionError(
+                str(exc), user_message=str(exc), retryable=False
+            ) from exc
+        return ToolResult(text, data, "Smart-home providers")

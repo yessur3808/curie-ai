@@ -30,7 +30,7 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Iterable, List, Optional, Sequence
+from typing import Any, Generator, Iterable, List, Optional, Sequence
 
 # ─── Rich availability ────────────────────────────────────────────────────────
 
@@ -43,7 +43,6 @@ try:
         MofNCompleteColumn,
         Progress,
         SpinnerColumn,
-        TaskID,
         TaskProgressColumn,
         TextColumn,
         TimeElapsedColumn,
@@ -191,8 +190,22 @@ def step_progress(steps: List[str], title: str = "") -> Generator[None, None, No
 # Determinate progress bar
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+class _ProgressHandle:
+    """Small adapter around Rich's progress/task pair."""
+
+    def __init__(self, progress: Any, task: Any) -> None:
+        self._progress = progress
+        self._task = task
+
+    def advance(self, n: int = 1) -> None:
+        self._progress.advance(self._task, n)
+
+
 @contextmanager
-def progress_bar(total: int, label: str = "Working…") -> Generator["_ProgressHandle", None, None]:
+def progress_bar(
+    total: int, label: str = "Working…"
+) -> Generator["_ProgressHandle", None, None]:
     """
     Simple determinate progress bar.
 
@@ -203,15 +216,6 @@ def progress_bar(total: int, label: str = "Working…") -> Generator["_ProgressH
                 process(f)
                 bar.advance()
     """
-    class _ProgressHandle:
-        def __init__(self, prog: "Progress", task: "TaskID") -> None:
-            self._prog = prog
-            self._task = task
-
-        def advance(self, n: int = 1) -> None:
-            if _RICH:
-                self._prog.advance(self._task, n)
-
     if not _RICH:
         print(f"  {label} (0/{total})", flush=True)
 

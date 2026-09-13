@@ -47,6 +47,20 @@ def test_multiple_independent_intents_get_one_ordering_question():
     assert "which" in decision.parameters["message"].casefold()
 
 
+def test_route_resolves_home_control_pronoun_from_recent_history():
+    decision = asyncio.run(
+        route_request(
+            "Switch it off",
+            "u1",
+            history=[("user", "Is the TV light on?")],
+        )
+    )
+
+    assert decision.intent == "capability"
+    assert decision.selected_capability == "home_control"
+    assert decision.parameters["target"] == "TV light"
+
+
 def test_model_cannot_route_mutating_capability(monkeypatch):
     async def fake_model(*args, **kwargs):
         return (

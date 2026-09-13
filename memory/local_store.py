@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 import os
@@ -107,11 +108,22 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def _managed_connection():
+    """Commit/rollback like sqlite's context manager, then always close."""
+    connection = _connect()
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
 def save_personal_item(internal_id: str, kind: str, document: dict) -> dict:
     item = dict(document)
     source_id = str(item.get("id") or uuid.uuid4().hex)
     now = datetime.now(timezone.utc).isoformat()
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         owned = conn.execute(
             "SELECT created_at FROM personal_items WHERE id=? AND internal_id=?",
             (source_id, str(internal_id)),
@@ -143,7 +155,7 @@ def save_personal_item(internal_id: str, kind: str, document: dict) -> dict:
 
 
 def list_personal_items(internal_id: str, kind: str | None = None) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         if kind:
             rows = conn.execute(
                 "SELECT document_json FROM personal_items WHERE internal_id=? AND kind=? ORDER BY updated_at",
@@ -158,7 +170,7 @@ def list_personal_items(internal_id: str, kind: str | None = None) -> list[dict]
 
 
 def delete_personal_item(internal_id: str, item_id: str) -> int:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         cursor = conn.execute(
             "DELETE FROM personal_items WHERE internal_id=? AND id=?",
             (str(internal_id), str(item_id)),
@@ -167,7 +179,7 @@ def delete_personal_item(internal_id: str, item_id: str) -> int:
 
 
 def get_or_create_user(channel: str, external_id: str) -> str:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT internal_id FROM users WHERE channel=? AND external_id=?",
             (channel, str(external_id)),
@@ -196,7 +208,7 @@ def get_or_create_user(channel: str, external_id: str) -> str:
 
 
 def get_profile(internal_id: str) -> dict:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT facts_json FROM profiles WHERE internal_id=?", (str(internal_id),)
         ).fetchone()
@@ -228,8 +240,39 @@ def update_profile(internal_id: str, facts: dict, conn=None) -> None:
             connection.close()
 
 
+def delete_profile_facts(
+    internal_id: str,
+    keys: list[str] | tuple[str, ...] | set[str],
+) -> int:
+    """Remove selected profile facts without disturbing runtime preferences."""
+    clean_keys = {str(key) for key in keys if str(key)}
+    if not clean_keys:
+        return 0
+    with _LOCK, _managed_connection() as conn:
+        row = conn.execute(
+            "SELECT facts_json FROM profiles WHERE internal_id=?", (str(internal_id),)
+        ).fetchone()
+        if not row:
+            return 0
+        current = json.loads(row["facts_json"])
+        removed = sum(key in current for key in clean_keys)
+        if not removed:
+            return 0
+        for key in clean_keys:
+            current.pop(key, None)
+        conn.execute(
+            "UPDATE profiles SET facts_json=?, updated_at=? WHERE internal_id=?",
+            (
+                json.dumps(current, default=str),
+                datetime.now(timezone.utc).isoformat(),
+                str(internal_id),
+            ),
+        )
+        return removed
+
+
 def list_users_with_profiles() -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         rows = conn.execute(
             "SELECT u.channel,u.external_id,u.internal_id,p.facts_json FROM users u "
             "LEFT JOIN profiles p ON p.internal_id=u.internal_id"
@@ -246,7 +289,7 @@ def list_users_with_profiles() -> list[dict]:
 
 
 def get_external_id(internal_id: str, channel: str) -> str | None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT external_id FROM users WHERE internal_id=? AND channel=? "
             "ORDER BY rowid LIMIT 1",
@@ -256,7 +299,7 @@ def get_external_id(internal_id: str, channel: str) -> str | None:
 
 
 def add_message(platform: str, internal_id: str, role: str, content: str) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO messages(platform,internal_id,role,content,created_at) VALUES(?,?,?,?,?)",
             (
@@ -270,7 +313,7 @@ def add_message(platform: str, internal_id: str, role: str, content: str) -> Non
 
 
 def get_history(platform: str, internal_id: str, limit: int = 100) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         rows = conn.execute(
             "SELECT role,content,created_at FROM messages WHERE platform=? AND internal_id=? "
             "ORDER BY id DESC LIMIT ?",
@@ -280,7 +323,7 @@ def get_history(platform: str, internal_id: str, limit: int = 100) -> list[dict]
 
 
 def reset_history(platform: str, internal_id: str) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "DELETE FROM messages WHERE platform=? AND internal_id=?",
             (platform, str(internal_id)),
@@ -301,7 +344,7 @@ def purge_expired_records(
         "operational_events": ("routing_outcomes", "created_at", "operational_events"),
     }
     removed: dict[str, int] = {}
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         for output, (table, timestamp, policy_name) in targets.items():
             days = max(0, int(policy.get(policy_name, 0)))
             cutoff = datetime.fromtimestamp(
@@ -343,7 +386,7 @@ class LocalSessionManager:
 
 
 def upsert_adaptive_memory(doc: dict) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         old = conn.execute(
             "SELECT document_json FROM adaptive_memories WHERE id=?", (doc["_id"],)
         ).fetchone()
@@ -361,7 +404,7 @@ def upsert_adaptive_memory(doc: dict) -> None:
 
 def update_adaptive_memory(memory_id: str, internal_id: str, updates: dict) -> bool:
     """Update one memory only when it belongs to the requested owner."""
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT document_json FROM adaptive_memories WHERE id=? AND internal_id=?",
             (str(memory_id), str(internal_id)),
@@ -379,7 +422,7 @@ def update_adaptive_memory(memory_id: str, internal_id: str, updates: dict) -> b
 
 def delete_adaptive_memories(internal_id: str, key: str | None = None) -> int:
     """Forget owner-scoped memories, optionally limited to one typed key."""
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         if key is None:
             result = conn.execute(
                 "DELETE FROM adaptive_memories WHERE internal_id=?", (str(internal_id),)
@@ -404,7 +447,7 @@ def delete_adaptive_memories(internal_id: str, key: str | None = None) -> int:
 
 
 def list_adaptive_memories(internal_id: str) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         rows = conn.execute(
             "SELECT document_json FROM adaptive_memories WHERE internal_id=?",
             (str(internal_id),),
@@ -413,7 +456,7 @@ def list_adaptive_memories(internal_id: str) -> list[dict]:
 
 
 def upsert_ability(doc: dict) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO learned_abilities(id,internal_id,status,document_json) VALUES(?,?,?,?) "
             "ON CONFLICT(id) DO UPDATE SET status=excluded.status,document_json=excluded.document_json",
@@ -427,7 +470,7 @@ def upsert_ability(doc: dict) -> None:
 
 
 def update_ability(internal_id: str, skill_id: str, updates: dict) -> bool:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT document_json FROM learned_abilities WHERE id=? AND internal_id=?",
             (str(skill_id), str(internal_id)),
@@ -450,7 +493,7 @@ def update_ability(internal_id: str, skill_id: str, updates: dict) -> bool:
 
 
 def delete_abilities(internal_id: str, name: str) -> int:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         rows = conn.execute(
             "SELECT id,document_json FROM learned_abilities WHERE internal_id=?",
             (str(internal_id),),
@@ -469,7 +512,7 @@ def delete_abilities(internal_id: str, name: str) -> int:
 
 
 def update_ability_status(internal_id: str, name: str, old: str, new: str) -> bool:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT document_json FROM learned_abilities WHERE id=? AND status=?",
             (f"{internal_id}:{name}", old),
@@ -486,7 +529,7 @@ def update_ability_status(internal_id: str, name: str, old: str, new: str) -> bo
 
 
 def list_abilities(internal_id: str, status: str | None = None) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         if status is None:
             rows = conn.execute(
                 "SELECT document_json FROM learned_abilities WHERE internal_id=?",
@@ -501,7 +544,7 @@ def list_abilities(internal_id: str, status: str | None = None) -> list[dict]:
 
 
 def get_adaptation_profile(internal_id: str) -> dict:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT document_json FROM adaptation_profiles WHERE internal_id=?",
             (str(internal_id),),
@@ -510,7 +553,7 @@ def get_adaptation_profile(internal_id: str) -> dict:
 
 
 def save_adaptation_profile(internal_id: str, document: dict) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO adaptation_profiles(internal_id,version,document_json,updated_at) "
             "VALUES(?,?,?,?) ON CONFLICT(internal_id) DO UPDATE SET "
@@ -525,7 +568,7 @@ def save_adaptation_profile(internal_id: str, document: dict) -> None:
 
 
 def add_adaptation_event(internal_id: str, signal: str, document: dict) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO adaptation_events(internal_id,signal,document_json,created_at) "
             "VALUES(?,?,?,?)",
@@ -539,7 +582,7 @@ def add_adaptation_event(internal_id: str, signal: str, document: dict) -> None:
 
 
 def list_adaptation_events(internal_id: str, signal: str | None = None) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         if signal:
             rows = conn.execute(
                 "SELECT signal,document_json,created_at FROM adaptation_events "
@@ -563,7 +606,7 @@ def list_adaptation_events(internal_id: str, signal: str | None = None) -> list[
 
 
 def reset_adaptation(internal_id: str) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "DELETE FROM adaptation_profiles WHERE internal_id=?", (str(internal_id),)
         )
@@ -573,7 +616,7 @@ def reset_adaptation(internal_id: str) -> None:
 
 
 def append_routing_outcome(internal_id: str, request_hash: str, decision: dict) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO routing_outcomes(internal_id,decision_id,request_hash,document_json,created_at) "
             "VALUES(?,?,?,?,?)",
@@ -590,7 +633,7 @@ def append_routing_outcome(internal_id: str, request_hash: str, decision: dict) 
 def append_routing_correction(
     internal_id: str, decision_id: str, corrected_capability: str
 ) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "UPDATE routing_outcomes SET corrected_capability=? "
             "WHERE internal_id=? AND decision_id=?",
@@ -599,7 +642,7 @@ def append_routing_correction(
 
 
 def list_routing_outcomes(internal_id: str) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         rows = conn.execute(
             "SELECT decision_id,request_hash,document_json,corrected_capability,created_at "
             "FROM routing_outcomes WHERE internal_id=? ORDER BY id",
@@ -617,7 +660,7 @@ def list_routing_outcomes(internal_id: str) -> list[dict]:
 
 
 def save_durable_task(document: dict) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO durable_tasks(id,internal_id,idempotency_key,status,document_json,updated_at) "
             "VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
@@ -634,7 +677,7 @@ def save_durable_task(document: dict) -> None:
 
 
 def get_durable_task(internal_id: str, task_id: str) -> dict | None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT document_json FROM durable_tasks WHERE id=? AND internal_id=?",
             (str(task_id), str(internal_id)),
@@ -643,7 +686,7 @@ def get_durable_task(internal_id: str, task_id: str) -> dict | None:
 
 
 def get_durable_task_by_key(internal_id: str, idempotency_key: str) -> dict | None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT document_json FROM durable_tasks "
             "WHERE internal_id=? AND idempotency_key=?",
@@ -653,7 +696,7 @@ def get_durable_task_by_key(internal_id: str, idempotency_key: str) -> dict | No
 
 
 def list_durable_tasks(internal_id: str, status: str | None = None) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         if status:
             rows = conn.execute(
                 "SELECT document_json FROM durable_tasks WHERE internal_id=? AND status=? "
@@ -674,7 +717,7 @@ def create_pending_action(internal_id: str, action: dict, ttl_minutes: int = 30)
 
     token = uuid.uuid4().hex[:8]
     now = datetime.now(timezone.utc)
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO pending_actions(token,internal_id,status,action_json,created_at,expires_at) "
             "VALUES(?,?,?,?,?,?)",
@@ -692,7 +735,7 @@ def create_pending_action(internal_id: str, action: dict, ttl_minutes: int = 30)
 
 def consume_pending_action(internal_id: str, token: str, approve: bool) -> dict | None:
     now = datetime.now(timezone.utc)
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         row = conn.execute(
             "SELECT action_json,expires_at FROM pending_actions "
             "WHERE token=? AND internal_id=? AND status='pending'",
@@ -710,7 +753,7 @@ def consume_pending_action(internal_id: str, token: str, approve: bool) -> dict 
 def append_action_audit(
     internal_id: str, action: str, status: str, details: dict
 ) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         retention_days = max(1, int(os.getenv("CURIE_AUDIT_RETENTION_DAYS", "90")))
         cutoff = datetime.fromtimestamp(
             datetime.now(timezone.utc).timestamp() - retention_days * 86400,
@@ -755,7 +798,7 @@ def append_action_audit(
 
 
 def list_action_audit(internal_id: str, limit: int = 50) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         rows = conn.execute(
             "SELECT action,status,details_json,created_at FROM action_audit "
             "WHERE internal_id=? ORDER BY id DESC LIMIT ?",
@@ -774,7 +817,7 @@ def list_action_audit(internal_id: str, limit: int = 50) -> list[dict]:
 
 def delete_action_audit(internal_id: str) -> int:
     """Controlled owner lifecycle deletion; normal audit APIs remain append-only."""
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         cursor = conn.execute(
             "DELETE FROM action_audit WHERE internal_id=?", (str(internal_id),)
         )
@@ -785,7 +828,7 @@ def create_reminder(
     internal_id: str, platform: str, message: str, due_at: datetime
 ) -> str:
     reminder_id = uuid.uuid4().hex
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO reminders(id,internal_id,platform,message,due_at,created_at) "
             "VALUES(?,?,?,?,?,?)",
@@ -802,7 +845,7 @@ def create_reminder(
 
 
 def list_reminders(internal_id: str, now: datetime) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM reminders WHERE internal_id=? AND fired=0 AND due_at>=? "
             "ORDER BY due_at",
@@ -812,7 +855,7 @@ def list_reminders(internal_id: str, now: datetime) -> list[dict]:
 
 
 def due_reminders(now: datetime) -> list[dict]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM reminders WHERE fired=0 AND due_at<=? ORDER BY due_at",
             (now.isoformat(),),
@@ -821,7 +864,7 @@ def due_reminders(now: datetime) -> list[dict]:
 
 
 def delete_reminder(internal_id: str, reminder_id: str | None = None) -> int:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         if reminder_id is None:
             result = conn.execute(
                 "DELETE FROM reminders WHERE internal_id=? AND fired=0",
@@ -852,7 +895,7 @@ def mark_reminder(
         values.append(attempted_at.isoformat())
     if not updates:
         return
-    with _LOCK, _connect() as conn:
+    with _LOCK, _managed_connection() as conn:
         conn.execute(
             f"UPDATE reminders SET {', '.join(updates)} WHERE id=?",
             (*values, str(reminder_id)),

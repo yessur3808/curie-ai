@@ -38,6 +38,63 @@ PERSONA_DIR = REPO_ROOT / "assets" / "personality"
 _processes: dict[int, Any] = {}
 
 
+def _pm2_statuses() -> dict[str, dict[str, Any]]:
+    """Return Curie instance statuses reported by PM2, keyed by instance."""
+    app_name = os.getenv("CURIE_PM2_APP_NAME", "curie-main")
+    try:
+        result = subprocess.run(
+            ["pm2", "jlist"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if result.returncode != 0:
+            return {}
+        processes = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return {}
+
+    statuses: dict[str, dict[str, Any]] = {}
+    for process in processes:
+        if process.get("name") != app_name:
+            continue
+        pm2_env = process.get("pm2_env") or {}
+        instance = str(pm2_env.get("CURIE_INSTANCE") or "default").casefold()
+        status = pm2_env.get("status")
+        pid = process.get("pid")
+        running = status == "online" and isinstance(pid, int) and pid > 0
+        started_ms = pm2_env.get("pm_uptime")
+        uptime = None
+        if running and isinstance(started_ms, (int, float)):
+            uptime = max(0, int(time.time() - started_ms / 1000))
+        connector_env = {
+            key: str(pm2_env[key])
+            for key in (
+                "RUN_API",
+                "RUN_TELEGRAM",
+                "RUN_DISCORD",
+                "RUN_SLACK",
+                "RUN_WHATSAPP",
+                "RUN_SIGNAL",
+            )
+            if key in pm2_env
+        }
+        statuses[instance] = {
+            "running": running,
+            "pid": pid if running else None,
+            "uptime_seconds": uptime,
+            "log_file": str(
+                pm2_env.get("pm_out_log_path")
+                or REPO_ROOT / "log" / "pm2-out-0.log"
+            ),
+            "instance": instance,
+            "supervisor": "pm2",
+            "connector_env": connector_env,
+        }
+    return statuses
+
+
 def _fmt_bytes(value: float) -> str:
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if abs(value) < 1024:
@@ -161,9 +218,12 @@ def _task_status(name: str) -> tuple[str, int]:
     return description[:32], len(running)
 
 
-def _connectors(name: str, env: dict[str, str]) -> str:
+def _connectors(
+    name: str, env: dict[str, str], runtime_env: dict[str, str] | None = None
+) -> str:
     state = daemon.read_daemon_state(name)
     flags = set(state.get("cmd", [])[2:])
+    effective_env = {**env, **(runtime_env or {})}
     known = {
         "api": "RUN_API",
         "telegram": "RUN_TELEGRAM",
@@ -177,14 +237,16 @@ def _connectors(name: str, env: dict[str, str]) -> str:
         if (
             "--all" in flags
             or f"--{connector}" in flags
-            or env.get(key, "false").lower() == "true"
+            or effective_env.get(key, "false").lower() == "true"
         ):
             enabled.append("api:8000" if connector == "api" else connector)
     return ", ".join(enabled) or "none"
 
 
-def _recent_log(name: str, limit: int = 2) -> tuple[int, list[str]]:
-    log_file = daemon._instance_paths(name)[1]
+def _recent_log(
+    name: str, limit: int = 2, log_path: str | None = None
+) -> tuple[int, list[str]]:
+    log_file = Path(log_path) if log_path else daemon._instance_paths(name)[1]
     try:
         if time.time() - log_file.stat().st_mtime > 300:
             return 0, []
@@ -215,6 +277,7 @@ def _process_metrics(pid: int | None, sample: bool = False) -> tuple[str, str, i
 
 def collect_instances(sample: bool = False) -> list[dict[str, Any]]:
     rows = []
+    pm2_statuses = _pm2_statuses()
     for name in discover_instances():
         try:
             status = daemon.get_status(name)
@@ -231,11 +294,15 @@ def collect_instances(sample: bool = False) -> list[dict[str, Any]]:
                 "log_file": str(log_file),
                 "instance": name,
             }
+        if not status["running"]:
+            status = pm2_statuses.get(name) or status
         env = _instance_env(name)
         cpu, memory, threads = _process_metrics(status.get("pid"), sample=sample)
         activity, active_tasks = _task_status(name)
         telemetry = _read_json(_runtime_path(name, "telemetry"))
-        log_errors, recent_errors = _recent_log(name)
+        log_errors, recent_errors = _recent_log(
+            name, log_path=status.get("log_file")
+        )
         telemetry_stale = time.time() - telemetry.get("updated_at", 0) > 300
         if not status["running"]:
             health = "stopped"
@@ -257,7 +324,9 @@ def collect_instances(sample: bool = False) -> list[dict[str, Any]]:
                 "threads": threads,
                 "health": health,
                 "uptime": _format_uptime(status.get("uptime_seconds")),
-                "connectors": _connectors(name, env),
+                "connectors": _connectors(
+                    name, env, status.get("connector_env")
+                ),
                 "activity": activity,
                 "active_tasks": active_tasks,
                 "telemetry": (

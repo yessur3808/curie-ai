@@ -31,6 +31,7 @@ def isolated(tmp_path, monkeypatch):
         ("Look through this project and fix the authentication bug.", "project_change"),
         ("Generate the API endpoint and run its tests.", "project_change"),
         ("What is using all my RAM?", "ram_usage"),
+        ("Measure the current network speed and latency", "network_speed"),
         ("Check tomorrow's weather and tell me whether I need my jacket.", "weather"),
         ("Is it raining now in hong kong?", "weather"),
         ("Research a seven-day trip to Paris within my budget.", "research"),
@@ -155,6 +156,105 @@ def test_raining_now_extracts_hong_kong_and_uses_live_weather(isolated, monkeypa
     assert "light rain" in result
     assert "27°C" in result
     assert "umbrella" in result
+
+
+def test_named_trip_destination_overrides_profile_location(isolated, monkeypatch):
+    observed = []
+
+    async def fake_weather(city, unit="metric", day_offset=0):
+        observed.append(city)
+        return {
+            "city": city,
+            "temperature": 22,
+            "description": "Clear sky",
+            "tips": [],
+        }
+
+    monkeypatch.setattr("utils.weather.get_weather", fake_weather)
+    request = router.classify_request("What is the weather in Los Angeles today?")
+    result = asyncio.run(router.execute_request(request, "u", {"location": "Hong Kong"}))
+    assert observed == ["Los Angeles"]
+    assert "Los Angeles" in result
+    assert "Hong Kong" not in result
+
+
+def test_weather_followup_will_i_need_jacket_is_routed():
+    request = router.classify_request("Will I need a jacket for those dates?")
+    assert request is not None
+    assert request.action == "weather"
+
+
+def test_humidity_question_is_routed_and_uses_live_value(isolated, monkeypatch):
+    async def fake_weather(city, unit="metric", day_offset=0):
+        assert city == "Los Angeles"
+        return {
+            "city": city,
+            "temperature": 22,
+            "relative_humidity": 61,
+            "description": "Partly cloudy",
+            "tips": [],
+            "source": "Open-Meteo",
+        }
+
+    monkeypatch.setattr("utils.weather.get_weather", fake_weather)
+    request = router.classify_request("What is the humidity in Los Angeles?")
+    assert request is not None and request.action == "weather"
+    result = asyncio.run(router.execute_request(request, "u", {}))
+    assert "61%" in result
+    assert "Los Angeles" in result
+
+
+def test_distant_trip_range_is_not_replaced_with_current_conditions(
+    isolated, monkeypatch
+):
+    from datetime import date, timedelta
+
+    async def should_not_fetch_current(*_args, **_kwargs):
+        raise AssertionError("current weather must not answer a future date range")
+
+    future = date.today() + timedelta(days=30)
+    monkeypatch.setattr("utils.weather.get_weather", should_not_fetch_current)
+    monkeypatch.setattr(
+        "agent.tooling.weather_tool._requested_range",
+        lambda _query: (future, future + timedelta(days=4)),
+    )
+    request = router.classify_request(
+        "What will the weather in Los Angeles be from October 1 to October 5?"
+    )
+    result = asyncio.run(
+        router.execute_request(request, "u", {"location": "Hong Kong"})
+    )
+    assert "not available yet" in result
+    assert "Los Angeles" in result
+    assert "Hong Kong" not in result
+
+
+def test_weather_date_range_parser_supports_transcript_wording():
+    from datetime import date
+    from agent.tooling.weather_tool import _requested_range
+
+    assert _requested_range(
+        "weather for my Los Angeles trip from October 1 to October 9?",
+        today=date(2026, 9, 12),
+    ) == (date(2026, 10, 1), date(2026, 10, 9))
+
+
+def test_missing_command_exit_status_is_not_falsely_audited_as_success_code(
+    isolated, monkeypatch
+):
+    from agent.tooling.contracts import ToolResult
+
+    class Registry:
+        def get(self, _name):
+            return type("Definition", (), {"audit_redactions": (), "version": "1", "approval_policy": "never"})()
+
+        async def execute(self, _name, _params, _context):
+            return ToolResult("done", {"command": ["pytest", "-q"]})
+
+    monkeypatch.setattr("agent.tooling.get_runtime_registry", lambda: Registry())
+    asyncio.run(router.execute_request(router.ToolRequest("run_tests"), "u", {}))
+    details = local_store.list_action_audit("u")[0]["details"]
+    assert details["command_exit_status"] is None
 
 
 def test_live_research_preserves_sources(isolated, monkeypatch):

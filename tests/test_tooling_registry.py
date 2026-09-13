@@ -53,6 +53,21 @@ def test_runtime_registry_has_migrated_tools():
         "weather",
         "ram_usage",
         "hardware",
+        "network_speed",
+        "gmail_search",
+        "gmail_read",
+        "gmail_send",
+        "x_search",
+        "x_read",
+        "x_post",
+        "x_reply",
+        "x_dm_read",
+        "x_dm_send",
+        "browser_open",
+        "browser_snapshot",
+        "browser_click",
+        "browser_fill",
+        "browser_close",
         "research",
         "inspect_project",
         "create_directory",
@@ -87,6 +102,52 @@ def test_conversion_executes_through_typed_registry():
         )
     )
     assert "mile" in result.text.lower()
+
+
+def test_network_speed_returns_a_completion_receipt(monkeypatch):
+    import agent.tooling.system_tools as system_tools
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self):
+            yield b"x" * 1_000_000
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, *args, **kwargs):
+            return FakeResponse()
+
+        def stream(self, *args, **kwargs):
+            return FakeResponse()
+
+        async def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    ticks = iter((0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 1.0, 2.0, 3.0, 4.0))
+    monkeypatch.setattr(system_tools.time, "perf_counter", lambda: next(ticks))
+
+    result = asyncio.run(
+        get_runtime_registry().execute("network_speed", {}, ToolContext("u"))
+    )
+    assert result.text.startswith("Network test complete.")
+    assert set(result.data) >= {"download_mbps", "upload_mbps", "latency_ms"}
 
 
 def test_duplicate_route_hints_are_rejected():

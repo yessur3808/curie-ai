@@ -5,6 +5,7 @@ import logging
 import time
 import threading
 import re
+import secrets
 from typing import Optional, NoReturn
 from dotenv import load_dotenv
 from fastapi import (
@@ -15,6 +16,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    Header,
 )
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field
@@ -235,6 +237,83 @@ async def capabilities(include_unavailable: bool = False):
     from contracts import discover_capabilities
 
     return discover_capabilities(include_unavailable=include_unavailable)
+
+
+def _require_setup_token(value: str | None) -> None:
+    configured = os.getenv("CURIE_SETUP_TOKEN", "")
+    if not configured or not value or not secrets.compare_digest(configured, value):
+        raise HTTPException(status_code=403, detail="Invalid setup token")
+
+
+def _require_master_owner(owner_id: str) -> None:
+    if not is_master_user(owner_id):
+        raise HTTPException(status_code=403, detail="OAuth connections are owner-only")
+
+
+@app.get("/oauth/google/start")
+async def google_oauth_start(
+    owner_id: str,
+    product: str = "gmail",
+    write: bool = True,
+    x_curie_setup_token: str | None = Header(None),
+):
+    """Begin an owner-only Google OAuth flow; secrets never pass through chat."""
+    _require_setup_token(x_curie_setup_token)
+    _require_master_owner(owner_id)
+    from connectors.google_oauth import authorization_url
+
+    return {"authorization_url": authorization_url(owner_id, product=product, write=write)}
+
+
+@app.get("/oauth/google/callback")
+async def google_oauth_callback(state: str, code: str):
+    from connectors.google_oauth import exchange_authorization_code
+
+    try:
+        _, product = await exchange_authorization_code(state, code)
+    except Exception:
+        logger.exception("Google OAuth callback failed")
+        return HTMLResponse("Google connection failed. Return to Curie and retry setup.", status_code=400)
+    return HTMLResponse(f"Google {product} connected. You can close this window.")
+
+
+@app.get("/oauth/x/start")
+async def x_oauth_start(
+    owner_id: str,
+    x_curie_setup_token: str | None = Header(None),
+):
+    _require_setup_token(x_curie_setup_token)
+    _require_master_owner(owner_id)
+    from connectors.twitter import authorization_url
+
+    return {"authorization_url": authorization_url(owner_id)}
+
+
+@app.get("/oauth/x/callback")
+async def x_oauth_callback(state: str, code: str):
+    from connectors.twitter import exchange_authorization_code
+
+    try:
+        await exchange_authorization_code(state, code)
+    except Exception:
+        logger.exception("X OAuth callback failed")
+        return HTMLResponse("X connection failed. Return to Curie and retry setup.", status_code=400)
+    return HTMLResponse("X connected. You can close this window.")
+
+
+@app.get("/oauth/status")
+async def oauth_status(
+    owner_id: str,
+    x_curie_setup_token: str | None = Header(None),
+):
+    _require_setup_token(x_curie_setup_token)
+    _require_master_owner(owner_id)
+    from services.credential_vault import credential_configured
+
+    return {
+        "gmail": credential_configured(owner_id, "google:gmail"),
+        "x": credential_configured(owner_id, "x"),
+    }
 
 
 @app.get("/reminders")

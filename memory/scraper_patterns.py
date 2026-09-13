@@ -1,6 +1,6 @@
 # memory/scraper_patterns.py
 
-from datetime import datetime
+from datetime import datetime, timezone
 from psycopg2.extras import Json
 from psycopg2 import sql
 from .database import get_pg_conn
@@ -32,7 +32,7 @@ class ScraperPatternManager:
     ):
         with get_pg_conn() as conn:
             cur = conn.cursor()
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             created_at = created_at or now
             updated_at = updated_at or now
             cur.execute(
@@ -124,7 +124,7 @@ class ScraperPatternManager:
             ]
         )
         values = list(allowed_fields.values())
-        values.append(datetime.utcnow())
+        values.append(datetime.now(timezone.utc))
         values.append(id)
         with get_pg_conn() as conn:
             cur = conn.cursor()

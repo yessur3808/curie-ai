@@ -154,7 +154,116 @@ async def test_ungrounded_sensory_prediction_uses_neutral_checkin():
         "memory.adaptive.generate_helpful_prediction", return_value=prediction
     ):
         message = await service._generate_proactive_message("u1", "telegram")
-    assert message == "Salut, how’s your day going?"
+    assert "cloud pattern" not in message
+    assert message
+
+
+@pytest.mark.asyncio
+async def test_recent_fallback_is_not_repeated_verbatim():
+    service = ProactiveMessagingService(SimpleNamespace(persona={}))
+    sessions = MagicMock()
+    sessions.get_history.return_value = [
+        {"role": "assistant", "content": "Salut, how’s your day going?"}
+    ]
+    with patch(
+        "services.proactive_messaging.UserManager.get_user_profile",
+        return_value={"proactive_predictions_enabled": False},
+    ), patch(
+        "services.proactive_messaging.get_session_manager", return_value=sessions
+    ):
+        message = await service._generate_proactive_message("u1", "telegram")
+    assert message != "Salut, how’s your day going?"
+
+
+@pytest.mark.asyncio
+async def test_recent_generation_attempt_skips_regeneration():
+    service = ProactiveMessagingService(
+        SimpleNamespace(persona={}), connectors={"telegram": AsyncMock()}
+    )
+    profile = {
+        "proactive_messaging_enabled": True,
+        "proactive_quiet_hours": {"start": 0, "end": 0},
+        "last_proactive_generation_at": "2099-01-01T00:00:00+00:00",
+    }
+    with patch(
+        "services.proactive_messaging.UserManager.get_user_profile",
+        return_value=profile,
+    ), patch.object(
+        service, "_generate_proactive_message", new=AsyncMock()
+    ) as generate:
+        await service._maybe_send_proactive_message(
+            {"internal_id": "u1", "platform": "telegram", "external_user_id": "42"}
+        )
+    generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ignored_messages_do_not_double_the_delivery_interval():
+    from datetime import datetime, timedelta, timezone
+
+    calls = []
+
+    async def connector(user, message):
+        calls.append((user, message))
+        return True
+
+    service = ProactiveMessagingService(
+        SimpleNamespace(persona={}), connectors={"telegram": connector}
+    )
+    profile = {
+        "proactive_messaging_enabled": True,
+        "proactive_interval_hours": 1,
+        "proactive_quiet_hours": {"start": 0, "end": 0},
+        "proactive_daily_max": 4,
+        "timezone": "UTC",
+        "proactive_ignored_count": 8,
+        "last_user_interaction_at": (
+            datetime.now(timezone.utc) - timedelta(hours=2)
+        ).isoformat(),
+    }
+    sessions = MagicMock()
+    with patch(
+        "services.proactive_messaging.UserManager.get_user_profile",
+        return_value=profile,
+    ), patch(
+        "services.proactive_messaging.UserManager.update_user_profile"
+    ), patch.object(
+        service, "_generate_proactive_message", new=AsyncMock(return_value="A fresh thought")
+    ), patch(
+        "services.proactive_messaging.get_session_manager", return_value=sessions
+    ), patch(
+        "services.proactive_messaging.random.random", return_value=0.0
+    ):
+        await service._maybe_send_proactive_message(
+            {"internal_id": "u1", "platform": "telegram", "external_user_id": "42"}
+        )
+    assert calls == [("42", "A fresh thought")]
+
+
+@pytest.mark.asyncio
+async def test_companion_mode_generates_original_contextual_message():
+    service = ProactiveMessagingService(SimpleNamespace(persona={}))
+    sessions = MagicMock()
+    sessions.get_history.return_value = [
+        {"role": "user", "content": "I have an idea for a local home dashboard"},
+        {"role": "assistant", "content": "What would you like it to show?"},
+    ]
+    with patch(
+        "services.proactive_messaging.UserManager.get_user_profile",
+        return_value={
+            "proactive_predictions_enabled": True,
+            "proactive_style": "companion",
+        },
+    ), patch(
+        "services.proactive_messaging.get_session_manager", return_value=sessions
+    ), patch(
+        "llm.manager.ask_llm",
+        return_value="That home dashboard idea has character. Which part would make it feel genuinely yours?",
+    ):
+        message = await service._generate_proactive_message("u1", "telegram")
+    assert "dashboard idea" in message
+    assert message != "What would you like it to show?"
+    assert service._generation_topics["u1"]
 
 
 def test_proactive_runtime_defaults_are_observable(monkeypatch):

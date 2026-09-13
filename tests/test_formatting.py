@@ -13,7 +13,40 @@ from utils.formatting import (
     strip_markdown,
     format_for_platform,
     MARKDOWN_SKILL_MODELS,
+    telegram_html,
 )  # noqa: E402
+
+
+def test_telegram_html_supports_rich_text_and_safe_links():
+    rendered = telegram_html(
+        "# Status\n**Bold** *italic* ~~old~~ ++underlined++ `code` "
+        "[Open](https://example.com?a=1&b=2)\n- First"
+    )
+
+    assert "<b>Status</b>" in rendered
+    assert "<b>Bold</b>" in rendered
+    assert "<i>italic</i>" in rendered
+    assert "<s>old</s>" in rendered
+    assert "<u>underlined</u>" in rendered
+    assert "<code>code</code>" in rendered
+    assert '<a href="https://example.com?a=1&amp;b=2">Open</a>' in rendered
+    assert "• First" in rendered
+
+
+def test_telegram_html_renders_markdown_table_as_preformatted_text():
+    rendered = telegram_html("| Device | State |\n| --- | --- |\n| Lamp | Off |")
+
+    assert rendered.startswith("<pre>")
+    assert "Device | State" in rendered
+    assert "Lamp" in rendered
+
+
+def test_telegram_html_escapes_untrusted_html_and_unsafe_links():
+    rendered = telegram_html("<script>x</script> [bad](javascript:alert(1))")
+
+    assert "&lt;script&gt;" in rendered
+    assert "<script>" not in rendered
+    assert "<a href=" not in rendered
 
 # ---------------------------------------------------------------------------
 # plain_links

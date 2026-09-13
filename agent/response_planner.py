@@ -21,6 +21,64 @@ _SIGNALS = {
     ),
 }
 
+_SOCIAL = re.compile(
+    r"^(?:(?:hi+|hello+|hey+|bonjour|good\s+(?:morning|afternoon|evening))"
+    r"(?:\s+curie)?[,!. ]*)?(?:how\s+are\s+you(?:\s+doing)?|"
+    r"how(?:'s|\s+is)\s+it\s+going)[?!. ]*$|"
+    r"^(?:hi+|hello+|hey+|bonjour)(?:\s+curie)?[?!. ]*$",
+    re.I,
+)
+_COMMAND = re.compile(
+    r"^(?:(?:please\s+)|(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?))?"
+    r"(?:turn|switch|set|start|stop|open|close|lock|unlock|"
+    r"enable|disable|run|send|show|check|cancel|pause|resume|remind|schedule)\b",
+    re.I,
+)
+_EXPLICIT_DEPTH = re.compile(
+    r"\b(?:in depth|deep dive|detailed|thorough|comprehensive|step[- ]by[- ]step|"
+    r"explain fully|full analysis|all the details|from first principles)\b",
+    re.I,
+)
+_FOCUSED = re.compile(
+    r"\b(?:why|how|compare|analy[sz]e|research|plan|design|implement|debug|fix|"
+    r"review|architecture|tradeoffs?|recommend|explain|brainstorm|evaluate|investigate|"
+    r"build|create|draft|write|summari[sz]e)\b",
+    re.I,
+)
+_TECHNICAL = re.compile(
+    r"\b(?:code|python|bug|error|stack|api|database|algorithm|optimi[sz]e|"
+    r"debug|architecture|model)\b",
+    re.I,
+)
+_FORMAL = re.compile(
+    r"\b(?:formal|professional tone|business tone|official wording|executive summary|"
+    r"cover letter|legal memo|formal report)\b",
+    re.I,
+)
+
+
+def _interaction_kind(text: str) -> str:
+    clean = text.strip()
+    if _SOCIAL.fullmatch(clean):
+        return "social"
+    if _COMMAND.search(clean):
+        return "command"
+    if _FOCUSED.search(clean):
+        return "explanation"
+    return "conversation"
+
+
+def _length_target(text: str, verbosity: str, *, urgent: bool, interaction: str) -> str:
+    if urgent or verbosity == "concise" or interaction in {"social", "command"}:
+        return "brief"
+    if _EXPLICIT_DEPTH.search(text):
+        return "deep"
+    if _FOCUSED.search(text) or len(text.split()) > 28:
+        return "deep" if verbosity == "detailed" else "focused"
+    if verbosity == "detailed":
+        return "focused"
+    return "brief"
+
 
 def plan_response(text: str, preferences: dict | None = None) -> dict[str, Any]:
     """Choose independent answer, care, action, length, and expression policies."""
@@ -29,38 +87,74 @@ def plan_response(text: str, preferences: dict | None = None) -> dict[str, Any]:
         (name for name, pattern in _SIGNALS.items() if pattern.search(text)), "neutral"
     )
     urgent = emotion == "urgency"
+    interaction = _interaction_kind(text)
     acknowledgement = {
         "fatigue": "acknowledge_once_then_reduce_load",
         "frustration": "acknowledge_once_then_fix",
         "celebration": "celebrate_briefly_and_specifically",
         "loneliness": "acknowledge_once_without_dependency_cues",
         "urgency": "skip_social_padding",
-    }.get(emotion, "only_if_naturally_relevant")
+    }.get(
+        emotion,
+        "result_or_blocker_only"
+        if interaction == "command"
+        else "only_if_naturally_relevant",
+    )
     verbosity = preferences.get("verbosity", "balanced")
-    length = "brief" if urgent or verbosity == "concise" else verbosity
+    length = _length_target(
+        text, verbosity, urgent=urgent, interaction=interaction
+    )
     affection = preferences.get("affection", "gentle")
     french = preferences.get("french_frequency", "natural")
+    formal = bool(_FORMAL.search(text))
+    if urgent or interaction == "command" or formal or _TECHNICAL.search(text):
+        french = "none"
     return {
         "emotion": emotion,
+        "interaction": interaction,
         "answer": "direct_first",
         "directness": "direct_first",
         "acknowledgement": acknowledgement,
-        "next_action": "one_practical_step_if_useful",
+        "next_action": (
+            "report_verified_result_or_blocker"
+            if interaction == "command"
+            else "one_practical_step_if_useful"
+        ),
         "length": length,
-        "personality": "calm" if urgent else "warm",
-        "affection": "none" if urgent else affection,
-        "french": "none" if urgent else french,
-        "french_usage": "none" if urgent else french,
+        "personality": (
+            "calm"
+            if urgent
+            else ("composed_and_natural" if formal else "warm_and_casual")
+        ),
+        "affection": (
+            "none" if urgent or interaction == "command" or formal else affection
+        ),
+        "french": french,
+        "french_usage": french,
         "end_with_question": False,
+        "layout": preferences.get("response_layout", "adaptive"),
     }
 
 
 def planner_directives(plan: dict[str, Any]) -> list[str]:
-    return [
-        f"- Response plan: answer={plan['answer']}, acknowledgement={plan['acknowledgement']}, "
+    directives = [
+        f"- Response plan: interaction={plan['interaction']}, answer={plan['answer']}, "
+        f"acknowledgement={plan['acknowledgement']}, "
         f"next_action={plan['next_action']}, length={plan['length']}.",
         f"- Relational expression: personality={plan['personality']}, affection={plan['affection']}, "
         f"French={plan['french']}. Do not end with a question by default.",
         "- Use one sincere acknowledgement at most. Never imply need, exclusivity, jealousy, guilt, "
         "human feelings, or that the user should withdraw from other people.",
     ]
+    if plan.get("interaction") == "command":
+        directives.append(
+            "- Command style: lead with the verified result or the blocker. Keep it to one "
+            "or two crisp sentences unless safety or recovery steps require more. Do not begin "
+            "with 'Certainly', 'Absolutely', 'As requested', or a recap of the command."
+        )
+    if plan.get("layout") == "structured":
+        directives.append(
+            "- Presentation preference: keep responses clean and scannable. Use concise bullets "
+            "or a small Markdown table when they materially clarify multi-part information."
+        )
+    return directives
