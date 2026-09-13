@@ -32,6 +32,9 @@ _NONEMPTY = lambda value: isinstance(value, str) and bool(value.strip())
 _PATH = lambda value: isinstance(value, str) and "\x00" not in value
 _BOOL = lambda value: isinstance(value, bool)
 _POWER_STATE = lambda value: isinstance(value, str) and value in {"on", "off"}
+_TARGETS = lambda value: isinstance(value, (list, tuple)) and 1 < len(value) <= 8 and all(
+    isinstance(item, str) and bool(item.strip()) for item in value
+)
 
 TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
     "ram_usage": ParameterSpec(),
@@ -66,12 +69,16 @@ TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
         validators=(("target", lambda value: isinstance(value, str)), ("provider", lambda value: isinstance(value, str))),
     ),
     "home_control": ParameterSpec(
-        required=("target", "state"), defaults=(("provider", ""),),
-        validators=(("target", _NONEMPTY), ("state", _POWER_STATE), ("provider", lambda value: isinstance(value, str))),
+        required=("state",), defaults=(("target", ""), ("targets", ()), ("provider", "")),
+        validators=(("target", lambda value: isinstance(value, str)), ("targets", lambda value: value in ((), []) or _TARGETS(value)), ("state", _POWER_STATE), ("provider", lambda value: isinstance(value, str))),
+    ),
+    "home_alias": ParameterSpec(
+        required=("device", "alias"),
+        validators=(("device", _NONEMPTY), ("alias", _NONEMPTY)),
     ),
 }
 
-_MUTATING_ACTIONS = {"create_directory", "create_python_project", "project_change", "gmail_send", "x_post", "x_reply", "x_dm_send", "browser_click", "browser_fill", "home_control"}
+_MUTATING_ACTIONS = {"create_directory", "create_python_project", "project_change", "gmail_send", "x_post", "x_reply", "x_dm_send", "browser_click", "browser_fill", "home_control", "home_alias"}
 _APPROVE = re.compile(r"^/approve\s+action\s+([a-f0-9]{8})$", re.I)
 _REJECT = re.compile(r"^/reject\s+action\s+([a-f0-9]{8})$", re.I)
 _ACTION_HINT = re.compile(
@@ -102,6 +109,10 @@ def validate_tool_request(action: str, params: dict[str, Any]) -> tuple[dict[str
     for key, validator in spec.validators:
         if key in normalized and not validator(normalized[key]):
             return None, f"The {key.replace('_', ' ')} is not valid. Could you rephrase it?"
+    if action == "home_control" and not (
+        str(normalized.get("target") or "").strip() or normalized.get("targets")
+    ):
+        return None, "Which home device should I control?"
     return normalized, None
 
 
@@ -116,12 +127,70 @@ def _project_name(text: str) -> Optional[str]:
 
 def _home_target(value: str) -> str:
     target = re.sub(r"^[\s,]*(?:the\s+)?", "", value.strip(), flags=re.I)
-    target = re.sub(r"[\s,]*(?:please|now|for me|at home|in the house)[.!?\s]*$", "", target, flags=re.I)
+    target = re.sub(
+        r"[\s,]*(?:please|now|for me|at home|in the house|too|also|as well)[.!?\s]*$",
+        "",
+        target,
+        flags=re.I,
+    )
+    # Natural descriptions often put the actual product name at the end:
+    # "the stand light which is called the DreamView".
+    named = re.search(r"\b(?:which\s+is\s+)?(?:called|named)\s+(?:the\s+)?(.+)$", target, re.I)
+    if named:
+        target = named.group(1)
     return target.strip(" \t.,!?")
 
 
+def _split_home_targets(value: str) -> list[str]:
+    """Split an explicit list while preserving the single-target API."""
+    target = _home_target(value)
+    parts = [
+        _home_target(part)
+        for part in re.split(r"\s*(?:,|\band\b|&)\s*", target, flags=re.I)
+        if part.strip()
+    ]
+    return [part for part in parts if part]
+
+
+def _home_control_params(target: str, state: str) -> dict[str, Any]:
+    targets = _split_home_targets(target)
+    if len(targets) > 1:
+        return {"target": "", "targets": targets, "state": state, "provider": ""}
+    return {
+        "target": targets[0] if targets else _home_target(target),
+        "state": state,
+        "provider": "",
+    }
+
+
+def _home_alias_request(command: str) -> ToolRequest | None:
+    """Recognize explicit owner instructions that teach Curie a device alias."""
+    patterns = (
+        r"^(?P<device>.+?)\s+is\s+(?:the\s+)?(?P<alias>.+?)\s*,?\s*(?:please\s+)?(?:correlate|remember|associate|map)\b.+$",
+        r"^(?:please\s+)?(?:remember|correlate|associate|map)\s+(?:that\s+)?(?P<device>.+?)\s+(?:is|means|with|to)\s+(?:the\s+)?(?P<alias>.+?)[.!?]?$",
+    )
+    for pattern in patterns:
+        match = re.fullmatch(pattern, command.strip(), re.I | re.S)
+        if not match:
+            continue
+        device = _home_target(match.group("device"))
+        alias = _home_target(match.group("alias"))
+        alias = re.sub(
+            r"\s+(?:when|from now on|in the future)\b.*$", "", alias, flags=re.I
+        ).strip(" \t.,!?")
+        params, error = validate_tool_request(
+            "home_alias", {"device": device, "alias": alias}
+        )
+        return ToolRequest("clarify", {"message": error}) if error else ToolRequest(
+            "home_alias",
+            params or {},
+            explanation=f"remember {alias!r} as an alias for {device!r}",
+        )
+    return None
+
+
 def _home_control_request(command: str) -> ToolRequest | None:
-    polite = r"(?:please\s+|could you\s+|can you\s+|would you\s+)?"
+    polite = r"(?:(?:please|could you|can(?: you)?|would you)\s+)?"
     patterns = (
         rf"^{polite}(?:turn|switch|power)\s+(?P<state>on|off)\s+(?P<target>.+)$",
         rf"^{polite}(?:turn|switch|power)\s+(?P<target>.+?)\s+(?P<state>on|off)(?:\s+please)?[.!?]?$",
@@ -131,23 +200,33 @@ def _home_control_request(command: str) -> ToolRequest | None:
         if not match:
             continue
         target = _home_target(match.group("target"))
-        if _normalize_pronoun(target):
+        if _pronoun_kind(target):
             return ToolRequest("clarify", {"message": "Which home device should I control? Please use its name."})
+        state = match.group("state").casefold()
         params, error = validate_tool_request(
-            "home_control", {"target": target, "state": match.group("state").casefold()}
+            "home_control", _home_control_params(target, state)
         )
         return ToolRequest("clarify", {"message": error}) if error else ToolRequest(
-            "home_control", params or {}, explanation=f"turn {target} {match.group('state').casefold()}"
+            "home_control", params or {}, explanation=f"turn {target} {state}"
         )
     return None
 
 
-def _normalize_pronoun(target: str) -> bool:
-    return not target or target.casefold() in {"it", "that", "that one", "this", "this one", "device", "the device"}
+def _pronoun_kind(target: str) -> str | None:
+    normalized = _home_target(target).casefold()
+    if not normalized or normalized in {
+        "it", "that", "that one", "this", "this one", "device", "the device"
+    }:
+        return "singular"
+    if normalized in {
+        "them", "those", "those devices", "these", "these devices", "both", "both devices"
+    }:
+        return "plural"
+    return None
 
 
-def _recent_explicit_home_target(history: Iterable[Any] | None) -> str | None:
-    """Recover a device named by the user in the immediately preceding turns."""
+def _recent_explicit_home_targets(history: Iterable[Any] | None) -> list[str]:
+    """Recover the most recent explicitly named device set from user turns."""
     for item in reversed(list(history or [])[-8:]):
         if isinstance(item, Mapping):
             role, content = item.get("role"), item.get("content")
@@ -159,9 +238,60 @@ def _recent_explicit_home_target(history: Iterable[Any] | None) -> str | None:
             continue
         previous = classify_request(content)
         if previous and previous.action in {"home_status", "home_control"}:
+            targets = [
+                _home_target(str(value)) for value in previous.params.get("targets", ())
+            ]
             target = _home_target(str(previous.params.get("target") or ""))
-            if target and not _normalize_pronoun(target):
-                return target
+            if target:
+                targets.insert(0, target)
+            targets = [value for value in targets if value and not _pronoun_kind(value)]
+            if targets:
+                return targets
+    return []
+
+
+def _retry_home_request(
+    command: str, history: Iterable[Any] | None
+) -> ToolRequest | None:
+    if not re.fullmatch(
+        r"(?:please\s+)?(?:try|do|send)(?:\s+(?:it|that|the command))?\s+again[.!?]?",
+        command.strip(),
+        re.I,
+    ):
+        return None
+    recent = list(history or [])[-8:]
+    assistant_messages: list[str] = []
+    for item in recent[-4:]:
+        if isinstance(item, Mapping):
+            role, content = item.get("role"), item.get("content")
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            role, content = item[0], item[1]
+        else:
+            continue
+        if str(role).casefold() == "assistant":
+            assistant_messages.append(str(content or ""))
+    assistant_text = " ".join(assistant_messages).casefold()
+    if not re.search(
+        r"didn.?t take effect|still reports|couldn.?t verify|couldn.?t find|can.?t reach|failed|not yet",
+        assistant_text,
+    ):
+        return None
+    for item in reversed(recent):
+        if isinstance(item, Mapping):
+            role, content = item.get("role"), item.get("content")
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            role, content = item[0], item[1]
+        else:
+            continue
+        if str(role).casefold() != "user" or not isinstance(content, str):
+            continue
+        previous = classify_request(content)
+        if previous and previous.action == "home_control":
+            return ToolRequest(
+                "home_control",
+                dict(previous.params),
+                explanation="retry the most recent failed smart-home command",
+            )
     return None
 
 
@@ -179,26 +309,51 @@ def classify_request(
 
     # Explicit account commands keep external writes unambiguous and previewable.
     command = text.strip()
+    retry = _retry_home_request(command, history)
+    if retry:
+        return retry
+    alias_request = _home_alias_request(command)
+    if alias_request:
+        return alias_request
     match = re.fullmatch(r"/home\s+(?:status|summary)(?:\s+(.+))?", command, re.I | re.S)
     if match:
         return ToolRequest("home_status", {"target": _home_target(match.group(1) or ""), "provider": ""})
     match = re.fullmatch(r"/home\s+(on|off)\s+(.+)", command, re.I | re.S)
     if match:
         target = _home_target(match.group(2))
-        if _normalize_pronoun(target):
+        if _pronoun_kind(target):
             return ToolRequest("clarify", {"message": "Which home device should I control? Please use its name."})
-        return ToolRequest("home_control", {"target": target, "state": match.group(1).casefold(), "provider": ""}, explanation=f"turn {target} {match.group(1).casefold()}")
+        params, error = validate_tool_request(
+            "home_control", _home_control_params(target, match.group(1).casefold())
+        )
+        return ToolRequest("clarify", {"message": error}) if error else ToolRequest(
+            "home_control", params or {}, explanation=f"turn {target} {match.group(1).casefold()}"
+        )
     home_control = _home_control_request(command)
     if home_control is not None:
         if home_control.action == "clarify":
-            target = _recent_explicit_home_target(history)
+            targets = _recent_explicit_home_targets(history)
             state_match = re.search(r"\b(on|off)\b", command, re.I)
-            if target and state_match:
+            pronoun_match = re.search(
+                r"\b(it|that|that one|this|this one|them|those|these|both)\b",
+                command,
+                re.I,
+            )
+            wants_plural = bool(
+                pronoun_match
+                and _pronoun_kind(pronoun_match.group(1)) == "plural"
+            )
+            if targets and state_match and (not wants_plural or len(targets) > 1):
                 state = state_match.group(1).casefold()
+                params = (
+                    {"target": "", "targets": targets, "state": state, "provider": ""}
+                    if wants_plural
+                    else {"target": targets[0], "state": state, "provider": ""}
+                )
                 return ToolRequest(
                     "home_control",
-                    {"target": target, "state": state, "provider": ""},
-                    explanation=f"turn {target} {state}",
+                    params,
+                    explanation=f"turn {' and '.join(targets if wants_plural else targets[:1])} {state}",
                 )
         return home_control
     if re.search(
@@ -349,9 +504,11 @@ async def _ask_intent_model(prompt: str) -> str:
     )
 
 
-async def resolve_request(text: str) -> Optional[ToolRequest]:
+async def resolve_request(
+    text: str, history: Iterable[Any] | None = None
+) -> Optional[ToolRequest]:
     """Use deterministic routing first, then a typed local classifier when warranted."""
-    deterministic = classify_request(text)
+    deterministic = classify_request(text, history=history)
     if deterministic is not None or not _ACTION_HINT.search(text):
         return deterministic
     if os.getenv("INTENT_LLM_ENABLED", "true").lower() not in {"1", "true", "yes"}:

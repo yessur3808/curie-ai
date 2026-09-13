@@ -199,7 +199,7 @@ async def route_request(
         )
         _record(owner_id, text, decision)
         return decision
-    inferred = await resolve_request(text)
+    inferred = await resolve_request(text, history=history)
     if inferred:
         decision = _from_tool_request(inferred)
         _record(owner_id, text, decision)

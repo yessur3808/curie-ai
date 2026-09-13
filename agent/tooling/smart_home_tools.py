@@ -50,14 +50,45 @@ class HomeControlTool:
         from services.smart_home import get_smart_home_hub
 
         try:
-            text, data = await get_smart_home_hub().control(
-                context.internal_id,
-                str(params["target"]),
-                str(params["state"]),
-                str(params.get("provider") or "") or None,
-            )
+            targets = [str(item) for item in params.get("targets") or ()]
+            if targets:
+                text, data = await get_smart_home_hub().control_many(
+                    context.internal_id,
+                    targets,
+                    str(params["state"]),
+                    str(params.get("provider") or "") or None,
+                )
+            else:
+                text, data = await get_smart_home_hub().control(
+                    context.internal_id,
+                    str(params.get("target") or ""),
+                    str(params["state"]),
+                    str(params.get("provider") or "") or None,
+                )
         except (ValueError, LookupError, ConnectionError) as exc:
             raise ToolExecutionError(
                 str(exc), user_message=str(exc), retryable=False
             ) from exc
         return ToolResult(text, data, "Smart-home providers")
+
+
+class HomeAliasTool:
+    name, read_only = "home_alias", False
+
+    async def execute(
+        self, params: Mapping[str, Any], context: ToolContext
+    ) -> ToolResult:
+        _require_home_owner(context)
+        from services.smart_home import get_smart_home_hub
+
+        try:
+            text, data = await get_smart_home_hub().learn_alias(
+                context.internal_id,
+                str(params["device"]),
+                str(params["alias"]),
+            )
+        except (ValueError, LookupError, ConnectionError) as exc:
+            raise ToolExecutionError(
+                str(exc), user_message=str(exc), retryable=False
+            ) from exc
+        return ToolResult(text, data, "Curie local memory")

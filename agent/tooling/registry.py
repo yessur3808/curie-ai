@@ -42,10 +42,19 @@ def _schema_for(name: str) -> Mapping[str, Any]:
             "type": "object",
             "properties": {
                 "target": {"type": "string"},
+                "targets": {"type": "array"},
                 "state": {"type": "string", "enum": ["on", "off"]},
                 "provider": {"type": "string"},
             },
-            "required": ["target", "state"],
+            "required": ["state"],
+        },
+        "home_alias": {
+            "type": "object",
+            "properties": {
+                "device": {"type": "string"},
+                "alias": {"type": "string"},
+            },
+            "required": ["device", "alias"],
         },
     }.get(name, _OBJECT)
 
@@ -56,7 +65,7 @@ def _validate(schema: Mapping[str, Any], value: Mapping[str, Any]) -> None:
     missing = [key for key in schema.get("required", ()) if key not in value]
     if missing:
         raise ValueError(f"Missing required parameters: {', '.join(missing)}")
-    types = {"string": str, "boolean": bool, "integer": int, "number": (int, float)}
+    types = {"string": str, "boolean": bool, "integer": int, "number": (int, float), "array": (list, tuple)}
     for key, item in schema.get("properties", {}).items():
         if key in value and item.get("type") in types and not isinstance(value[key], types[item["type"]]):
             raise ValueError(f"Parameter {key!r} must be {item['type']}")
@@ -201,7 +210,7 @@ def _build_runtime_registry() -> ToolRegistry:
     from agent.tooling.research_tool import ResearchTool
     from agent.tooling.specialist_tools import SpecialistTool, browser, coding, http_interceptor, navigation, network_analyzer, network_scanner, scheduler, trip_planner
     from agent.tooling.system_tools import HardwareTool, NetworkSpeedTool, RamUsageTool
-    from agent.tooling.smart_home_tools import HomeControlTool, HomeStatusTool
+    from agent.tooling.smart_home_tools import HomeAliasTool, HomeControlTool, HomeStatusTool
     from agent.tooling.weather_tool import WeatherTool
     capabilities = [
         definition(WeatherTool(), description="Get weather from a live source.", tags=("weather", "live")),
@@ -242,12 +251,21 @@ def _build_runtime_registry() -> ToolRegistry:
         ),
         definition(
             HomeControlTool(),
-            description="Turn one unambiguously named smart-home device on or off and verify its resulting state.",
-            examples=("Turn off the desk plug", "Switch the living-room lights on"),
+            description="Turn one or more unambiguously resolved smart-home devices on or off and verify their resulting state.",
+            examples=("Turn off the desk plug", "Switch the floor lamp and TV light on"),
             approval_policy="never",
             required_permissions=("home_control",),
             resource_policy=ResourcePolicy(timeout_seconds=60, concurrency_limit=1, network=True),
             tags=("smart-home", "iot", "control"),
+        ),
+        definition(
+            HomeAliasTool(),
+            description="Remember an owner-scoped natural-language alias for a smart-home device.",
+            examples=("Remember that AI Sync Box strip is the TV light",),
+            approval_policy="never",
+            required_permissions=("home_control",),
+            resource_policy=ResourcePolicy(timeout_seconds=60, concurrency_limit=1, network=True),
+            tags=("smart-home", "iot", "memory"),
         ),
         definition(
             ConversionTool(), display_name="Unit and Currency Conversion",

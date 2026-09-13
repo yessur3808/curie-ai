@@ -61,6 +61,40 @@ def test_route_resolves_home_control_pronoun_from_recent_history():
     assert decision.parameters["target"] == "TV light"
 
 
+def test_route_keeps_multiple_devices_for_plural_follow_up():
+    decision = asyncio.run(
+        route_request(
+            "Please turn them on",
+            "u1",
+            history=[
+                ("user", "Turn on the floor lamp and tv light"),
+                ("assistant", "Which devices?"),
+            ],
+        )
+    )
+
+    assert decision.intent == "capability"
+    assert decision.selected_capability == "home_control"
+    assert decision.parameters["targets"] == ["floor lamp", "tv light"]
+
+
+def test_route_retries_recent_failed_home_command_without_model_inference():
+    decision = asyncio.run(
+        route_request(
+            "Try again",
+            "u1",
+            history=[
+                ("user", "Turn on the DreamView"),
+                ("assistant", "Not yet. The command didn't take effect."),
+            ],
+        )
+    )
+
+    assert decision.intent == "capability"
+    assert decision.selected_capability == "home_control"
+    assert decision.parameters["target"] == "DreamView"
+
+
 def test_model_cannot_route_mutating_capability(monkeypatch):
     async def fake_model(*args, **kwargs):
         return (
