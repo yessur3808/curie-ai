@@ -9,7 +9,7 @@ import uuid
 
 from agent.response_planner import select_response_mode
 from agent.routing import RoutingDecision, route_operational_request
-from .contracts import EntityReference, GoalSpec, SubGoal, TurnState
+from .contracts import EntityReference, GoalConstraint, GoalSpec, SubGoal, TurnState
 
 _CORRELATE_AND_CONTROL = re.compile(
     r"^(?:please\s+)?(?:correlate|associate|map)\s+(?P<alias>.+?)\s+"
@@ -18,6 +18,10 @@ _CORRELATE_AND_CONTROL = re.compile(
     r"(?:\s+please)?[.!?]?$",
     re.I | re.S,
 )
+_SEQUENTIAL_SPLIT = re.compile(
+    r"\s*(?:;|\band then\b|\bthen also\b|\bafter that\b)\s*", re.I
+)
+_PARALLEL_SPLIT = re.compile(r"\s+\band\b\s+", re.I)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +29,7 @@ class TurnAnalysis:
     state: TurnState
     effective_text: str
     operational_decisions: tuple[RoutingDecision, ...] = ()
+    preserve_order: bool = True
 
     @property
     def operational_decision(self) -> RoutingDecision | None:
@@ -45,6 +50,35 @@ def _targets(decision: RoutingDecision) -> list[str]:
         device = str(decision.parameters.get("device") or "").strip()
         values = [item for item in (alias, device) if item]
     return list(dict.fromkeys(item for item in values if item))
+
+
+def _typed_constraints(
+    decisions: tuple[RoutingDecision, ...], text: str
+) -> tuple[GoalConstraint, ...]:
+    constraints: list[GoalConstraint] = []
+    tracked = {
+        "target": "device_target",
+        "targets": "device_targets",
+        "state": "requested_state",
+        "provider": "provider",
+        "city": "location",
+        "location": "location",
+        "unit": "unit",
+        "limit": "result_limit",
+        "path": "workspace_path",
+    }
+    for decision in decisions:
+        for key, kind in tracked.items():
+            value = decision.parameters.get(key)
+            if value is not None and value != "" and value != () and value != []:
+                constraints.append(GoalConstraint(kind, value))
+    if re.search(r"\b(?:brief|briefly|short answer|keep it short)\b", text, re.I):
+        constraints.append(GoalConstraint("response_length", "brief"))
+    if re.search(r"\b(?:table|tabular)\b", text, re.I):
+        constraints.append(GoalConstraint("response_format", "table"))
+    elif re.search(r"\b(?:bullet points?|bulleted list)\b", text, re.I):
+        constraints.append(GoalConstraint("response_format", "bullets"))
+    return tuple(constraints)
 
 
 def _compound_home_plan(
@@ -72,6 +106,40 @@ def _compound_home_plan(
     return alias_decision, control_decision
 
 
+def _compound_operational_plan(
+    text: str, owner_id: str, history: Sequence[Any] | None
+) -> tuple[tuple[RoutingDecision, ...], bool]:
+    home = _compound_home_plan(text, owner_id, history)
+    if home:
+        return home, True
+
+    sequential = [item for item in _SEQUENTIAL_SPLIT.split(text.strip()) if item]
+    if len(sequential) > 1:
+        decisions = tuple(
+            decision
+            for item in sequential
+            if (decision := route_operational_request(item, owner_id, history))
+        )
+        if len(decisions) == len(sequential):
+            return decisions, True
+
+    # A plain "and" is decomposed only when every resulting clause is
+    # independently and deterministically routable. Read-only work can run in
+    # parallel. Mutations stay ordered. This protects device lists, prose, and
+    # model-inferred intents from accidental decomposition.
+    parallel = [item for item in _PARALLEL_SPLIT.split(text.strip()) if item]
+    if 1 < len(parallel) <= 4:
+        decisions = tuple(
+            decision
+            for item in parallel
+            if (decision := route_operational_request(item, owner_id, history))
+        )
+        if len(decisions) == len(parallel):
+            read_only = all(item.risk in {"none", "read_only"} for item in decisions)
+            return decisions, not read_only
+    return (), True
+
+
 def analyze_turn(
     original_text: str,
     effective_text: str,
@@ -84,7 +152,9 @@ def analyze_turn(
 ) -> TurnAnalysis:
     """Create a bounded goal model before any memory retrieval or model prompt."""
     trace_id = trace_id or uuid.uuid4().hex
-    decisions = _compound_home_plan(effective_text, owner_id, history)
+    decisions, preserve_order = _compound_operational_plan(
+        effective_text, owner_id, history
+    )
     if not decisions:
         decision = route_operational_request(effective_text, owner_id, history)
         decisions = (decision,) if decision else ()
@@ -97,7 +167,7 @@ def analyze_turn(
             decision.intent,
             capability=decision.selected_capability,
             parameters=decision.parameters,
-            depends_on=(previous_id,) if previous_id else (),
+            depends_on=(previous_id,) if preserve_order and previous_id else (),
         )
         previous_id = subgoal.id
         subgoals.append(subgoal)
@@ -142,6 +212,7 @@ def analyze_turn(
             else ("Answer the newest request without reviving stale topics",)
         ),
         risk=risk,
+        typed_constraints=_typed_constraints(tuple(decisions), effective_text),
     )
     state = TurnState.create(
         trace_id=trace_id,
@@ -153,4 +224,4 @@ def analyze_turn(
         response_mode=mode,
         memory_policy="operational_minimal" if decisions else "relevant_only",
     )
-    return TurnAnalysis(state, effective_text, tuple(decisions))
+    return TurnAnalysis(state, effective_text, tuple(decisions), preserve_order)

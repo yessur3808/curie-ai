@@ -104,7 +104,9 @@ def test_audit_records_completed_action(isolated):
 def test_invalid_approval_is_a_redacted_security_event(isolated):
     result = asyncio.run(
         router.execute_request(
-            router.ToolRequest("approve", {"token": "deadbeef"}), "u", {"_connector": "api"}
+            router.ToolRequest("approve", {"token": "deadbeef"}),
+            "u",
+            {"_connector": "api"},
         )
     )
     assert "invalid" in result.lower()
@@ -172,7 +174,9 @@ def test_named_trip_destination_overrides_profile_location(isolated, monkeypatch
 
     monkeypatch.setattr("utils.weather.get_weather", fake_weather)
     request = router.classify_request("What is the weather in Los Angeles today?")
-    result = asyncio.run(router.execute_request(request, "u", {"location": "Hong Kong"}))
+    result = asyncio.run(
+        router.execute_request(request, "u", {"location": "Hong Kong"})
+    )
     assert observed == ["Los Angeles"]
     assert "Los Angeles" in result
     assert "Hong Kong" not in result
@@ -246,7 +250,11 @@ def test_missing_command_exit_status_is_not_falsely_audited_as_success_code(
 
     class Registry:
         def get(self, _name):
-            return type("Definition", (), {"audit_redactions": (), "version": "1", "approval_policy": "never"})()
+            return type(
+                "Definition",
+                (),
+                {"audit_redactions": (), "version": "1", "approval_policy": "never"},
+            )()
 
         async def execute(self, _name, _params, _context):
             return ToolResult("done", {"command": ["pytest", "-q"]})
@@ -255,6 +263,53 @@ def test_missing_command_exit_status_is_not_falsely_audited_as_success_code(
     asyncio.run(router.execute_request(router.ToolRequest("run_tests"), "u", {}))
     details = local_store.list_action_audit("u")[0]["details"]
     assert details["command_exit_status"] is None
+
+
+def test_mutating_tool_outcome_records_destination_verification(isolated, monkeypatch):
+    from agent.tooling.contracts import ToolResult
+
+    class Registry:
+        def get(self, _name):
+            return type(
+                "Definition",
+                (),
+                {
+                    "audit_redactions": (),
+                    "version": "1",
+                    "approval_policy": "never",
+                    "risk": "mutating",
+                },
+            )()
+
+        async def execute(self, _name, _params, _context):
+            return ToolResult(
+                "Done. DreamView is off.",
+                {
+                    "receipt": {
+                        "requested_state": "off",
+                        "verified_state": "off",
+                    }
+                },
+            )
+
+    monkeypatch.setattr("agent.tooling.get_runtime_registry", lambda: Registry())
+    outcome = {}
+    result = asyncio.run(
+        router.execute_request(
+            router.ToolRequest("home_control", {"target": "DreamView", "state": "off"}),
+            "u",
+            {},
+            _outcome=outcome,
+        )
+    )
+
+    assert result == "Done. DreamView is off."
+    assert outcome["status"] == "verified"
+    assert outcome["verification_status"] == "verified"
+    assert (
+        local_store.list_action_audit("u")[0]["details"]["verification_status"]
+        == "verified"
+    )
 
 
 def test_live_research_preserves_sources(isolated, monkeypatch):

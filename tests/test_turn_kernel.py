@@ -27,6 +27,12 @@ def test_operational_turn_has_typed_goal_and_skips_memory():
     assert analysis.state.response_mode is ResponseMode.COMMAND_ACK
     assert analysis.state.entities[0].resolved_name == "DreamView"
     assert analysis.operational_decisions[0].parameters["state"] == "off"
+    assert {
+        item.kind: item.value for item in analysis.state.goal.typed_constraints
+    } == {"device_target": "DreamView", "requested_state": "off"}
+    safe_state = analysis.state.as_dict()
+    assert safe_state["goal"]["typed_constraints"][0]["value_type"] == "str"
+    assert "DreamView" not in str(safe_state["goal"]["typed_constraints"])
 
 
 def test_dialogue_state_resolves_device_pronouns_without_rewriting_normal_chat():

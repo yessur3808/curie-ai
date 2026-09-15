@@ -30,6 +30,11 @@ _SOCIAL = re.compile(
     r"^(?:hi+|hello+|hey+|bonjour)(?:\s+curie)?[?!. ]*$",
     re.I,
 )
+_CASUAL_QUIP = re.compile(
+    r"^(?:that was|well,?\s+that was|not bad|nice one|well played|look at you)"
+    r"\b.{0,100}[.!?]*$",
+    re.I | re.S,
+)
 _COMMAND = re.compile(
     r"^(?:(?:please\s+)|(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?))?"
     r"(?:turn|switch|set|start|stop|open|close|lock|unlock|"
@@ -61,7 +66,7 @@ _FORMAL = re.compile(
 
 def _interaction_kind(text: str) -> str:
     clean = text.strip()
-    if _SOCIAL.fullmatch(clean):
+    if _SOCIAL.fullmatch(clean) or _CASUAL_QUIP.fullmatch(clean):
         return "social"
     if _COMMAND.search(clean):
         return "command"

@@ -1,0 +1,65 @@
+[
+  {
+    "id": "parallel_read_checks",
+    "category": "planning",
+    "input": "Check RAM usage and check hardware specs",
+    "expected": {
+      "route_intent": "compound_operation",
+      "tool_sequence": ["ram_usage", "hardware"],
+      "execution_mode": "parallel_read_only",
+      "execution_status": "completed",
+      "verification_status": "not_required",
+      "message_parts": 2
+    }
+  },
+  {
+    "id": "ordered_read_checks",
+    "category": "planning",
+    "input": "Check RAM usage and then check hardware specs",
+    "expected": {
+      "tool_sequence": ["ram_usage", "hardware"],
+      "execution_mode": "sequential",
+      "execution_status": "completed",
+      "message_parts": 2
+    }
+  },
+  {
+    "id": "ordered_device_mutations",
+    "category": "safe_execution",
+    "input": "Turn off DreamView and turn on the desk lamp",
+    "expected": {
+      "tool_sequence": ["home_control", "home_control"],
+      "risk": "mutating",
+      "execution_mode": "sequential",
+      "execution_status": "completed",
+      "verification_status": "verified",
+      "message_parts": 2
+    }
+  },
+  {
+    "id": "partial_failure",
+    "category": "failure_recovery",
+    "input": "Check RAM usage then also check hardware specs then also measure current network speed and latency",
+    "fail_capability": "hardware",
+    "expected": {
+      "tool_sequence": ["ram_usage", "hardware", "network_speed"],
+      "execution_mode": "sequential",
+      "execution_status": "partial",
+      "verification_status": "failed",
+      "message_parts": 3,
+      "contains": ["RAM usage complete", "earlier step failed"]
+    }
+  },
+  {
+    "id": "alias_then_control",
+    "category": "device_correlation",
+    "input": "Correlate DreamView with AI Sync Box strip and turn it off",
+    "expected": {
+      "tool_sequence": ["home_alias", "home_control"],
+      "execution_mode": "sequential",
+      "execution_status": "completed",
+      "verification_status": "verified",
+      "message_parts": 2
+    }
+  }
+]

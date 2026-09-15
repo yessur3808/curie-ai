@@ -91,8 +91,11 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         return None
     health = capability_health(workflow_ready)
     capabilities = health["capabilities"]
-    labels = []
+    lines = [f"**Curie status: {health['status'].title()}**", ""]
     for name in ("text", "vision", "transcription", "speech", "database", "disk"):
         item = capabilities[name]
-        labels.append(f"{name}={'ready' if item.get('ready') else 'degraded'}")
-    return f"Curie is {health['status']}. " + ", ".join(labels) + "."
+        ready = bool(item.get("ready"))
+        icon = "✅" if ready else "⚠️"
+        state = "Ready" if ready else "Degraded"
+        lines.append(f"- {icon} **{name.title()}:** {state}")
+    return "\n".join(lines)

@@ -19,6 +19,7 @@ from agent.chat_workflow import (
     _naturalize_prose_punctuation,
     _select_relevant_facts,
 )  # noqa: E402
+from agent.kernel.understanding import analyze_turn  # noqa: E402
 
 
 def test_unrelated_profile_topics_are_not_injected_into_every_request():
@@ -34,9 +35,7 @@ def test_unrelated_profile_topics_are_not_injected_into_every_request():
 
 
 def test_prompt_advertises_portable_rich_text_syntax():
-    workflow = ChatWorkflow(
-        persona={"name": "Curie", "system_prompt": "Be helpful."}
-    )
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
 
     prompt = workflow._build_structured_prompt({}, [], "Compare the devices")
 
@@ -46,9 +45,7 @@ def test_prompt_advertises_portable_rich_text_syntax():
 
 
 def test_prompt_uses_direct_casual_command_style_without_forced_french():
-    workflow = ChatWorkflow(
-        persona={"name": "Curie", "system_prompt": "Be helpful."}
-    )
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
 
     prompt = workflow._build_structured_prompt({}, [], "Turn off the DreamView")
 
@@ -58,6 +55,23 @@ def test_prompt_uses_direct_casual_command_style_without_forced_french():
     assert "usually be omitted from commands and technical replies" in prompt
     assert "like a good, trusted friend" in prompt
     assert "lightly romantic" not in prompt
+
+
+def test_prompt_keeps_casual_quips_short_and_advice_free():
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
+    analysis = analyze_turn(
+        "That was almost suspiciously efficient.",
+        "That was almost suspiciously efficient.",
+        owner_id="owner",
+        platform="telegram",
+    )
+
+    prompt = workflow._build_structured_prompt(
+        {}, [], "That was almost suspiciously efficient.", turn_analysis=analysis
+    )
+
+    assert "one short playful sentence" in prompt
+    assert "Do not turn it into praise, a plan, or advice" in prompt
 
 
 class TestOutputSanitization:

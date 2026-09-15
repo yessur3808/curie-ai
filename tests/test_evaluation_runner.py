@@ -137,3 +137,26 @@ def test_repetition_gate_and_summary_scores():
     summary = summarize_results([result])
     assert summary.total == 1
     assert summary.overall_score == 0
+
+
+def test_typed_execution_and_message_delivery_are_evaluated():
+    case = {
+        "id": "compound",
+        "category": "planning",
+        "expected": {
+            "execution_status": "completed",
+            "execution_mode": "parallel_read_only",
+            "message_parts": 2,
+        },
+    }
+    response = {
+        "text": "Memory is healthy.\n\nHardware is healthy.",
+        "execution_status": "completed",
+        "execution": {
+            "status": "completed",
+            "plan": {"execution_mode": "parallel_read_only"},
+        },
+        "message_parts": ["Memory is healthy.", "Hardware is healthy."],
+    }
+
+    assert evaluate_case(case, response).passed is True

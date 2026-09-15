@@ -13,8 +13,13 @@ import uuid
 from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
-_SECRET_KEY = re.compile(r"token|secret|password|passcode|credential|api.?key|authorization|cookie", re.I)
-_CONTENT_KEY = re.compile(r"message|content|prompt|body|result|output|error|summary|query|request|text|recipient|subject|title|contact", re.I)
+_SECRET_KEY = re.compile(
+    r"token|secret|password|passcode|credential|api.?key|authorization|cookie", re.I
+)
+_CONTENT_KEY = re.compile(
+    r"message|content|prompt|body|result|output|error|summary|query|request|text|recipient|subject|title|contact",
+    re.I,
+)
 _PATH_KEY = re.compile(r"path|file|root|directory", re.I)
 _SECRET_VALUE = re.compile(
     r"(?i)(bearer\s+\S+|(?:token|password|secret|api[_-]?key)\s*[:=]\s*\S+)"
@@ -56,7 +61,11 @@ def redact(value: Any, key: str = "") -> Any:
         return {"sha256": _digest(raw), "length": len(raw)}
     if isinstance(value, str):
         return _SECRET_VALUE.sub("[REDACTED]", value)[:1000]
-    return value if value is None or isinstance(value, (bool, int, float)) else str(value)[:1000]
+    return (
+        value
+        if value is None or isinstance(value, (bool, int, float))
+        else str(value)[:1000]
+    )
 
 
 def normalize_audit_details(details: dict) -> dict:
@@ -67,7 +76,9 @@ def normalize_audit_details(details: dict) -> dict:
         "schema_version": 1,
         "event_id": str(details.get("event_id") or uuid.uuid4().hex),
         "connector": str(details.get("connector") or "unknown")[:40],
-        "validated_action": str(details.get("validated_action") or details.get("action") or "unknown")[:120],
+        "validated_action": str(
+            details.get("validated_action") or details.get("action") or "unknown"
+        )[:120],
         "parameters": safe.get("parameters", safe.get("params", {})),
         "policy_decision": str(details.get("policy_decision") or "evaluated")[:80],
         "approval": redact(details.get("approval") or {"required": False}),
@@ -76,8 +87,13 @@ def normalize_audit_details(details: dict) -> dict:
         "finished_at": str(details.get("finished_at") or now),
         "changed_files": redact(details.get("changed_files") or [], "changed_files"),
         "command_exit_status": details.get("command_exit_status"),
-        "citations": [_safe_citation(item) for item in details.get("citations", [])[:20]],
+        "citations": [
+            _safe_citation(item) for item in details.get("citations", [])[:20]
+        ],
         "outcome": safe.get("outcome", safe.get("result", safe.get("error", {}))),
+        "verification_status": str(
+            details.get("verification_status") or "not_recorded"
+        )[:40],
         "security_category": details.get("security_category"),
     }
 
@@ -98,14 +114,21 @@ def security_alerts(events: list[dict], window_minutes: int = 15) -> list[dict]:
     counts: Counter[str] = Counter()
     for event in events:
         try:
-            created = datetime.fromisoformat(str(event.get("created_at", "")).replace("Z", "+00:00"))
+            created = datetime.fromisoformat(
+                str(event.get("created_at", "")).replace("Z", "+00:00")
+            )
         except ValueError:
             continue
         category = (event.get("details") or {}).get("security_category")
         if category in SECURITY_THRESHOLDS and created >= cutoff:
             counts[category] += 1
     return [
-        {"category": category, "count": count, "threshold": SECURITY_THRESHOLDS[category], "severity": "warning"}
+        {
+            "category": category,
+            "count": count,
+            "threshold": SECURITY_THRESHOLDS[category],
+            "severity": "warning",
+        }
         for category, count in sorted(counts.items())
         if count >= SECURITY_THRESHOLDS[category]
     ]
@@ -123,7 +146,11 @@ def handle_audit_command(internal_id: str, text: str) -> str | None:
         events = repo.list(str(internal_id), 1000)
         return f"Audit contains {len(events)} retained events. Active security alerts: {len(security_alerts(events))}."
     if command == "/audit export":
-        return json.dumps({"schema_version": 1, "events": repo.list(str(internal_id), 10000)}, default=str, sort_keys=True)
+        return json.dumps(
+            {"schema_version": 1, "events": repo.list(str(internal_id), 10000)},
+            default=str,
+            sort_keys=True,
+        )
     if command == "/audit delete":
         return "Audit deletion is irreversible. Use `/audit delete confirm` to delete your audit records."
     if command == "/audit delete confirm":

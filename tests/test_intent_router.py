@@ -73,7 +73,9 @@ def test_parameter_schema_applies_defaults_and_rejects_bad_values():
     assert "not valid" in error
 
 
-def _resolve_with_model(monkeypatch, payload, text="Could you investigate fresh chip supply data?"):
+def _resolve_with_model(
+    monkeypatch, payload, text="Could you investigate fresh chip supply data?"
+):
     async def fake_model(*args, **kwargs):
         return payload
 
@@ -108,7 +110,9 @@ def test_medium_confidence_model_route_asks_before_acting(monkeypatch):
         '{"action":"research","params":{"query":"chips"},"confidence":0.2,"clarification":null}',
     ],
 )
-def test_invalid_unsafe_or_low_confidence_model_output_does_not_route(monkeypatch, payload):
+def test_invalid_unsafe_or_low_confidence_model_output_does_not_route(
+    monkeypatch, payload
+):
     assert _resolve_with_model(monkeypatch, payload) is None
 
 
@@ -127,3 +131,15 @@ def test_non_action_chat_never_calls_intent_model(monkeypatch):
 
     monkeypatch.setattr("agent.intent_router._ask_intent_model", fail)
     assert asyncio.run(resolve_request("Hello, how are you?")) is None
+
+
+def test_formatting_request_with_inline_url_never_calls_intent_model(monkeypatch):
+    async def fail(*args, **kwargs):
+        raise AssertionError("intent model should not be called")
+
+    monkeypatch.setattr("agent.intent_router._ask_intent_model", fail)
+    text = (
+        "Formatting test: write a bold heading, bullets, a table, and an inline "
+        "link to https://example.com"
+    )
+    assert asyncio.run(resolve_request(text)) is None

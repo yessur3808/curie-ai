@@ -47,6 +47,7 @@ from agent.observability import (
     turn_event_writer,
 )
 from agent.kernel.dialogue_state import DialogueStateStore
+from agent.kernel.planning import PlanExecutor, build_execution_plan
 from agent.kernel.understanding import TurnAnalysis, analyze_turn
 from agent.orchestration.session_commands import SessionCommandService
 from agent.orchestration.specialist_router import SpecialistRouter
@@ -427,6 +428,7 @@ class ChatWorkflow:
         self.model_service = ModelConversationService(llm_manager)
         self.learning_service = ConversationLearningService(_LEARNING_EXECUTOR)
         self.dialogue_state = DialogueStateStore()
+        self.plan_executor = PlanExecutor()
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
         self.prompt_cache = PromptCache(max_size=100)
 
@@ -605,6 +607,31 @@ class ChatWorkflow:
             logger.debug("Could not persist user interaction time: %s", exc)
 
         try:
+            from utils.formatting import rich_format_preview_request
+
+            formatting_preview = rich_format_preview_request(user_text)
+            if formatting_preview:
+                sm = get_session_manager()
+                sm.add_message(platform, internal_id, "user", user_text)
+                sm.add_message(platform, internal_id, "assistant", formatting_preview)
+                self.dedupe_cache.set(
+                    platform, str(external_chat_id), message_id, formatting_preview
+                )
+                return {
+                    "text": formatting_preview,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "deterministic_formatting_preview",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                    "provenance": response_provenance(
+                        model_used="deterministic_formatting_preview",
+                        user_text=user_text,
+                        response_text=formatting_preview,
+                    ),
+                }
+        except Exception as exc:
+            logger.debug("Could not render formatting preview: %s", exc)
+
+        try:
             from utils.calculator import calculate_request
 
             exact_calculation = calculate_request(user_text)
@@ -670,29 +697,32 @@ class ChatWorkflow:
         ):
             try:
                 user_profile = UserManager.get_user_profile(internal_id) or {}
-                candidates = []
+                plan = build_execution_plan(
+                    turn_analysis.state,
+                    turn_analysis.operational_decisions,
+                    preserve_order=turn_analysis.preserve_order,
+                )
+
+                async def execute_decision(decision):
+                    return await self.routing_service.execute(
+                        decision,
+                        routing_text,
+                        str(internal_id),
+                        platform,
+                        user_profile,
+                    )
+
                 with trace.stage("tool"):
-                    for decision in turn_analysis.operational_decisions:
-                        candidate = await self.routing_service.execute(
-                            decision,
-                            routing_text,
-                            str(internal_id),
-                            platform,
-                            user_profile,
-                        )
-                        if candidate is None:
-                            raise RuntimeError("The operational route has no executor")
-                        candidates.append((decision, candidate))
+                    execution = await self.plan_executor.execute(plan, execute_decision)
                 response_parts = [
                     self.response_policy.finalize(
-                        candidate.text, user_text, profile=user_profile
+                        outcome.text, user_text, profile=user_profile
                     )
-                    for _, candidate in candidates
+                    for outcome in execution.outcomes
+                    if outcome.text.strip()
                 ]
                 routed_response = "\n\n".join(response_parts)
-                model_used = "+".join(
-                    candidate.model_used for _, candidate in candidates
-                )
+                model_used = execution.model_used or "operational_plan"
                 sm = get_session_manager()
                 sm.add_message(platform, internal_id, "user", user_text)
                 sm.add_message(platform, internal_id, "assistant", routed_response)
@@ -702,11 +732,14 @@ class ChatWorkflow:
                 timings = trace.finish()
                 latency_metrics.observe(timings)
                 routing_payload = (
-                    candidates[0][0].as_dict()
-                    if len(candidates) == 1
+                    turn_analysis.operational_decisions[0].as_dict()
+                    if len(turn_analysis.operational_decisions) == 1
                     else {
                         "intent": "compound_operation",
-                        "steps": [decision.as_dict() for decision, _ in candidates],
+                        "steps": [
+                            decision.as_dict()
+                            for decision in turn_analysis.operational_decisions
+                        ],
                     }
                 )
                 return {
@@ -716,6 +749,10 @@ class ChatWorkflow:
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                     "timings_ms": timings,
                     "routing": routing_payload,
+                    "execution": execution.as_dict(),
+                    "execution_status": execution.status,
+                    "verification_status": execution.verification_status,
+                    "message_parts": response_parts,
                     "provenance": response_provenance(
                         model_used=model_used,
                         user_text=user_text,
@@ -1083,7 +1120,11 @@ class ChatWorkflow:
             # Build structured prompt — internal_id scopes the prompt cache per user
             with trace.stage("prompt"):
                 prompt = self._build_structured_prompt(
-                    user_profile, history, user_text, internal_id=internal_id
+                    user_profile,
+                    history,
+                    user_text,
+                    internal_id=internal_id,
+                    turn_analysis=turn_analysis,
                 )
 
             temperature = self.personality_context.get_response_temperature()
@@ -1363,7 +1404,12 @@ class ChatWorkflow:
         return recent
 
     def _build_structured_prompt(
-        self, user_profile: Dict, history: list, user_text: str, internal_id: str = ""
+        self,
+        user_profile: Dict,
+        history: list,
+        user_text: str,
+        internal_id: str = "",
+        turn_analysis: TurnAnalysis | None = None,
     ) -> str:
         """
         Build prompt using structured chat format.
@@ -1473,6 +1519,46 @@ class ChatWorkflow:
 
             lines.append("\n[PERSONALITY STATE]")
             lines.extend(personality_directives)
+
+            if turn_analysis is not None:
+                state = turn_analysis.state
+                lines.append("\n[CURRENT TURN CONTRACT]")
+                lines.append(f"- Response mode: {state.response_mode.value}")
+                lines.append(f"- Current goal: {state.goal.intent}")
+                lines.append(
+                    "- The current goal and newest user message outrank remembered or "
+                    "earlier subjects. Mention an older subject only when it is necessary "
+                    "to answer this turn."
+                )
+                if state.response_mode.value == "social":
+                    lines.append(
+                        "- Treat this as natural conversation. Use light, understated banter "
+                        "when it fits, then respond to the actual nuance."
+                    )
+                    lines.append(
+                        "- If the newest message is only a casual quip, answer with one short "
+                        "playful sentence. Do not turn it into praise, a plan, or advice."
+                    )
+                elif state.response_mode.value == "explanation":
+                    lines.append(
+                        "- Explain the reasoning clearly and proportionately. Lead with the "
+                        "answer, then show the useful logic and tradeoffs."
+                    )
+                else:
+                    lines.append(
+                        "- Be tactically direct. State the result, blocker, or next required "
+                        "choice before any supporting detail."
+                    )
+                if state.response_mode.value != "social":
+                    lines.append(
+                        "- Offer at most one proactive recommendation, and only when it is "
+                        "specific, grounded in the current context, and materially useful."
+                    )
+                lines.append(
+                    "- When the user explicitly asks you to choose or recommend between "
+                    "options, commit to the best option supported by the given facts. State "
+                    "one concise assumption if needed instead of handing the choice back."
+                )
 
             lines.append("\n[IMPORTANT RULES]")
             lines.append(

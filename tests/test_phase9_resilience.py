@@ -39,7 +39,10 @@ def test_capability_health_publishes_independent_degradation(monkeypatch):
     assert health["capabilities"]["text"]["ready"] is False
     assert health["capabilities"]["vision"]["ready"] is False
     assert health["capabilities"]["database"]["ready"] is True
-    assert "text=degraded" in handle_health_command("/health", workflow_ready=False)
+    message = handle_health_command("/health", workflow_ready=False)
+    assert message.startswith("**Curie status: Degraded**\n\n")
+    assert "- ⚠️ **Text:** Degraded" in message
+    assert "- ✅ **Database:** Ready" in message
 
 
 @pytest.mark.asyncio

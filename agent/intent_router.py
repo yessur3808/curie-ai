@@ -177,6 +177,11 @@ _ACTION_HINT = re.compile(
     r"create|make|run|inspect|analy[sz]e|fix|implement|generate|modify|refactor|turn on|turn off)\b",
     re.I,
 )
+_RESPONSE_COMPOSITION = re.compile(
+    r"\b(?:format(?:ting)?|write|draft|rewrite|compose)\b.{0,200}"
+    r"\b(?:message|reply|response|text|wording|paragraph|heading|bullets?|table|bold|italic|link)\b",
+    re.I | re.S,
+)
 
 
 def validate_tool_request(
@@ -797,7 +802,11 @@ async def resolve_request(
 ) -> Optional[ToolRequest]:
     """Use deterministic routing first, then a typed local classifier when warranted."""
     deterministic = classify_request(text, history=history)
-    if deterministic is not None or not _ACTION_HINT.search(text):
+    if (
+        deterministic is not None
+        or _RESPONSE_COMPOSITION.search(text)
+        or not _ACTION_HINT.search(text)
+    ):
         return deterministic
     if os.getenv("INTENT_LLM_ENABLED", "true").lower() not in {"1", "true", "yes"}:
         return None

@@ -19,8 +19,11 @@ _OPS = {
     ast.UAdd: operator.pos,
 }
 _REQUEST = re.compile(
-    r"^(?:what(?:'s| is)|calculate|compute|work out)\s+([\d\s().+*/%^-]+)\??$", re.I
+    r"^(?:(?:quick one|quick question)\s*[:,]\s*)?"
+    r"(?:what(?:'s| is)|calculate|compute|work out)\s+(.+?)\??$",
+    re.I,
 )
+_SAFE_EXPRESSION = re.compile(r"[\d\s().+*/%^-]+")
 
 
 def _evaluate(node, depth: int = 0):
@@ -47,7 +50,13 @@ def calculate_request(text: str) -> str | None:
     match = _REQUEST.fullmatch(text.strip())
     if not match:
         return None
-    expression = match.group(1).replace("^", "**")
+    display_expression = match.group(1).strip()
+    expression = display_expression.casefold()
+    expression = re.sub(r"\bmultiplied\s+by\b|\btimes\b", "*", expression)
+    expression = re.sub(r"\bdivided\s+by\b", "/", expression)
+    expression = expression.replace("×", "*").replace("÷", "/").replace("^", "**")
+    if not _SAFE_EXPRESSION.fullmatch(expression):
+        return None
     try:
         value = _evaluate(ast.parse(expression, mode="eval"))
     except (SyntaxError, ValueError, ZeroDivisionError, OverflowError):
@@ -59,4 +68,4 @@ def calculate_request(text: str) -> str | None:
             rendered = str(value)
     else:
         rendered = str(value)
-    return f"{match.group(1).strip()} = {rendered}"
+    return f"{display_expression} = {rendered}"

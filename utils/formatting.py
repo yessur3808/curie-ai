@@ -29,6 +29,28 @@ MARKDOWN_SKILL_MODELS = frozenset(
 )
 
 
+def rich_format_preview_request(text: str) -> str | None:
+    """Return a stable rich-text preview for an explicit formatting test."""
+    if not re.search(
+        r"\b(?:formatting\s+test|(?:show|demonstrate|test).{0,40}"
+        r"(?:telegram|message|rich[- ]?text)\s+formatting)\b",
+        str(text or ""),
+        re.I | re.S,
+    ):
+        return None
+    return (
+        "**Curie formatting check**\n\n"
+        "- **Status:** Ready\n"
+        "- *Style:* Compact and readable\n\n"
+        "| Feature | Result |\n"
+        "| --- | --- |\n"
+        "| Lists | Ready |\n"
+        "| Links | Ready |\n\n"
+        "*Italic sample.* ~~Old wording~~ ++Underlined note++ "
+        "[Example](https://example.com)"
+    )
+
+
 def _safe_telegram_link(url: str) -> bool:
     parsed = urlparse(html.unescape(url).strip())
     return parsed.scheme.casefold() in {"http", "https"} and bool(parsed.netloc)
@@ -38,7 +60,9 @@ def _render_markdown_table(lines: list[str]) -> str | None:
     """Render a small Markdown table as an aligned Telegram ``pre`` block."""
     if len(lines) < 2:
         return None
-    rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
+    rows = [
+        [cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines
+    ]
     if not all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in rows[1]):
         return None
     rows = [rows[0], *rows[2:]]
@@ -47,8 +71,7 @@ def _render_markdown_table(lines: list[str]) -> str | None:
         return None
     normalized = [row + [""] * (columns - len(row)) for row in rows]
     widths = [
-        min(24, max(len(row[index]) for row in normalized))
-        for index in range(columns)
+        min(24, max(len(row[index]) for row in normalized)) for index in range(columns)
     ]
     rendered = []
     for row_index, row in enumerate(normalized):
@@ -86,9 +109,7 @@ def telegram_html(text: str) -> str:
             if re.fullmatch(r"[A-Za-z0-9_+.-]{1,30}", language)
             else ""
         )
-        return token(
-            f"<pre><code{language_attr}>{html.escape(body)}</code></pre>"
-        )
+        return token(f"<pre><code{language_attr}>{html.escape(body)}</code></pre>")
 
     source = re.sub(r"```([^\n`]*)\n([\s\S]*?)```", code_block, source)
 
@@ -119,7 +140,9 @@ def telegram_html(text: str) -> str:
 
     source = re.sub(r"\[([^\]\n]+)\]\(([^)\s]+)\)", link, source)
     source = re.sub(
-        r"`([^`\n]+)`", lambda match: token(f"<code>{html.escape(match.group(1))}</code>"), source
+        r"`([^`\n]+)`",
+        lambda match: token(f"<code>{html.escape(match.group(1))}</code>"),
+        source,
     )
     source = html.escape(source)
 
@@ -131,7 +154,9 @@ def telegram_html(text: str) -> str:
     source = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", source)
     source = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"<i>\1</i>", source)
     source = re.sub(r"^\s*[-*]\s+", "• ", source, flags=re.MULTILINE)
-    source = re.sub(r"^&gt;\s?(.+)$", r"<blockquote>\1</blockquote>", source, flags=re.MULTILINE)
+    source = re.sub(
+        r"^&gt;\s?(.+)$", r"<blockquote>\1</blockquote>", source, flags=re.MULTILINE
+    )
 
     for index, rendered in enumerate(protected):
         source = source.replace(f"\x00TG{index}\x00", rendered)

@@ -52,3 +52,10 @@ def test_explicitly_detailed_explanation_gets_deep_length():
 
     assert plan["interaction"] == "explanation"
     assert plan["length"] == "deep"
+
+
+def test_short_casual_quip_is_social_and_stays_brief():
+    plan = plan_response("That was almost suspiciously efficient.")
+
+    assert plan["interaction"] == "social"
+    assert plan["length"] == "brief"

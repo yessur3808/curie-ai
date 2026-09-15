@@ -5,6 +5,7 @@ Receives Telegram events, normalizes to standard format, calls ChatWorkflow.
 """
 
 import asyncio
+from contextlib import suppress
 import datetime
 import os
 import logging
@@ -67,6 +68,7 @@ class PendingAttachment:
 _pending_attachments: dict[int, PendingAttachment] = {}
 _pending_lock = threading.Lock()
 _ATTACHMENT_TTL_SECONDS = 900
+_TYPING_ACTION = "typing"
 
 # Telegram's ``filters.COMMAND`` excludes slash commands from the generic text
 # handler. Keep every workflow-owned command registered here so it remains
@@ -390,6 +392,34 @@ async def reply_in_chunks(
             await message.reply_text(strip_markdown(raw_chunk))
 
 
+async def reply_with_result(message, result: dict, fallback: str) -> None:
+    """Deliver deliberately separated response parts as distinct messages."""
+    parts = [
+        str(part).strip()
+        for part in result.get("message_parts", [])
+        if str(part).strip()
+    ]
+    if len(parts) > 1:
+        for part in parts:
+            await reply_in_chunks(message, part)
+        return
+    await reply_in_chunks(message, result.get("text", fallback))
+
+
+async def _typing_heartbeat(message) -> None:
+    """Keep Telegram's typing indicator alive during slower local inference."""
+    try:
+        while True:
+            await message.get_bot().send_chat_action(
+                chat_id=message.chat_id, action=_TYPING_ACTION
+            )
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.debug("Could not refresh Telegram typing indicator: %s", exc)
+
+
 async def handle_busy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
     set_busy_temporarily(tg_user_id)
@@ -676,7 +706,7 @@ async def handle_workflow_command(update: Update, context: ContextTypes.DEFAULT_
         "internal_id": internal_id,
     }
     result = await _runtime.workflow.process_message(normalized_input)
-    await reply_in_chunks(update.message, result.get("text", "Command unavailable."))
+    await reply_with_result(update.message, result, "Command unavailable.")
 
 
 async def handle_voice_message(update: Update, persona: dict) -> Optional[str]:
@@ -743,7 +773,13 @@ async def _process_and_reply(
         "timestamp": datetime.datetime.utcnow(),
         "internal_id": internal_id,
     }
-    result = await _runtime.workflow.process_message(normalized_input)
+    typing_task = asyncio.create_task(_typing_heartbeat(update.message))
+    try:
+        result = await _runtime.workflow.process_message(normalized_input)
+    finally:
+        typing_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await typing_task
     response_text = result.get("text", "[Error: No response]")
     try:
         from services.voice_delivery import synthesize_reply, voice_replies_enabled
@@ -764,7 +800,7 @@ async def _process_and_reply(
                     Path(voice_path).unlink(missing_ok=True)
     except Exception as exc:
         logger.warning("Telegram voice reply failed; sending text: %s", exc)
-    await reply_in_chunks(update.message, response_text)
+    await reply_with_result(update.message, result, "[Error: No response]")
 
 
 async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -936,8 +972,7 @@ async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "internal_id": internal_id,
     }
     result = await _runtime.workflow.process_message(normalized_input)
-    response_text = result.get("text", "📅 No reminders found.")
-    await reply_in_chunks(update.message, response_text)
+    await reply_with_result(update.message, result, "📅 No reminders found.")
 
 
 def start_telegram_bot(workflow: ChatWorkflow):

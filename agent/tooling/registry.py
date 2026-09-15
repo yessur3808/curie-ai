@@ -279,7 +279,17 @@ def _build_runtime_registry() -> ToolRegistry:
         ("scheduler_skill", "Scheduler", scheduler, False, r"\b(?:remind|reminder|alarm|schedule|timer)\b", "agent.skills.scheduler", ("reminders",)),
         ("navigation_skill", "Navigation", navigation, True, r"\b(?:directions?|navigate|navigation|traffic|route to|how do i get)\b", "agent.skills.navigation", ("navigation",)),
         ("trip_planner_skill", "Trip Planner", trip_planner, True, r"\b(?:vacation|holiday|trip plan|travel plan|itinerary)\b", "agent.skills.trip_planner", ("travel",)),
-        ("browser_skill", "Browser", browser, True, r"https?://|\b(?:open|browse|visit)\s+(?:the\s+)?(?:webpage|website|site|url)\b", "agent.skills.browser", ("web",)),
+        (
+            "browser_skill",
+            "Browser",
+            browser,
+            True,
+            r"^\s*https?://\S+\s*$|"
+            r"\b(?:open|browse|visit|read|summari[sz]e|check|inspect)\b.{0,80}https?://|"
+            r"\b(?:open|browse|visit)\s+(?:the\s+)?(?:webpage|website|site|url)\b",
+            "agent.skills.browser",
+            ("web",),
+        ),
         ("network_scanner_skill", "Network Scanner", network_scanner, True, r"\b(?:port scan|network scan|nmap|scan hosts?)\b", "agent.skills.network_scanner", ("network", "security")),
         ("network_analyzer_skill", "Network Analyzer", network_analyzer, True, r"\b(?:pcap|packet capture|wireshark|network traffic|protocol analysis)\b", "agent.skills.network_analyzer", ("network", "security")),
         ("http_interceptor_skill", "HTTP Interceptor", http_interceptor, True, r"\b(?:http interceptor|intercept http|burp suite|web proxy|proxy request)\b", "agent.skills.http_interceptor", ("web", "security")),

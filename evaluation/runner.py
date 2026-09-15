@@ -162,6 +162,23 @@ def evaluate_case(case: dict, response: dict) -> EvaluationResult:
         and response.get("verification_status") != expected["verification_status"]
     ):
         correctness_failures.append("verification status is incorrect")
+    execution = response.get("execution") or {}
+    plan = execution.get("plan") or {}
+    if (
+        expected.get("execution_status")
+        and (response.get("execution_status") or execution.get("status"))
+        != expected["execution_status"]
+    ):
+        correctness_failures.append("execution status is incorrect")
+    if (
+        expected.get("execution_mode")
+        and plan.get("execution_mode") != expected["execution_mode"]
+    ):
+        correctness_failures.append("execution mode is incorrect")
+    if "message_parts" in expected and len(response.get("message_parts") or ()) != int(
+        expected["message_parts"]
+    ):
+        correctness_failures.append("message-part count is incorrect")
     if "clarification" in expected:
         actual_clarification = actual_intent in {"clarification", "multiple_intents"}
         if actual_clarification is not bool(expected["clarification"]):

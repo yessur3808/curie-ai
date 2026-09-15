@@ -53,7 +53,16 @@ def _semantic_aliases(device: DeviceSnapshot) -> str:
     aliases: list[str] = []
     if "sync box" in name:
         aliases.extend(
-            ("tv light", "television light", "screen light", "tv backlight", "ambient light")
+            (
+                "dreamview",
+                "dream view",
+                "dreamview t1",
+                "tv light",
+                "television light",
+                "screen light",
+                "tv backlight",
+                "ambient light",
+            )
         )
     return " ".join(aliases)
 
@@ -208,9 +217,15 @@ class SmartHomeHub:
                     None, compact_query, name.replace(" ", "")
                 ).ratio()
                 if fuzzy >= 0.76:
-                    score, reason = 0.72 + min((fuzzy - 0.76) * 0.5, 0.16), "close device name"
+                    score, reason = (
+                        0.72 + min((fuzzy - 0.76) * 0.5, 0.16),
+                        "close device name",
+                    )
                 elif token_overlap >= 0.67:
-                    score, reason = 0.70 + token_overlap * 0.12, "partial device-name tokens"
+                    score, reason = (
+                        0.70 + token_overlap * 0.12,
+                        "partial device-name tokens",
+                    )
             if score:
                 ranked.append(_Match(item, score, reason))
         return sorted(
@@ -354,9 +369,7 @@ class SmartHomeHub:
         clean_targets = [str(item).strip() for item in targets if str(item).strip()]
         if not 1 < len(clean_targets) <= 8:
             raise ValueError("Name between two and eight devices for a grouped command")
-        blocked = {
-            "all", "everything", "home", "house", "every device", "all devices"
-        }
+        blocked = {"all", "everything", "home", "house", "every device", "all devices"}
         if any(_normalize(target) in blocked for target in clean_targets):
             raise ValueError(
                 "Bulk whole-home power changes are not accepted; name each device"
@@ -457,7 +470,9 @@ class SmartHomeHub:
         else:
             parts = []
             if verified:
-                parts.append(f"{_join_names(verified)} {'is' if len(verified) == 1 else 'are'} {state}")
+                parts.append(
+                    f"{_join_names(verified)} {'is' if len(verified) == 1 else 'are'} {state}"
+                )
             if unverified:
                 parts.append(f"I couldn't verify {_join_names(unverified)}")
             if failures:
@@ -485,7 +500,13 @@ class SmartHomeHub:
         """Persist an explicit, owner-scoped mapping after resolving the device."""
         normalized_alias = _normalize(alias)
         if not normalized_alias or normalized_alias in {
-            "it", "them", "this", "that", "device", "all", "everything"
+            "it",
+            "them",
+            "this",
+            "that",
+            "device",
+            "all",
+            "everything",
         }:
             raise ValueError("That alias is too vague. Please use a specific nickname.")
         devices, _ = await self.collect(owner_id)
@@ -498,9 +519,7 @@ class SmartHomeHub:
             raise LookupError(message)
         if len(matches) > 1:
             choices = ", ".join(item.name for item in matches[:10])
-            raise ValueError(
-                f"{device_target!r} is ambiguous. Which one: {choices}?"
-            )
+            raise ValueError(f"{device_target!r} is ambiguous. Which one: {choices}?")
         device = matches[0]
         from memory.local_store import save_personal_item
 

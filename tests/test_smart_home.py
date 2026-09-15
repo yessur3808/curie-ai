@@ -137,6 +137,27 @@ def test_tv_light_alias_prefers_the_only_online_tv_light():
     assert provider.controls == [("owner", "sync", "off")]
 
 
+def test_dreamview_product_name_resolves_ai_sync_box_when_unique():
+    provider = FakeProvider(
+        [
+            DeviceSnapshot(
+                "fake", "sync", "AI Sync Box strip", "light", True, "on", True, True
+            ),
+            DeviceSnapshot(
+                "fake", "floor", "Floor Lamp 2", "light", True, "off", False, True
+            ),
+        ]
+    )
+
+    text, data = asyncio.run(
+        SmartHomeHub([provider]).control("owner", "DreamView", "off")
+    )
+
+    assert text == "Done. AI Sync Box strip is now off."
+    assert data["receipt"]["verified_state"] == "off"
+    assert provider.controls == [("owner", "sync", "off")]
+
+
 def test_batch_control_resolves_every_target_before_running_once():
     provider = FakeProvider(
         [
@@ -150,9 +171,7 @@ def test_batch_control_resolves_every_target_before_running_once():
     )
 
     text, data = asyncio.run(
-        SmartHomeHub([provider]).control_many(
-            "owner", ["floor lamp", "tv light"], "on"
-        )
+        SmartHomeHub([provider]).control_many("owner", ["floor lamp", "tv light"], "on")
     )
 
     assert text == "Done. Floor Lamp 2 and AI Sync Box strip are now on."
@@ -371,10 +390,13 @@ def test_try_again_repeats_only_a_recent_failed_home_command():
     )
     assert failed.action == "home_control"
     assert failed.params["target"] == "DreamView"
-    assert classify_request(
-        "Try again",
-        history=[{"role": "assistant", "content": "Done. DreamView T1 is on."}],
-    ) is None
+    assert (
+        classify_request(
+            "Try again",
+            history=[{"role": "assistant", "content": "Done. DreamView T1 is on."}],
+        )
+        is None
+    )
 
 
 def test_explicit_alias_teaching_routes_to_persistent_home_alias_tool():

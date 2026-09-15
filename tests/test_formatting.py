@@ -13,6 +13,7 @@ from utils.formatting import (
     strip_markdown,
     format_for_platform,
     MARKDOWN_SKILL_MODELS,
+    rich_format_preview_request,
     telegram_html,
 )  # noqa: E402
 
@@ -47,6 +48,27 @@ def test_telegram_html_escapes_untrusted_html_and_unsafe_links():
     assert "&lt;script&gt;" in rendered
     assert "<script>" not in rendered
     assert "<a href=" not in rendered
+
+
+def test_explicit_rich_format_preview_exercises_every_supported_style():
+    preview = rich_format_preview_request(
+        "Formatting test: show bold, italic, strike, underline, table, list, and link"
+    )
+
+    assert preview is not None
+    rendered = telegram_html(preview)
+    assert "<b>Curie formatting check</b>" in rendered
+    assert "• <b>Status:</b> Ready" in rendered
+    assert "<i>Italic sample.</i>" in rendered
+    assert "<s>Old wording</s>" in rendered
+    assert "<u>Underlined note</u>" in rendered
+    assert "<pre>" in rendered
+    assert '<a href="https://example.com">Example</a>' in rendered
+
+
+def test_normal_message_does_not_trigger_format_preview():
+    assert rich_format_preview_request("Please format this update as bullets") is None
+
 
 # ---------------------------------------------------------------------------
 # plain_links

@@ -53,6 +53,33 @@ class EntityReference:
 
 
 @dataclass(frozen=True, slots=True)
+class GoalConstraint:
+    """A typed constraint with provenance, safe to summarize in traces."""
+
+    kind: str
+    value: Any
+    source: str = "explicit"
+    confidence: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not self.kind.strip():
+            raise ValueError("Goal constraints require a kind")
+        if not 0.0 <= float(self.confidence) <= 1.0:
+            raise ValueError("Constraint confidence must be between zero and one")
+
+    def as_dict(self, *, include_value: bool = False) -> dict[str, Any]:
+        payload = {
+            "kind": self.kind,
+            "source": self.source,
+            "confidence": self.confidence,
+        }
+        payload["value" if include_value else "value_type"] = (
+            self.value if include_value else type(self.value).__name__
+        )
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
 class SubGoal:
     id: str
     intent: str
@@ -100,6 +127,7 @@ class GoalSpec:
     constraints: tuple[str, ...] = ()
     completion_criteria: tuple[str, ...] = ()
     risk: str = "none"
+    typed_constraints: tuple[GoalConstraint, ...] = ()
 
     def __post_init__(self) -> None:
         if self.risk not in {"none", "read_only", "mutating"}:
@@ -117,6 +145,10 @@ class GoalSpec:
             "constraints": list(self.constraints),
             "completion_criteria": list(self.completion_criteria),
             "risk": self.risk,
+            "typed_constraints": [
+                item.as_dict(include_value=include_parameters)
+                for item in self.typed_constraints
+            ],
         }
 
 

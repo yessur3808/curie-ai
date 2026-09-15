@@ -12,9 +12,7 @@ class UnifiedRoutingService:
         self.social_service = social_service
         self.specialist_router = specialist_router
 
-    async def decide(
-        self, text: str, owner_id: str, history=None
-    ) -> RoutingDecision:
+    async def decide(self, text: str, owner_id: str, history=None) -> RoutingDecision:
         return await route_request(text, owner_id, history=history)
 
     async def execute(
@@ -29,7 +27,12 @@ class UnifiedRoutingService:
             return None
         if decision.intent in {"clarification", "multiple_intents"}:
             return ResponseCandidate(
-                str(decision.parameters["message"]), f"router:{decision.intent}"
+                str(decision.parameters["message"]),
+                f"router:{decision.intent}",
+                {
+                    "status": "clarification",
+                    "verification_status": "not_run",
+                },
             )
         if decision.intent == "social":
             return self.social_service.handle(text)
@@ -40,7 +43,14 @@ class UnifiedRoutingService:
                 text, internal_id=internal_id, platform=platform
             )
             return (
-                ResponseCandidate(result, "system_commands_skill")
+                ResponseCandidate(
+                    result,
+                    "system_commands_skill",
+                    {
+                        "status": "completed",
+                        "verification_status": "not_required",
+                    },
+                )
                 if result is not None
                 else None
             )
@@ -51,8 +61,14 @@ class UnifiedRoutingService:
                 str(decision.parameters["action"]),
                 {"token": decision.parameters["token"]},
             )
-            result = await execute_request(request, internal_id, {**profile, "_connector": platform})
-            return ResponseCandidate(result, f"action_router:{request.action}")
+            outcome = {}
+            result = await execute_request(
+                request,
+                internal_id,
+                {**profile, "_connector": platform},
+                _outcome=outcome,
+            )
+            return ResponseCandidate(result, f"action_router:{request.action}", outcome)
         capability = str(decision.selected_capability)
         if capability.endswith("_skill"):
             return await self.specialist_router.handle_selected(
@@ -68,5 +84,11 @@ class UnifiedRoutingService:
             confidence=decision.confidence,
             source=decision.source,
         )
-        result = await execute_request(request, internal_id, {**profile, "_connector": platform})
-        return ResponseCandidate(result, f"action_router:{capability}")
+        outcome = {}
+        result = await execute_request(
+            request,
+            internal_id,
+            {**profile, "_connector": platform},
+            _outcome=outcome,
+        )
+        return ResponseCandidate(result, f"action_router:{capability}", outcome)

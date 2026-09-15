@@ -3,6 +3,8 @@ import logging
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from connectors import telegram
 
 
@@ -15,7 +17,9 @@ def test_split_telegram_message_preserves_content_and_limits_chunks():
 
 
 def test_long_telegram_answer_is_split_into_separate_readable_messages():
-    text = "\n\n".join(f"Section {index}: " + "useful detail " * 18 for index in range(8))
+    text = "\n\n".join(
+        f"Section {index}: " + "useful detail " * 18 for index in range(8)
+    )
     chunks = telegram.split_telegram_message(text)
 
     assert len(chunks) > 1
@@ -32,6 +36,44 @@ def test_reply_in_chunks_uses_safe_telegram_html():
     asyncio.run(telegram.reply_in_chunks(message, "**Ready**\n- Lamp is off"))
 
     assert replies == [("<b>Ready</b>\n• Lamp is off", "HTML")]
+
+
+def test_reply_with_result_sends_deliberate_parts_as_separate_messages():
+    replies = []
+
+    async def reply_text(text, parse_mode=None):
+        replies.append((text, parse_mode))
+
+    message = SimpleNamespace(reply_text=reply_text)
+    result = {
+        "text": "First result\n\nSecond result",
+        "message_parts": ["**First result**", "*Second result*"],
+    }
+    asyncio.run(telegram.reply_with_result(message, result, "unavailable"))
+
+    assert replies == [
+        ("<b>First result</b>", "HTML"),
+        ("<i>Second result</i>", "HTML"),
+    ]
+
+
+def test_typing_heartbeat_refreshes_until_cancelled(monkeypatch):
+    actions = []
+
+    class Bot:
+        async def send_chat_action(self, **kwargs):
+            actions.append(kwargs)
+
+    async def cancel_after_first_refresh(_seconds):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(telegram.asyncio, "sleep", cancel_after_first_refresh)
+    message = SimpleNamespace(chat_id=42, get_bot=lambda: Bot())
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(telegram._typing_heartbeat(message))
+
+    assert actions == [{"chat_id": 42, "action": "typing"}]
 
 
 def test_proactive_send_uses_client_owned_by_calling_loop(monkeypatch):
@@ -116,10 +158,13 @@ def test_text_reply_to_photo_reprocesses_referenced_attachment(monkeypatch):
     class TelegramFile:
         async def download_to_drive(self, path):
             from pathlib import Path
+
             Path(path).write_bytes(b"image")
 
     media = SimpleNamespace(
-        file_id="photo1", file_unique_id="unique1", file_size=5,
+        file_id="photo1",
+        file_unique_id="unique1",
+        file_size=5,
         get_file=lambda: _async_value(TelegramFile()),
     )
 
@@ -136,12 +181,17 @@ def test_text_reply_to_photo_reprocesses_referenced_attachment(monkeypatch):
     previous = telegram._runtime.workflow
     telegram._runtime.workflow = SimpleNamespace(persona={})
     message = SimpleNamespace(
-        from_user=SimpleNamespace(id=42, username="owner"), voice=None,
-        text="Explain it to me in text", reply_to_message=SimpleNamespace(photo=[media], document=None),
-        chat_id=7, reply_text=lambda _text: None,
+        from_user=SimpleNamespace(id=42, username="owner"),
+        voice=None,
+        text="Explain it to me in text",
+        reply_to_message=SimpleNamespace(photo=[media], document=None),
+        chat_id=7,
+        reply_text=lambda _text: None,
     )
     try:
-        asyncio.run(telegram.handle_message(SimpleNamespace(message=message), SimpleNamespace()))
+        asyncio.run(
+            telegram.handle_message(SimpleNamespace(message=message), SimpleNamespace())
+        )
     finally:
         telegram._runtime.workflow = previous
     assert prepared == [("telegram_reply_unique1.jpg", "Explain it to me in text")]

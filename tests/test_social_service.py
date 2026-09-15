@@ -1,16 +1,45 @@
+import asyncio
+
 from agent.orchestration.social_service import SocialConversationService
+from agent.routing import route_request
 
 
-def test_relational_greeting_continues_to_model_with_history():
-    assert SocialConversationService().handle("Hi Curie, how are you?") is None
+def test_technical_win_gets_brief_banter_and_grounded_next_step():
+    candidate = SocialConversationService().handle(
+        "I finally fixed a stubborn bug. Give me brief banter and one next step."
+    )
 
-
-def test_bare_greeting_stays_fast_and_deterministic():
-    candidate = SocialConversationService().handle("Hi Curie")
     assert candidate is not None
-    assert candidate.model_used == "social"
-    assert "Bonjour" in candidate.text
+    assert "far too comfortable" in candidate.text
+    assert "regression test" in candidate.text
+    assert "commit the fix" in candidate.text
 
 
-def test_substantive_greeting_continues_to_the_model():
-    assert SocialConversationService().handle("Hi Curie, explain quantum tunneling") is None
+def test_technical_win_routes_without_model_inference():
+    decision = asyncio.run(route_request("I finally fixed that stubborn bug."))
+
+    assert decision.intent == "social"
+
+
+def test_deep_bug_followup_stays_available_to_normal_reasoning():
+    candidate = SocialConversationService().handle(
+        "I fixed the bug. Explain why the race condition happened."
+    )
+
+    assert candidate is None
+
+
+def test_short_banter_gets_one_fast_advice_free_sentence():
+    candidate = SocialConversationService().handle(
+        "That was almost suspiciously efficient."
+    )
+
+    assert candidate is not None
+    assert candidate.text == "I prefer ‘efficient enough to raise questions.’"
+    assert candidate.text.count(".") == 1
+
+
+def test_short_banter_routes_without_model_inference():
+    decision = asyncio.run(route_request("That was almost suspiciously efficient."))
+
+    assert decision.intent == "social"

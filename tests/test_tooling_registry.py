@@ -93,6 +93,15 @@ def test_specialists_are_selected_from_runtime_registry():
     assert registry.select("remind me tomorrow").name == "scheduler_skill"
     assert registry.select("show traffic directions home").name == "navigation_skill"
     assert registry.select("convert 5 km to miles").name == "conversion"
+    assert registry.select("https://example.com").name == "browser_skill"
+    assert registry.select("Please open https://example.com").name == "browser_skill"
+
+
+def test_inline_link_in_writing_request_is_not_mistaken_for_browser_navigation():
+    selected = get_runtime_registry().select(
+        "Write a compact update with an inline link to https://example.com"
+    )
+    assert selected is None or selected.name != "browser_skill"
 
 
 def test_conversion_executes_through_typed_registry():

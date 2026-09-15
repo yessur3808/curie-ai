@@ -2,6 +2,7 @@
 
 from .contracts import (
     EntityReference,
+    GoalConstraint,
     GoalSpec,
     ResponseMode,
     SubGoal,
@@ -10,6 +11,7 @@ from .contracts import (
 
 __all__ = [
     "EntityReference",
+    "GoalConstraint",
     "GoalSpec",
     "ResponseMode",
     "SubGoal",
