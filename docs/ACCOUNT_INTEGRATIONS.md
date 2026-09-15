@@ -55,9 +55,11 @@ console, use that value in `.env`, and open the consent URL on the workstation
 while the tunnel is active. Provider console rules determine whether a loopback
 HTTP callback is accepted; otherwise use an HTTPS reverse proxy.
 
-If port 8000 is already used on the server, run Curie's API on another port, for
-example `CURIE_API_PORT=8010`, while keeping the registered workstation callback
-unchanged. Map the workstation callback port to Curie's server port:
+Curie's API binds to `127.0.0.1` by default so the owner-only setup surface is not
+exposed to the network. If port 8000 is already used on the server, run Curie's
+API on another loopback port, for example `CURIE_API_HOST=127.0.0.1` and
+`CURIE_API_PORT=8010`, while keeping the registered workstation callback unchanged.
+Map the workstation callback port to Curie's server port:
 
 ```bash
 ssh -L 8000:127.0.0.1:8010 YOUR_SERVER_USER@YOUR_SERVER

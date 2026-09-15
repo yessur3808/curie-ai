@@ -29,12 +29,13 @@ def test_connector_flags_are_registered_once():
 
 
 def test_api_connector_uses_configured_port(monkeypatch):
+    monkeypatch.setenv("CURIE_API_HOST", "127.0.0.1")
     monkeypatch.setenv("CURIE_API_PORT", "8010")
     with patch("main.uvicorn.run") as run:
         main.run_api()
     run.assert_called_once_with(
         main.fastapi_app,
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8010,
         log_level="info",
     )
@@ -45,6 +46,13 @@ def test_api_connector_falls_back_from_invalid_port(monkeypatch):
     with patch("main.uvicorn.run") as run:
         main.run_api()
     assert run.call_args.kwargs["port"] == 8000
+
+
+def test_api_connector_defaults_to_loopback(monkeypatch):
+    monkeypatch.delenv("CURIE_API_HOST", raising=False)
+    with patch("main.uvicorn.run") as run:
+        main.run_api()
+    assert run.call_args.kwargs["host"] == "127.0.0.1"
 
 
 def test_logging_suppresses_token_bearing_http_urls():

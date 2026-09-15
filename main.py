@@ -368,14 +368,15 @@ def run_signal(workflow: ChatWorkflow):
 
 
 def run_api():
+    host = os.getenv("CURIE_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
     try:
         port = int(os.getenv("CURIE_API_PORT", "8000"))
     except ValueError:
         port = 8000
     if not 1 <= port <= 65535:
         port = 8000
-    print(f"Starting API (FastAPI) connector on http://0.0.0.0:{port} ...")
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=port, log_level="info")
+    print(f"Starting API (FastAPI) connector on http://{host}:{port} ...")
+    uvicorn.run(fastapi_app, host=host, port=port, log_level="info")
 
 
 def run_coding_service(workflow: ChatWorkflow):
