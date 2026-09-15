@@ -15,7 +15,12 @@ function loadEnvFile(filePath, target) {
     envContent.split("\n").forEach((line) => {
         const [key, ...valueParts] = line.split("=");
         if (key && key.trim() && !key.trim().startsWith("#")) {
-            target[key.trim()] = valueParts.join("=").trim().replace(/^"|"$/g, "");
+            const rawValue = valueParts.join("=").trim();
+            const quote = rawValue[0];
+            target[key.trim()] =
+                (quote === '"' || quote === "'") && rawValue.at(-1) === quote
+                    ? rawValue.slice(1, -1)
+                    : rawValue;
         }
     });
 }
