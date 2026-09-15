@@ -10,13 +10,21 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import logging
 import os
 import re
 from typing import Any, Optional
 import uuid
 
 from memory.database import mongo_db
-from memory.hierarchy import default_importance, memory_stats, rank_memories
+from memory.hierarchy import (
+    default_importance,
+    memory_stats,
+    memory_tier,
+    rank_memories,
+)
+
+logger = logging.getLogger(__name__)
 
 _MEMORY_MIN_CONFIDENCE = float(os.getenv("ADAPTIVE_MEMORY_MIN_CONFIDENCE", "0.8"))
 _PREDICTION_MIN_CONFIDENCE = float(
@@ -104,6 +112,88 @@ def _memory_kind(key: str, source: str) -> str:
     return "biography"
 
 
+def _normalize_stored_memory(document: dict, internal_id: str) -> dict:
+    """Backfill safe metadata on pre-hierarchy records without changing values."""
+    item = dict(document)
+    updates: dict[str, Any] = {}
+    source = str(item.get("source") or "legacy_import")
+    kind = str(item.get("kind") or "").casefold()
+    if kind not in _KINDS:
+        kind = _memory_kind(str(item.get("key", "")), source)
+        updates["kind"] = kind
+    if str(item.get("tier") or "").casefold() not in {
+        "core",
+        "episodic",
+        "archival",
+    }:
+        updates["tier"] = memory_tier({"kind": kind})
+    if not item.get("source"):
+        updates["source"] = source
+    if not item.get("owner_id"):
+        updates["owner_id"] = str(internal_id)
+    if not item.get("internal_id"):
+        updates["internal_id"] = str(internal_id)
+    status = str(item.get("status") or "").casefold()
+    if status not in {
+        "verified",
+        "recorded",
+        "hypothesis",
+        "pending_confirmation",
+        "corrected",
+        "superseded",
+        "rolled_back",
+    }:
+        updates["status"] = (
+            "recorded"
+            if kind == "episode"
+            else "verified"
+            if source == "explicit_user_statement"
+            else "hypothesis"
+        )
+    if item.get("confidence") is None:
+        updates["confidence"] = (
+            1.0 if source == "explicit_user_statement" else _MEMORY_MIN_CONFIDENCE
+        )
+    if item.get("importance") is None:
+        updates["importance"] = default_importance(kind)
+    if item.get("active") is None:
+        updates["active"] = True
+    if item.get("confirmation_count") is None:
+        updates["confirmation_count"] = 1
+    if item.get("sensitivity") is None:
+        updates["sensitivity"] = "ordinary"
+    if item.get("contradicts") is None:
+        updates["contradicts"] = []
+    if not updates:
+        return item
+
+    item.update(updates)
+    memory_id = item.get("id") or item.get("_id")
+    if memory_id is None:
+        return item
+    try:
+        if not os.getenv("MONGODB_URI"):
+            from memory.local_store import update_adaptive_memory
+
+            update_adaptive_memory(str(memory_id), str(internal_id), updates)
+        else:
+            mongo_db.adaptive_memories.update_one(
+                {
+                    "_id": document.get("_id"),
+                    "$or": [
+                        {"owner_id": str(internal_id)},
+                        {"internal_id": str(internal_id)},
+                    ],
+                },
+                {"$set": updates},
+            )
+    except Exception as exc:
+        # Retrieval remains available with the normalized copy even if a
+        # persistence backend is temporarily read-only.
+        logger.debug("Legacy memory metadata backfill skipped: %s", exc)
+    return item
+
+
 def _memory_enabled(internal_id: str, channel: str | None = None) -> bool:
     from memory.repositories import get_repositories
 
@@ -117,17 +207,19 @@ def _all_owner_memories(internal_id: str) -> list[dict]:
     if not os.getenv("MONGODB_URI"):
         from memory.local_store import list_adaptive_memories
 
-        return list_adaptive_memories(str(internal_id))
-    return list(
-        mongo_db.adaptive_memories.find(
-            {
-                "$or": [
-                    {"owner_id": str(internal_id)},
-                    {"internal_id": str(internal_id)},
-                ]
-            }
-        ).limit(500)
-    )
+        rows = list_adaptive_memories(str(internal_id))
+    else:
+        rows = list(
+            mongo_db.adaptive_memories.find(
+                {
+                    "$or": [
+                        {"owner_id": str(internal_id)},
+                        {"internal_id": str(internal_id)},
+                    ]
+                }
+            ).limit(500)
+        )
+    return [_normalize_stored_memory(item, str(internal_id)) for item in rows]
 
 
 _UNSAFE_ACTIONS = re.compile(
@@ -414,7 +506,10 @@ def get_relevant_memories(internal_id: str, query: str, limit: int = 8) -> list[
     if not os.getenv("MONGODB_URI"):
         from memory.local_store import list_adaptive_memories
 
-        docs = list_adaptive_memories(str(internal_id))
+        docs = [
+            _normalize_stored_memory(item, str(internal_id))
+            for item in list_adaptive_memories(str(internal_id))
+        ]
         active_docs = []
         for doc in docs:
             if not doc.get("active", True):
@@ -452,6 +547,9 @@ def get_relevant_memories(internal_id: str, query: str, limit: int = 8) -> list[
                 _RETRIEVAL_PROJECTION,
             ).limit(max(100, min(int(os.getenv("MEMORY_MAX_CANDIDATES", "500")), 2000)))
         )
+        docs = [
+            _normalize_stored_memory(item, str(internal_id)) for item in docs
+        ]
     return rank_memories(query, docs, limit=limit)
 
 

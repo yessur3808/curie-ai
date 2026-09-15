@@ -209,6 +209,33 @@ def test_routine_chat_is_not_promoted_to_episodic_memory(tmp_path, monkeypatch):
     assert local_store.list_adaptive_memories("u1") == []
 
 
+def test_legacy_memories_are_backfilled_into_the_hierarchy_without_value_changes(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
+    local_store.upsert_adaptive_memory(
+        {
+            "_id": "legacy-1",
+            "id": "legacy-1",
+            "internal_id": "u1",
+            "key": "favorite_drink",
+            "value": "tea",
+            "source": "explicit_user_statement",
+        }
+    )
+
+    normalized = adaptive._all_owner_memories("u1")[0]
+    persisted = local_store.list_adaptive_memories("u1")[0]
+
+    assert normalized["value"] == "tea"
+    assert normalized["kind"] == "preference"
+    assert normalized["tier"] == "core"
+    assert normalized["status"] == "verified"
+    assert persisted["value"] == "tea"
+    assert persisted["kind"] == "preference"
+    assert persisted["status"] == "verified"
+
+
 def test_conversation_learning_checks_episode_capture_before_fact_fast_path():
     with (
         patch("memory.adaptive.propose_learned_ability"),
