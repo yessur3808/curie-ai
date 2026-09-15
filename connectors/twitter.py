@@ -17,14 +17,19 @@ from services.credential_vault import delete_credential, get_credential, put_cre
 _AUTH_URL = "https://x.com/i/oauth2/authorize"
 _TOKEN_URL = "https://api.x.com/2/oauth2/token"
 _API = "https://api.x.com/2"
-_SCOPES = (
+_POSTING_SCOPES = (
     "tweet.read",
     "tweet.write",
     "users.read",
-    "dm.read",
-    "dm.write",
     "offline.access",
 )
+_DM_SCOPES = ("dm.read", "dm.write")
+
+
+def requested_scopes() -> tuple[str, ...]:
+    """Request only posting scopes unless DM access is explicitly enabled."""
+    allow_dms = os.getenv("X_OAUTH_DM_SCOPES_ENABLED", "false").strip().casefold()
+    return _POSTING_SCOPES + (_DM_SCOPES if allow_dms in {"1", "true", "yes"} else ())
 
 
 def _pkce() -> tuple[str, str]:
@@ -62,7 +67,7 @@ def authorization_url(owner_id: str) -> str:
                 "response_type": "code",
                 "client_id": client_id,
                 "redirect_uri": redirect_uri,
-                "scope": " ".join(_SCOPES),
+                "scope": " ".join(requested_scopes()),
                 "state": state,
                 "code_challenge": challenge,
                 "code_challenge_method": "S256",

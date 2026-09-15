@@ -46,21 +46,31 @@ def test_credential_vault_is_encrypted_and_private(integration_env):
     assert credential_vault.get_credential("other", "x") is None
 
 
-def test_google_and_x_oauth_use_pkce_and_full_requested_scopes(integration_env):
+def test_google_and_x_oauth_use_pkce_and_least_privilege_scopes(integration_env):
     google = parse_qs(urlsplit(google_url("owner", product="gmail", write=True)).query)
     assert set(google["scope"][0].split()) == {GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE}
     assert google["code_challenge_method"] == ["S256"]
     assert "owner" not in google["state"][0]
 
     x = parse_qs(urlsplit(x_url("owner")).query)
+    scopes = set(x["scope"][0].split())
     assert {
         "tweet.read",
         "tweet.write",
-        "dm.read",
-        "dm.write",
+        "users.read",
         "offline.access",
-    } <= set(x["scope"][0].split())
+    } == scopes
+    assert "dm.read" not in scopes
+    assert "dm.write" not in scopes
     assert x["code_challenge_method"] == ["S256"]
+
+
+def test_x_dm_scopes_require_explicit_opt_in(integration_env, monkeypatch):
+    monkeypatch.setenv("X_OAUTH_DM_SCOPES_ENABLED", "true")
+
+    x = parse_qs(urlsplit(x_url("owner")).query)
+
+    assert {"dm.read", "dm.write"} <= set(x["scope"][0].split())
 
 
 @pytest.mark.parametrize(

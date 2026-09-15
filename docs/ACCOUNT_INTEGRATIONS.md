@@ -68,14 +68,17 @@ Sending produces a preview and a single-use `/approve action TOKEN` command.
 ## X
 
 Create an X developer Project and App, enable OAuth 2.0 Authorization Code with
-PKCE, and register `https://YOUR_CURIE_HOST/oauth/x/callback`. The app requests
-`tweet.read`, `tweet.write`, `users.read`, `dm.read`, `dm.write`, and
-`offline.access`. Availability and billing still depend on the X developer tier.
+PKCE, and register `https://YOUR_CURIE_HOST/oauth/x/callback`. Posting authorization
+requests only `tweet.read`, `tweet.write`, `users.read`, and `offline.access`.
+Availability and billing still depend on the X developer tier. Direct-message
+access is excluded unless the operator separately sets
+`X_OAUTH_DM_SCOPES_ENABLED=true` and reconnects the account.
 
 ```dotenv
 X_OAUTH_CLIENT_ID=...
 X_OAUTH_CLIENT_SECRET=...
 X_OAUTH_REDIRECT_URI=https://YOUR_CURIE_HOST/oauth/x/callback
+X_OAUTH_DM_SCOPES_ENABLED=false
 ```
 
 Request and open the consent URL:
