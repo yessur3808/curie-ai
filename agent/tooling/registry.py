@@ -212,6 +212,18 @@ def _build_runtime_registry() -> ToolRegistry:
     from agent.tooling.system_tools import HardwareTool, NetworkSpeedTool, RamUsageTool
     from agent.tooling.smart_home_tools import HomeAliasTool, HomeControlTool, HomeStatusTool
     from agent.tooling.weather_tool import WeatherTool
+    gmail_probe = _dependency_probe(
+        "connectors.google_oauth",
+        (
+            "GOOGLE_OAUTH_CLIENT_ID",
+            "GOOGLE_OAUTH_REDIRECT_URI",
+            "CURIE_CREDENTIAL_KEY",
+        ),
+    )
+    x_probe = _dependency_probe(
+        "connectors.twitter",
+        ("X_OAUTH_CLIENT_ID", "X_OAUTH_REDIRECT_URI", "CURIE_CREDENTIAL_KEY"),
+    )
     capabilities = [
         definition(WeatherTool(), description="Get weather from a live source.", tags=("weather", "live")),
         definition(RamUsageTool(), description="Inspect current memory usage.", chat_routable=False, tags=("system",)),
@@ -222,15 +234,15 @@ def _build_runtime_registry() -> ToolRegistry:
             resource_policy=ResourcePolicy(timeout_seconds=50, concurrency_limit=1, network=True),
             tags=("system", "network", "live"),
         ),
-        definition(GmailSearchTool(), resource_policy=ResourcePolicy(timeout_seconds=45, concurrency_limit=2, network=True), tags=("gmail", "email", "read")),
-        definition(GmailReadTool(), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("gmail", "email", "read")),
-        definition(GmailSendTool(), required_permissions=("gmail_send",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"body"}), tags=("gmail", "email", "write")),
-        definition(XSearchTool(), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("x", "social", "read")),
-        definition(XReadTool(), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("x", "social", "read")),
-        definition(XPostTool(), required_permissions=("x_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "social", "write")),
-        definition(XReplyTool(), required_permissions=("x_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "social", "write")),
-        definition(XReadDMsTool(), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "dm", "read")),
-        definition(XSendDMTool(), required_permissions=("x_dm_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "dm", "write")),
+        definition(GmailSearchTool(), availability_probe=gmail_probe, resource_policy=ResourcePolicy(timeout_seconds=45, concurrency_limit=2, network=True), tags=("gmail", "email", "read")),
+        definition(GmailReadTool(), availability_probe=gmail_probe, resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("gmail", "email", "read")),
+        definition(GmailSendTool(), availability_probe=gmail_probe, required_permissions=("gmail_send",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"body"}), tags=("gmail", "email", "write")),
+        definition(XSearchTool(), availability_probe=x_probe, resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("x", "social", "read")),
+        definition(XReadTool(), availability_probe=x_probe, resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=2, network=True), tags=("x", "social", "read")),
+        definition(XPostTool(), availability_probe=x_probe, required_permissions=("x_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "social", "write")),
+        definition(XReplyTool(), availability_probe=x_probe, required_permissions=("x_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "social", "write")),
+        definition(XReadDMsTool(), availability_probe=x_probe, resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "dm", "read")),
+        definition(XSendDMTool(), availability_probe=x_probe, required_permissions=("x_dm_write",), resource_policy=ResourcePolicy(timeout_seconds=30, concurrency_limit=1, network=True), audit_redactions=frozenset({"text"}), tags=("x", "dm", "write")),
         definition(BrowserOpenTool(), availability_probe=_module_probe("playwright.async_api"), resource_policy=ResourcePolicy(timeout_seconds=45, concurrency_limit=2, network=True), tags=("browser", "interactive", "read")),
         definition(BrowserSnapshotTool(), availability_probe=_module_probe("playwright.async_api"), resource_policy=ResourcePolicy(timeout_seconds=20, concurrency_limit=2), tags=("browser", "interactive", "read")),
         definition(BrowserClickTool(), availability_probe=_module_probe("playwright.async_api"), required_permissions=("browser_interact",), resource_policy=ResourcePolicy(timeout_seconds=45, concurrency_limit=1, network=True), tags=("browser", "interactive", "write")),

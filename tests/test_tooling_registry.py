@@ -8,6 +8,7 @@ from agent.tooling import (
     ToolRegistry,
     ToolResult,
     get_runtime_registry,
+    reset_runtime_registry,
 )
 from agent.tooling.registry import definition
 
@@ -187,6 +188,22 @@ def test_diagnostics_explain_every_advertised_capability():
         "dependency_missing",
     }
     assert all(row["status"] == "reachable" or row["reason"] for row in rows)
+
+
+def test_account_diagnostics_do_not_claim_unconfigured_x_is_reachable(monkeypatch):
+    for name in (
+        "X_OAUTH_CLIENT_ID",
+        "X_OAUTH_REDIRECT_URI",
+        "CURIE_CREDENTIAL_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    reset_runtime_registry()
+    try:
+        rows = {row["name"]: row for row in get_runtime_registry().diagnostics()}
+        assert rows["x_post"]["status"] == "dependency_missing"
+        assert "Missing configuration" in rows["x_post"]["reason"]
+    finally:
+        reset_runtime_registry()
 
 
 def test_schema_validation_rejects_missing_required_input():
