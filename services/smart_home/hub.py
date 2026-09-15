@@ -105,6 +105,41 @@ def _join_names(names: list[str]) -> str:
     return f"{', '.join(names[:-1])}, and {names[-1]}"
 
 
+def _group_kind(target: str) -> str | None:
+    """Recognize bounded natural-language groups that are safe to resolve."""
+    words = [
+        word
+        for word in _normalize(target).split()
+        if word not in {"all", "every", "each", "both", "the", "my", "our"}
+    ]
+    if words in (["light"], ["lights"], ["lamp"], ["lamps"], ["bulb"], ["bulbs"]):
+        return "lights"
+    return None
+
+
+def _in_group(device: DeviceSnapshot, group: str) -> bool:
+    if group != "lights":
+        return False
+    identity = _normalize(
+        " ".join(
+            (
+                device.name,
+                device.device_type,
+                str(device.attributes.get("device_class") or ""),
+                str(device.attributes.get("category") or ""),
+                str(device.attributes.get("model") or ""),
+            )
+        )
+    )
+    words = set(identity.split())
+    return bool(
+        words & {"light", "lights", "lamp", "lamps", "bulb", "bulbs", "led", "leds"}
+    ) or any(
+        phrase in identity
+        for phrase in ("sync box", "dreamview", "dream view", "nanoleaf", "backlight")
+    )
+
+
 class SmartHomeHub:
     def __init__(self, providers: Iterable[SmartHomeProvider] | None = None):
         provider_items = (
@@ -259,7 +294,12 @@ class SmartHomeHub:
         self, owner_id: str, target: str | None = None, provider: str | None = None
     ) -> tuple[str, dict[str, Any]]:
         devices, issues = await self.collect(owner_id, provider)
-        matches = self._matches(devices, target or "", _owner_aliases(owner_id))
+        group = _group_kind(target or "")
+        matches = (
+            [item for item in devices if _in_group(item, group)]
+            if group
+            else self._matches(devices, target or "", _owner_aliases(owner_id))
+        )
         if target and not matches:
             names = ", ".join(item.name for item in devices[:12])
             text = f"I couldn't find a smart-home device matching {target!r}."
@@ -288,6 +328,9 @@ class SmartHomeHub:
         provider: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         state = require_power_state(state)
+        group = _group_kind(target)
+        if group:
+            return await self.control_group(owner_id, target, state, provider)
         if _normalize(target) in {
             "all",
             "everything",
@@ -357,6 +400,51 @@ class SmartHomeHub:
             text = f"The command was accepted, but I couldn't verify that {receipt.name} is {state} yet."
         return text, {"receipt": receipt.as_dict()}
 
+    async def control_group(
+        self,
+        owner_id: str,
+        target: str,
+        state: str,
+        provider: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Resolve and control every device in one bounded semantic category."""
+        state = require_power_state(state)
+        group = _group_kind(target)
+        if not group:
+            raise ValueError(f"{target!r} is not a recognized device group")
+        devices, issues = await self.collect(owner_id, provider)
+        grouped = [item for item in devices if _in_group(item, group)]
+        selected = [item for item in grouped if item.controllable]
+        if not selected:
+            if grouped:
+                raise ValueError(
+                    f"I found {_join_names([item.name for item in grouped])}, but "
+                    "none exposes safe on/off control."
+                )
+            available = [item.name for item in devices if item.controllable]
+            message = f"I couldn't find any controllable {group}."
+            if available:
+                message += f" Other controllable devices: {_join_names(available)}."
+            elif issues:
+                message += " No configured provider returned a controllable device."
+            raise LookupError(message)
+        if len(selected) > 32:
+            raise ValueError(
+                f"I found {len(selected)} {group}. Please narrow the room or group before I control them."
+            )
+        if len(selected) == 1:
+            text, data = await self.control(owner_id, selected[0].key, state, provider)
+        else:
+            text, data = await self.control_many(
+                owner_id, [item.key for item in selected], state, provider
+            )
+        data["group"] = {
+            "kind": group,
+            "target": target,
+            "device_names": [item.name for item in selected],
+        }
+        return text, data
+
     async def control_many(
         self,
         owner_id: str,
@@ -367,8 +455,8 @@ class SmartHomeHub:
         """Resolve an entire device set first, then execute it as one plan."""
         state = require_power_state(state)
         clean_targets = [str(item).strip() for item in targets if str(item).strip()]
-        if not 1 < len(clean_targets) <= 8:
-            raise ValueError("Name between two and eight devices for a grouped command")
+        if not 1 < len(clean_targets) <= 32:
+            raise ValueError("Name between two and 32 devices for a grouped command")
         blocked = {"all", "everything", "home", "house", "every device", "all devices"}
         if any(_normalize(target) in blocked for target in clean_targets):
             raise ValueError(

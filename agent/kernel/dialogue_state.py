@@ -65,6 +65,29 @@ def _history_targets(history: Iterable[Any] | None) -> list[str]:
     return []
 
 
+def _result_entities(result: Mapping[str, Any]) -> tuple[EntityReference, ...]:
+    """Use verified tool identities instead of retaining a vague group phrase."""
+    raw_names = result.get("_dialogue_entities") or ()
+    if isinstance(raw_names, (str, bytes)):
+        raw_names = (raw_names,)
+    names: list[str] = []
+    for value in raw_names if isinstance(raw_names, Iterable) else ():
+        name = str(value or "").strip()
+        if name and name.casefold() not in {item.casefold() for item in names}:
+            names.append(name)
+        if len(names) >= 32:
+            break
+    return tuple(
+        EntityReference(
+            surface=name,
+            resolved_name=name,
+            source="tool_result",
+            confidence=1.0,
+        )
+        for name in names
+    )
+
+
 class DialogueStateStore:
     """Small in-memory state for references; durable memory remains elsewhere."""
 
@@ -144,8 +167,11 @@ class DialogueStateStore:
             if state.response_mode.value == "clarification"
             else None
         )
+        result_entities = _result_entities(result)
         return DialogueContext(
-            entities=state.entities or (previous.entities if previous else ()),
+            entities=result_entities
+            or state.entities
+            or (previous.entities if previous else ()),
             last_capability=(
                 capabilities[-1]
                 if capabilities

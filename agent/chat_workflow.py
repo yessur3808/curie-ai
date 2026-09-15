@@ -27,6 +27,7 @@ import pytz
 from datetime import datetime, timezone
 from typing import Optional, Dict, Tuple
 from collections import OrderedDict
+from collections.abc import Mapping
 from threading import Lock
 
 from memory import UserManager
@@ -113,6 +114,39 @@ def _is_predominantly_french(text: str) -> bool:
         return False
     french_hits = sum(word.strip("'") in _FRENCH_FUNCTION_WORDS for word in words)
     return french_hits >= 4 and french_hits / len(words) >= 0.14
+
+
+def _dialogue_device_names(metadata: Mapping[str, object]) -> list[str]:
+    """Extract only device display names needed for grounded follow-up turns."""
+    data = metadata.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    rows: list[Mapping[str, object]] = []
+    receipt = data.get("receipt")
+    if isinstance(receipt, Mapping):
+        rows.append(receipt)
+    receipts = data.get("receipts")
+    if isinstance(receipts, (list, tuple)):
+        rows.extend(item for item in receipts if isinstance(item, Mapping))
+    devices = data.get("devices")
+    if isinstance(devices, (list, tuple)):
+        rows.extend(item for item in devices if isinstance(item, Mapping))
+    correlations = data.get("correlations")
+    if isinstance(correlations, (list, tuple)):
+        rows.extend(item for item in correlations if isinstance(item, Mapping))
+
+    names: list[str] = []
+    for row in rows:
+        snapshot = row.get("snapshot")
+        name = row.get("name") or row.get("device_name")
+        if not name and isinstance(snapshot, Mapping):
+            name = snapshot.get("name")
+        clean = str(name or "").strip()
+        if clean and clean.casefold() not in {item.casefold() for item in names}:
+            names.append(clean)
+        if len(names) >= 32:
+            break
+    return names
 
 
 def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> dict:
@@ -528,6 +562,7 @@ class ChatWorkflow:
         result["turn_state"] = analysis.state.as_dict()
         result["response_mode"] = analysis.state.response_mode.value
         self.dialogue_state.observe_for_owner(str(internal_id), analysis.state, result)
+        result.pop("_dialogue_entities", None)
         turn_event_writer.record(analysis.state, result)
         return result
 
@@ -743,7 +778,7 @@ class ChatWorkflow:
                         ],
                     }
                 )
-                return {
+                result = {
                     "text": routed_response,
                     "timestamp": datetime.now(timezone.utc),
                     "model_used": model_used,
@@ -760,6 +795,18 @@ class ChatWorkflow:
                         response_text=routed_response,
                     ),
                 }
+                dialogue_names: list[str] = []
+                for outcome in execution.outcomes:
+                    if outcome.capability not in {"home_control", "home_status"}:
+                        continue
+                    for name in _dialogue_device_names(outcome.metadata):
+                        if name.casefold() not in {
+                            item.casefold() for item in dialogue_names
+                        }:
+                            dialogue_names.append(name)
+                if dialogue_names:
+                    result["_dialogue_entities"] = dialogue_names
+                return result
             except Exception as exc:
                 logger.exception("Operational fast-path failed: %s", exc)
                 operational_metrics.record_error()
@@ -1077,7 +1124,7 @@ class ChatWorkflow:
                 processing_time = (time.time() - start_time) * 1000
                 timings = trace.finish()
                 latency_metrics.observe(timings)
-                return {
+                result = {
                     "text": routed_response,
                     "timestamp": datetime.now(timezone.utc),
                     "model_used": routed_candidate.model_used,
@@ -1090,6 +1137,14 @@ class ChatWorkflow:
                         response_text=routed_response,
                     ),
                 }
+                if routing_decision.selected_capability in {
+                    "home_control",
+                    "home_status",
+                }:
+                    names = _dialogue_device_names(routed_candidate.metadata)
+                    if names:
+                        result["_dialogue_entities"] = names
+                return result
         except Exception as exc:
             logger.exception("Unified request router failed: %s", exc)
             routing_decision = None

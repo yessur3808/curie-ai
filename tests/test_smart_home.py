@@ -185,6 +185,49 @@ def test_batch_control_resolves_every_target_before_running_once():
     ]
 
 
+def test_all_lights_resolves_the_device_category_and_controls_only_lights():
+    provider = FakeProvider(
+        [
+            DeviceSnapshot(
+                "fake",
+                "sync",
+                "AI Sync Box strip",
+                "devices.types.light",
+                True,
+                "on",
+                True,
+                True,
+            ),
+            DeviceSnapshot(
+                "fake",
+                "floor",
+                "Floor Lamp 2",
+                "devices.types.light",
+                True,
+                "on",
+                True,
+                True,
+            ),
+            DeviceSnapshot("fake", "fan", "Desk Fan", "fan", True, "on", True, True),
+        ]
+    )
+
+    text, data = asyncio.run(
+        SmartHomeHub([provider]).control("owner", "all lights", "off")
+    )
+
+    assert text == "Done. AI Sync Box strip and Floor Lamp 2 are now off."
+    assert set(provider.controls) == {
+        ("owner", "sync", "off"),
+        ("owner", "floor", "off"),
+    }
+    assert data["group"]["kind"] == "lights"
+    assert data["group"]["device_names"] == [
+        "AI Sync Box strip",
+        "Floor Lamp 2",
+    ]
+
+
 def test_batch_control_does_not_partially_run_when_one_target_is_unknown():
     provider = FakeProvider(
         [
@@ -300,6 +343,7 @@ def test_offline_device_reports_the_blocker_without_claiming_success():
         ("What's running at home?", "home_status", "", None),
         ("Is the bedroom lamp on?", "home_status", "bedroom lamp", None),
         ("Turn off the desk plug", "home_control", "desk plug", "off"),
+        ("Turn off all lights", "home_control", "all lights", "off"),
         (
             "Switch the living-room Nanoleaf on",
             "home_control",
@@ -375,6 +419,26 @@ def test_multi_device_command_and_plural_reference_keep_the_entity_set():
     assert follow_up.action == "home_control"
     assert follow_up.params["targets"] == ["floor lamp", "tv light"]
     assert follow_up.params["state"] == "on"
+
+
+def test_plural_follow_up_can_reuse_a_recent_light_group():
+    follow_up = classify_request(
+        "Turn off both devices",
+        history=[
+            {"role": "user", "content": "Turn off all lights"},
+            {
+                "role": "assistant",
+                "content": "I found two lights: AI Sync Box strip and Floor Lamp 2.",
+            },
+        ],
+    )
+
+    assert follow_up.action == "home_control"
+    assert follow_up.params == {
+        "target": "all lights",
+        "state": "off",
+        "provider": "",
+    }
 
 
 def test_try_again_repeats_only_a_recent_failed_home_command():

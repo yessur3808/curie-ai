@@ -252,6 +252,16 @@ def _home_target(value: str) -> str:
     return target.strip(" \t.,!?")
 
 
+def _is_home_group_target(value: str) -> bool:
+    """Return whether a target names a bounded device category, not one device."""
+    words = [
+        word
+        for word in _home_target(value).casefold().split()
+        if word not in {"all", "every", "each", "both", "the", "my", "our"}
+    ]
+    return words in (["light"], ["lights"], ["lamp"], ["lamps"], ["bulb"], ["bulbs"])
+
+
 def _split_home_targets(value: str) -> list[str]:
     """Split an explicit list while preserving the single-target API."""
     target = _home_target(value)
@@ -529,12 +539,29 @@ def classify_request(
             wants_plural = bool(
                 pronoun_match and _pronoun_kind(pronoun_match.group(1)) == "plural"
             )
-            if targets and state_match and (not wants_plural or len(targets) > 1):
+            group_target = (
+                targets[0]
+                if len(targets) == 1 and _is_home_group_target(targets[0])
+                else ""
+            )
+            if (
+                targets
+                and state_match
+                and (not wants_plural or len(targets) > 1 or bool(group_target))
+            ):
                 state = state_match.group(1).casefold()
                 params = (
                     {"target": "", "targets": targets, "state": state, "provider": ""}
-                    if wants_plural
-                    else {"target": targets[0], "state": state, "provider": ""}
+                    if wants_plural and len(targets) > 1
+                    else (
+                        {
+                            "target": group_target,
+                            "state": state,
+                            "provider": "",
+                        }
+                        if wants_plural and group_target
+                        else {"target": targets[0], "state": state, "provider": ""}
+                    )
                 )
                 return ToolRequest(
                     "home_control",

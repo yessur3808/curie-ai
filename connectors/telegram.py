@@ -69,6 +69,7 @@ _pending_attachments: dict[int, PendingAttachment] = {}
 _pending_lock = threading.Lock()
 _ATTACHMENT_TTL_SECONDS = 900
 _TYPING_ACTION = "typing"
+_STARTUP_NOTIFICATION_LOCK = threading.Lock()
 
 # Telegram's ``filters.COMMAND`` excludes slash commands from the generic text
 # handler. Keep every workflow-owned command registered here so it remains
@@ -249,6 +250,49 @@ def _persona_startup_message() -> str:
     return f"{name} is awake, online, and ready."
 
 
+def _startup_notification_path() -> Path:
+    configured = os.getenv("CURIE_STARTUP_NOTIFICATION_STATE", "").strip()
+    return (
+        Path(configured)
+        if configured
+        else Path.home() / ".curie" / "telegram-startup-notified"
+    )
+
+
+def _startup_notification_due() -> bool:
+    try:
+        cooldown = max(
+            0, int(os.getenv("CURIE_STARTUP_NOTIFICATION_COOLDOWN_SECONDS", "0"))
+        )
+    except ValueError:
+        cooldown = 0
+    if cooldown == 0:
+        return True
+    path = _startup_notification_path()
+    with _STARTUP_NOTIFICATION_LOCK:
+        try:
+            return not path.exists() or time.time() - path.stat().st_mtime >= cooldown
+        except OSError:
+            return True
+
+
+def _mark_startup_notification_sent() -> None:
+    try:
+        cooldown = int(os.getenv("CURIE_STARTUP_NOTIFICATION_COOLDOWN_SECONDS", "0"))
+    except ValueError:
+        cooldown = 0
+    if cooldown <= 0:
+        return
+    path = _startup_notification_path()
+    try:
+        with _STARTUP_NOTIFICATION_LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            path.touch()
+            path.chmod(0o600)
+    except OSError as exc:
+        logger.warning("Could not persist startup notification cooldown: %s", exc)
+
+
 async def handle_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show IDs needed for an owner to configure MASTER_USER_ID safely."""
     user = update.effective_user
@@ -322,6 +366,9 @@ async def notify_master_awake(application) -> None:
     if not master_id:
         logger.info("Startup notification skipped: MASTER_USER_ID is not configured")
         return
+    if not _startup_notification_due():
+        logger.info("Startup notification skipped during the restart cooldown")
+        return
     external_id = UserManager.get_external_id(master_id, "telegram")
     if not external_id:
         logger.warning(
@@ -343,6 +390,7 @@ async def notify_master_awake(application) -> None:
             exc,
         )
         return
+    _mark_startup_notification_sent()
     logger.info("Sent startup-ready notification to the configured master user")
 
 

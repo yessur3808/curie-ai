@@ -81,6 +81,34 @@ def test_dialogue_state_keeps_recent_device_across_a_brief_social_interlude():
     assert resolved.resolved_text == "Turn DreamView on"
 
 
+def test_dialogue_state_replaces_a_group_phrase_with_tool_resolved_devices():
+    store = DialogueStateStore()
+    first = analyze_turn(
+        "Turn off all lights",
+        "Turn off all lights",
+        owner_id="owner",
+        platform="telegram",
+    )
+    store.observe_for_owner(
+        "owner",
+        first.state,
+        {
+            "text": "Done.",
+            "_dialogue_entities": ["AI Sync Box strip", "Floor Lamp 2"],
+        },
+    )
+
+    resolved = store.resolve_references(
+        "Turn both devices on", platform="telegram", owner_id="owner"
+    )
+
+    assert resolved.resolved_text == "Turn AI Sync Box strip and Floor Lamp 2 on"
+    assert [item.resolved_name for item in resolved.entities] == [
+        "AI Sync Box strip",
+        "Floor Lamp 2",
+    ]
+
+
 def test_compound_alias_and_control_becomes_an_ordered_plan():
     analysis = analyze_turn(
         "Correlate DreamView with AI Sync Box strip and turn it off",
@@ -173,7 +201,16 @@ def test_chat_operational_fast_path_never_loads_memory_or_calls_the_model():
     workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
     workflow.routing_service.execute = AsyncMock(
         return_value=ResponseCandidate(
-            "Done. DreamView is now off.", "action_router:home_control"
+            "Done. AI Sync Box strip and Floor Lamp 2 are now off.",
+            "action_router:home_control",
+            {
+                "data": {
+                    "receipts": [
+                        {"name": "AI Sync Box strip"},
+                        {"name": "Floor Lamp 2"},
+                    ]
+                }
+            },
         )
     )
     workflow._batch_load_context = AsyncMock(
@@ -189,7 +226,7 @@ def test_chat_operational_fast_path_never_loads_memory_or_calls_the_model():
         "external_user_id": "55",
         "external_chat_id": "300",
         "message_id": "week12-fast-path",
-        "text": "Turn off the DreamView",
+        "text": "Turn off all lights",
         "internal_id": "owner",
     }
 
@@ -201,9 +238,14 @@ def test_chat_operational_fast_path_never_loads_memory_or_calls_the_model():
     ):
         result = asyncio.run(workflow.process_message(normalized))
 
-    assert result["text"] == "Done. DreamView is now off."
+    assert result["text"] == "Done. AI Sync Box strip and Floor Lamp 2 are now off."
     assert result["routing"]["selected_capability"] == "home_control"
     assert result["turn_state"]["memory_policy"] == "operational_minimal"
+    assert "_dialogue_entities" not in result
+    resolved = workflow.dialogue_state.resolve_references(
+        "Turn both devices on", platform="telegram", owner_id="owner"
+    )
+    assert resolved.resolved_text == "Turn AI Sync Box strip and Floor Lamp 2 on"
     workflow._batch_load_context.assert_not_awaited()
     workflow.model_service.generate.assert_not_awaited()
 
