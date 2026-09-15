@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import threading
 import time
+from typing import Any, Mapping
 
 
 @dataclass(slots=True)
@@ -167,3 +168,92 @@ def reset_telemetry(*, path: Path | None = None) -> None:
 
 
 operational_metrics = OperationalMetrics()
+
+
+class TurnEventWriter:
+    """Append privacy-safe end-to-end turn events for evaluation and debugging."""
+
+    def __init__(self, path: Path | None = None, *, max_bytes: int | None = None):
+        instance = os.getenv("CURIE_INSTANCE", "default").strip().casefold()
+        filename = (
+            "turn-events.jsonl"
+            if instance == "default"
+            else f"instance-{instance}-turn-events.jsonl"
+        )
+        configured = os.getenv("CURIE_TURN_TRACE_PATH", "").strip()
+        self.path = path or (
+            Path(configured) if configured else Path.home() / ".curie" / filename
+        )
+        try:
+            configured_max = int(os.getenv("CURIE_TURN_TRACE_MAX_BYTES", "10000000"))
+        except ValueError:
+            configured_max = 10_000_000
+        self.max_bytes = max(64_000, int(max_bytes or configured_max))
+        self._lock = threading.Lock()
+
+    def _rotate_if_needed(self) -> None:
+        try:
+            if not self.path.exists() or self.path.stat().st_size < self.max_bytes:
+                return
+            rotated = self.path.with_suffix(self.path.suffix + ".1")
+            self.path.replace(rotated)
+        except OSError:
+            pass
+
+    def record(self, state: Any, response: Mapping[str, Any]) -> None:
+        """Write metadata only: never raw prompts, responses, IDs, or parameters."""
+        try:
+            subgoals = tuple(getattr(state.goal, "subgoals", ()))
+            capabilities = [
+                item.capability
+                for item in subgoals
+                if getattr(item, "capability", None)
+            ]
+            text = str(response.get("text") or "")
+            event = {
+                "schema_version": 1,
+                "recorded_at": time.time(),
+                "trace_id": state.trace_id,
+                "turn_id": state.id,
+                "platform": state.platform,
+                "owner_scope_hash": state.owner_scope_hash,
+                "message_hash": state.message_hash,
+                "message_chars": state.original_length,
+                "intent": state.goal.intent,
+                "capabilities": capabilities,
+                "risk": state.goal.risk,
+                "response_mode": state.response_mode.value,
+                "memory_policy": state.memory_policy,
+                "entity_count": len(state.entities),
+                "entity_kinds": sorted({item.kind for item in state.entities}),
+                "model_used": str(response.get("model_used") or "unknown"),
+                "timings_ms": {
+                    str(key): float(value)
+                    for key, value in dict(response.get("timings_ms") or {}).items()
+                    if isinstance(value, (int, float))
+                },
+                "processing_time_ms": float(response.get("processing_time_ms") or 0),
+                "response_chars": len(text),
+                "outcome": (
+                    "error"
+                    if text.startswith("[Error") or response.get("model_used") == "N/A"
+                    else "completed"
+                ),
+            }
+            encoded = json.dumps(event, separators=(",", ":"), sort_keys=True)
+            with self._lock:
+                self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                try:
+                    self.path.parent.chmod(0o700)
+                except OSError:
+                    pass
+                self._rotate_if_needed()
+                with self.path.open("a", encoding="utf-8") as stream:
+                    stream.write(encoded + "\n")
+                self.path.chmod(0o600)
+        except Exception:
+            # Observability must never alter the conversational outcome.
+            pass
+
+
+turn_event_writer = TurnEventWriter()

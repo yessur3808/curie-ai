@@ -1,4 +1,4 @@
-from evaluation.runner import evaluate_case, evaluate_suite
+from evaluation.runner import evaluate_case, evaluate_suite, summarize_results
 
 
 def test_brevity_personality_and_hidden_reasoning_pass():
@@ -86,3 +86,54 @@ def test_typed_provenance_gate():
     assert evaluate_case(
         case, {"text": "4", "provenance": {"kind": "deterministic"}}
     ).passed
+
+
+def test_structured_turn_contract_is_evaluated():
+    case = {
+        "id": "dreamview",
+        "category": "device_reasoning",
+        "expected": {
+            "route_intent": "capability",
+            "capability": "home_control",
+            "risk": "mutating",
+            "response_mode": "command_ack",
+            "memory_policy": "operational_minimal",
+            "entities": ["DreamView"],
+            "verification_status": "verified",
+        },
+    }
+    response = {
+        "text": "Done. DreamView is now off.",
+        "routing": {
+            "intent": "capability",
+            "selected_capability": "home_control",
+            "risk": "mutating",
+        },
+        "turn_state": {
+            "response_mode": "command_ack",
+            "memory_policy": "operational_minimal",
+            "entities": [{"resolved_name": "DreamView"}],
+            "goal": {"intent": "capability", "risk": "mutating", "subgoals": []},
+        },
+        "verification_status": "verified",
+    }
+    assert evaluate_case(case, response).passed
+
+
+def test_repetition_gate_and_summary_scores():
+    case = {
+        "id": "fresh",
+        "category": "relevance",
+        "expected": {"max_recent_similarity": 0.4},
+    }
+    result = evaluate_case(
+        case,
+        {
+            "text": "The same old topic again",
+            "recent_responses": ["The same old topic again"],
+        },
+    )
+    assert "response repeats a recent answer" in result.failures
+    summary = summarize_results([result])
+    assert summary.total == 1
+    assert summary.overall_score == 0

@@ -40,7 +40,14 @@ from agent.orchestration.response_policy import (  # noqa: F401
 )
 from agent.orchestration.model_service import ModelConversationService
 from agent.orchestration.learning_service import ConversationLearningService
-from agent.observability import RequestTrace, latency_metrics, operational_metrics
+from agent.observability import (
+    RequestTrace,
+    latency_metrics,
+    operational_metrics,
+    turn_event_writer,
+)
+from agent.kernel.dialogue_state import DialogueStateStore
+from agent.kernel.understanding import TurnAnalysis, analyze_turn
 from agent.orchestration.session_commands import SessionCommandService
 from agent.orchestration.specialist_router import SpecialistRouter
 from agent.orchestration.social_service import SocialConversationService
@@ -419,6 +426,7 @@ class ChatWorkflow:
         )
         self.model_service = ModelConversationService(llm_manager)
         self.learning_service = ConversationLearningService(_LEARNING_EXECUTOR)
+        self.dialogue_state = DialogueStateStore()
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
         self.prompt_cache = PromptCache(max_size=100)
 
@@ -443,6 +451,84 @@ class ChatWorkflow:
         )
 
     async def process_message(self, normalized_input: Dict) -> Dict:
+        """Understand, execute, and trace one complete connector turn."""
+        enriched = dict(normalized_input or {})
+        original_text = str(enriched.get("text") or "").strip()
+        platform = str(enriched.get("platform") or "unknown")
+        external_user_id = enriched.get("external_user_id")
+        external_chat_id = enriched.get("external_chat_id")
+        if not all([external_user_id, external_chat_id, original_text]):
+            return await self._process_message_core(enriched)
+
+        internal_id = enriched.get("internal_id")
+        if not internal_id:
+            internal_id = UserManager.get_or_create_user_internal_id(
+                channel=platform,
+                external_id=str(external_user_id),
+                secret_username=f"{platform}_{external_user_id}",
+                updated_by="chat_workflow",
+            )
+            enriched["internal_id"] = internal_id
+
+        has_device_reference = bool(
+            re.search(
+                r"\b(?:it|that(?: one| device)?|this(?: one| device)?|them|"
+                r"those(?: devices)?|these(?: devices)?|both(?: devices)?|the device)\b",
+                original_text,
+                re.I,
+            )
+        )
+        has_device_operation = bool(
+            re.search(
+                r"\b(?:turn|switch|power|status|still (?:on|off)|"
+                r"(?:is|are)\b.{0,50}\b(?:on|off|online|offline|running))\b",
+                original_text,
+                re.I,
+            )
+        )
+        needs_dialogue_history = (
+            has_device_reference and has_device_operation
+        ) or bool(re.search(r"\btry again\b", original_text, re.I))
+        history = (
+            get_session_manager().get_history(platform, internal_id)[-8:]
+            if needs_dialogue_history
+            else []
+        )
+        resolution = self.dialogue_state.resolve_references(
+            original_text,
+            platform=platform,
+            owner_id=str(internal_id),
+            history=history,
+        )
+        analysis = analyze_turn(
+            original_text,
+            resolution.resolved_text,
+            owner_id=str(internal_id),
+            platform=platform,
+            history=history,
+            resolved_entities=resolution.entities,
+        )
+        enriched["_effective_text"] = resolution.resolved_text
+        enriched["_turn_analysis"] = analysis
+        try:
+            result = await self._process_message_core(enriched)
+        except Exception:
+            result = {
+                "text": "[Error processing message]",
+                "timestamp": datetime.now(timezone.utc),
+                "model_used": "N/A",
+                "processing_time_ms": 0,
+            }
+            turn_event_writer.record(analysis.state, result)
+            raise
+        result["trace_id"] = analysis.state.trace_id
+        result["turn_state"] = analysis.state.as_dict()
+        result["response_mode"] = analysis.state.response_mode.value
+        self.dialogue_state.observe_for_owner(str(internal_id), analysis.state, result)
+        turn_event_writer.record(analysis.state, result)
+        return result
+
+    async def _process_message_core(self, normalized_input: Dict) -> Dict:
         """
         Main entry point: process a normalized message and return structured response.
         """
@@ -454,6 +540,8 @@ class ChatWorkflow:
         external_chat_id = normalized_input.get("external_chat_id")
         message_id = str(normalized_input.get("message_id", ""))
         user_text = normalized_input.get("text", "").strip()
+        routing_text = str(normalized_input.get("_effective_text") or user_text).strip()
+        turn_analysis = normalized_input.get("_turn_analysis")
 
         # task_id is always defined so later _finish_task calls are safe even
         # when task tracking is disabled or register_task is called later.
@@ -571,6 +659,81 @@ class ChatWorkflow:
                 }
         except (KeyError, TypeError, ValueError, pytz.UnknownTimeZoneError) as exc:
             logger.debug("Could not apply deterministic time arithmetic: %s", exc)
+
+        # Explicit operational work bypasses personality memory, adaptive recall,
+        # prompt construction, and model inference. The typed plan is created by
+        # the wrapper before this core path starts, so references and dependencies
+        # are stable for the full turn.
+        if (
+            isinstance(turn_analysis, TurnAnalysis)
+            and turn_analysis.operational_decisions
+        ):
+            try:
+                user_profile = UserManager.get_user_profile(internal_id) or {}
+                candidates = []
+                with trace.stage("tool"):
+                    for decision in turn_analysis.operational_decisions:
+                        candidate = await self.routing_service.execute(
+                            decision,
+                            routing_text,
+                            str(internal_id),
+                            platform,
+                            user_profile,
+                        )
+                        if candidate is None:
+                            raise RuntimeError("The operational route has no executor")
+                        candidates.append((decision, candidate))
+                response_parts = [
+                    self.response_policy.finalize(
+                        candidate.text, user_text, profile=user_profile
+                    )
+                    for _, candidate in candidates
+                ]
+                routed_response = "\n\n".join(response_parts)
+                model_used = "+".join(
+                    candidate.model_used for _, candidate in candidates
+                )
+                sm = get_session_manager()
+                sm.add_message(platform, internal_id, "user", user_text)
+                sm.add_message(platform, internal_id, "assistant", routed_response)
+                self.dedupe_cache.set(
+                    platform, str(external_chat_id), message_id, routed_response
+                )
+                timings = trace.finish()
+                latency_metrics.observe(timings)
+                routing_payload = (
+                    candidates[0][0].as_dict()
+                    if len(candidates) == 1
+                    else {
+                        "intent": "compound_operation",
+                        "steps": [decision.as_dict() for decision, _ in candidates],
+                    }
+                )
+                return {
+                    "text": routed_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": model_used,
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                    "timings_ms": timings,
+                    "routing": routing_payload,
+                    "provenance": response_provenance(
+                        model_used=model_used,
+                        user_text=user_text,
+                        response_text=routed_response,
+                    ),
+                }
+            except Exception as exc:
+                logger.exception("Operational fast-path failed: %s", exc)
+                operational_metrics.record_error()
+                timings = trace.finish()
+                latency_metrics.observe(timings)
+                return {
+                    "text": "I couldn't complete that command because the operational route failed.",
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "operational_route_error",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                    "timings_ms": timings,
+                }
 
         try:
             from services.personal_ops import handle_personal_ops_command
@@ -834,9 +997,11 @@ class ChatWorkflow:
             return {
                 "text": user_facing_tool_error(
                     exc,
-                    executable.get("name", "learned skill")
-                    if executable
-                    else "learned skill",
+                    (
+                        executable.get("name", "learned skill")
+                        if executable
+                        else "learned skill"
+                    ),
                 ),
                 "timestamp": datetime.now(timezone.utc),
                 "model_used": "learned_skill_error",
@@ -847,16 +1012,16 @@ class ChatWorkflow:
         # one deterministic/social/system/specialist/capability executor.
         try:
             user_profile = UserManager.get_user_profile(internal_id) or {}
-            routing_history = get_session_manager().get_history(
-                platform, internal_id
-            )[-8:]
+            routing_history = get_session_manager().get_history(platform, internal_id)[
+                -8:
+            ]
             with trace.stage("tool"):
                 routing_decision = await self.routing_service.decide(
-                    user_text, str(internal_id), history=routing_history
+                    routing_text, str(internal_id), history=routing_history
                 )
                 routed_candidate = await self.routing_service.execute(
                     routing_decision,
-                    user_text,
+                    routing_text,
                     str(internal_id),
                     platform,
                     user_profile,

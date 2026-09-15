@@ -160,6 +160,43 @@ def _deterministic_clause(
     return None
 
 
+def route_operational_request(
+    text: str, owner_id: str = "", history: Sequence[Any] | None = None
+) -> RoutingDecision | None:
+    """Route only explicit operational requests without invoking a model.
+
+    This is the fast-path used before profile, memory, and prompt construction.  It
+    intentionally excludes social conversation and specialist inference so an
+    ordinary chat message cannot be pulled into a tool path by stale context.
+    """
+    request = classify_request(text, history=history)
+    if request:
+        decision = _from_tool_request(request)
+        _record(owner_id, text, decision)
+        return decision
+
+    from agent.skills.system_commands import detect_system_command
+
+    command = detect_system_command(text)
+    if not command:
+        return None
+    risk = (
+        "mutating"
+        if command in {"start", "stop", "restart", "service"}
+        else "read_only"
+    )
+    decision = RoutingDecision(
+        id=uuid.uuid4().hex,
+        intent="system_command",
+        confidence=1.0,
+        parameters={"command": command},
+        risk=risk,
+        explanation=f"Matched explicit system command {command}.",
+    )
+    _record(owner_id, text, decision)
+    return decision
+
+
 async def route_request(
     text: str, owner_id: str = "", history: Sequence[Any] | None = None
 ) -> RoutingDecision:

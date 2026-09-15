@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agent.kernel.contracts import ResponseMode
+
 _SIGNALS = {
     "urgency": re.compile(r"\b(?:urgent|emergency|asap|right now|immediately)\b", re.I),
     "fatigue": re.compile(
@@ -80,6 +82,36 @@ def _length_target(text: str, verbosity: str, *, urgent: bool, interaction: str)
     return "brief"
 
 
+def select_response_mode(
+    text: str,
+    *,
+    routing_intent: str | None = None,
+    capability: str | None = None,
+    preferences: dict | None = None,
+) -> ResponseMode:
+    """Choose an explicit response contract independently of generation style."""
+    if routing_intent in {"clarification", "multiple_intents"}:
+        return ResponseMode.CLARIFICATION
+    if capability in {"home_status", "ram_usage", "hardware", "network_speed"}:
+        return ResponseMode.STATUS
+    if routing_intent in {"system_command", "approval"} or capability:
+        return ResponseMode.COMMAND_ACK
+    interaction = _interaction_kind(text)
+    if interaction == "social":
+        return ResponseMode.SOCIAL
+    length = _length_target(
+        text,
+        str((preferences or {}).get("verbosity", "balanced")),
+        urgent=bool(_SIGNALS["urgency"].search(text)),
+        interaction=interaction,
+    )
+    return {
+        "brief": ResponseMode.BRIEF,
+        "focused": ResponseMode.FOCUSED,
+        "deep": ResponseMode.DEEP,
+    }[length]
+
+
 def plan_response(text: str, preferences: dict | None = None) -> dict[str, Any]:
     """Choose independent answer, care, action, length, and expression policies."""
     preferences = preferences or {}
@@ -96,20 +128,22 @@ def plan_response(text: str, preferences: dict | None = None) -> dict[str, Any]:
         "urgency": "skip_social_padding",
     }.get(
         emotion,
-        "result_or_blocker_only"
-        if interaction == "command"
-        else "only_if_naturally_relevant",
+        (
+            "result_or_blocker_only"
+            if interaction == "command"
+            else "only_if_naturally_relevant"
+        ),
     )
     verbosity = preferences.get("verbosity", "balanced")
-    length = _length_target(
-        text, verbosity, urgent=urgent, interaction=interaction
-    )
+    length = _length_target(text, verbosity, urgent=urgent, interaction=interaction)
     affection = preferences.get("affection", "gentle")
     french = preferences.get("french_frequency", "natural")
     formal = bool(_FORMAL.search(text))
+    mode = select_response_mode(text, preferences=preferences)
     if urgent or interaction == "command" or formal or _TECHNICAL.search(text):
         french = "none"
     return {
+        "mode": mode.value,
         "emotion": emotion,
         "interaction": interaction,
         "answer": "direct_first",
@@ -138,7 +172,7 @@ def plan_response(text: str, preferences: dict | None = None) -> dict[str, Any]:
 
 def planner_directives(plan: dict[str, Any]) -> list[str]:
     directives = [
-        f"- Response plan: interaction={plan['interaction']}, answer={plan['answer']}, "
+        f"- Response plan: mode={plan.get('mode', 'brief')}, interaction={plan['interaction']}, answer={plan['answer']}, "
         f"acknowledgement={plan['acknowledgement']}, "
         f"next_action={plan['next_action']}, length={plan['length']}.",
         f"- Relational expression: personality={plan['personality']}, affection={plan['affection']}, "

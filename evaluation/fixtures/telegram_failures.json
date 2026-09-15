@@ -1,0 +1,30 @@
+[
+  {
+    "id": "reported-dreamview-off",
+    "sanitized": true,
+    "source": "user_reported",
+    "input": "Turn off the DreamView",
+    "failure": "The named device was not correlated and remained on."
+  },
+  {
+    "id": "reported-correlate-and-control",
+    "sanitized": true,
+    "source": "user_reported",
+    "input": "Correlate DreamView with AI Sync Box strip and turn it off",
+    "failure": "Neither the alias correlation nor the control goal completed."
+  },
+  {
+    "id": "reported-device-still-on",
+    "sanitized": true,
+    "source": "user_reported",
+    "input": "The device is still on",
+    "failure": "The active device goal was not recovered from dialogue context."
+  },
+  {
+    "id": "reported-topic-loop",
+    "sanitized": true,
+    "source": "user_reported",
+    "input": "Let's discuss something new",
+    "failure": "The response revived an irrelevant previous topic."
+  }
+]

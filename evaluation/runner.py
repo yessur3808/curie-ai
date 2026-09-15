@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+from typing import Any
 
 _URL = re.compile(r"https?://[^\s)]+", re.I)
 _THINKING = re.compile(r"<\/?think>|chain of thought|my reasoning process", re.I)
@@ -25,6 +26,52 @@ class EvaluationResult:
     failures: tuple[str, ...]
     correctness_passed: bool = True
     personality_passed: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationSummary:
+    total: int
+    passed: int
+    overall_score: float
+    correctness_score: float
+    personality_score: float
+    categories: dict[str, float]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "total": self.total,
+            "passed": self.passed,
+            "overall_score": self.overall_score,
+            "correctness_score": self.correctness_score,
+            "personality_score": self.personality_score,
+            "categories": dict(self.categories),
+        }
+
+
+def _routing_capabilities(response: dict) -> list[str]:
+    routing = response.get("routing") or {}
+    capabilities = []
+    if routing.get("selected_capability"):
+        capabilities.append(str(routing["selected_capability"]))
+    for step in routing.get("steps", ()):
+        if isinstance(step, dict) and step.get("selected_capability"):
+            capabilities.append(str(step["selected_capability"]))
+    state = response.get("turn_state") or {}
+    for subgoal in (state.get("goal") or {}).get("subgoals", ()):
+        if isinstance(subgoal, dict) and subgoal.get("capability"):
+            capabilities.append(str(subgoal["capability"]))
+    return list(dict.fromkeys(capabilities))
+
+
+def _recent_similarity(text: str, recent: list[str]) -> float:
+    current = set(re.findall(r"[a-z0-9]+", text.casefold()))
+    if not current:
+        return 0.0
+    scores = []
+    for item in recent:
+        previous = set(re.findall(r"[a-z0-9]+", str(item).casefold()))
+        scores.append(len(current & previous) / max(len(current | previous), 1))
+    return max(scores, default=0.0)
 
 
 def evaluate_case(case: dict, response: dict) -> EvaluationResult:
@@ -72,6 +119,60 @@ def evaluate_case(case: dict, response: dict) -> EvaluationResult:
     ):
         correctness_failures.append("latency exceeds the scenario budget")
 
+    routing = response.get("routing") or {}
+    turn_state = response.get("turn_state") or {}
+    goal = turn_state.get("goal") or {}
+    actual_intent = routing.get("intent") or goal.get("intent")
+    if expected.get("route_intent") and actual_intent != expected["route_intent"]:
+        correctness_failures.append("routing intent is incorrect")
+    if expected.get("capability") and expected[
+        "capability"
+    ] not in _routing_capabilities(response):
+        correctness_failures.append("selected capability is incorrect")
+    if expected.get("tool_sequence"):
+        sequence = response.get("tool_sequence") or _routing_capabilities(response)
+        if list(sequence) != list(expected["tool_sequence"]):
+            correctness_failures.append("tool sequence is incorrect")
+    actual_risk = routing.get("risk") or goal.get("risk")
+    if expected.get("risk") and actual_risk != expected["risk"]:
+        correctness_failures.append("risk classification is incorrect")
+    if (
+        expected.get("response_mode")
+        and (response.get("response_mode") or turn_state.get("response_mode"))
+        != expected["response_mode"]
+    ):
+        correctness_failures.append("response mode is incorrect")
+    if (
+        expected.get("memory_policy")
+        and turn_state.get("memory_policy") != expected["memory_policy"]
+    ):
+        correctness_failures.append("memory policy is incorrect")
+    if expected.get("entities"):
+        actual_entities = {
+            str(item.get("resolved_name", "")).casefold()
+            for item in turn_state.get("entities", ())
+            if isinstance(item, dict)
+        }
+        if any(
+            str(item).casefold() not in actual_entities for item in expected["entities"]
+        ):
+            correctness_failures.append("entity resolution is incorrect")
+    if (
+        expected.get("verification_status")
+        and response.get("verification_status") != expected["verification_status"]
+    ):
+        correctness_failures.append("verification status is incorrect")
+    if "clarification" in expected:
+        actual_clarification = actual_intent in {"clarification", "multiple_intents"}
+        if actual_clarification is not bool(expected["clarification"]):
+            correctness_failures.append("clarification behavior is incorrect")
+    if "max_recent_similarity" in expected:
+        similarity = _recent_similarity(
+            text, list(response.get("recent_responses") or ())
+        )
+        if similarity > float(expected["max_recent_similarity"]):
+            personality_failures.append("response repeats a recent answer")
+
     failures.extend(correctness_failures)
     failures.extend(personality_failures)
 
@@ -91,6 +192,30 @@ def evaluate_suite(
     return [evaluate_case(case, responses.get(str(case["id"]), {})) for case in cases]
 
 
+def summarize_results(results: list[EvaluationResult]) -> EvaluationSummary:
+    total = len(results)
+    if not total:
+        return EvaluationSummary(0, 0, 0.0, 0.0, 0.0, {})
+    categories: dict[str, list[bool]] = {}
+    for result in results:
+        categories.setdefault(result.category, []).append(result.passed)
+    return EvaluationSummary(
+        total=total,
+        passed=sum(item.passed for item in results),
+        overall_score=round(sum(item.passed for item in results) / total * 10, 2),
+        correctness_score=round(
+            sum(item.correctness_passed for item in results) / total * 10, 2
+        ),
+        personality_score=round(
+            sum(item.personality_passed for item in results) / total * 10, 2
+        ),
+        categories={
+            category: round(sum(values) / len(values) * 10, 2)
+            for category, values in sorted(categories.items())
+        },
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate captured Curie responses")
     parser.add_argument("responses", type=Path, help="JSON object keyed by scenario ID")
@@ -99,6 +224,7 @@ def main() -> int:
         type=Path,
         default=Path(__file__).with_name("scenarios.json"),
     )
+    parser.add_argument("--json-report", type=Path)
     args = parser.parse_args()
     cases = json.loads(args.scenarios.read_text())
     responses = json.loads(args.responses.read_text())
@@ -108,7 +234,27 @@ def main() -> int:
         detail = "" if result.passed else f": {', '.join(result.failures)}"
         print(f"{status} {result.case_id} [{result.category}]{detail}")
     passed = sum(result.passed for result in results)
-    print(f"\n{passed}/{len(results)} scenarios passed")
+    summary = summarize_results(results)
+    print(f"\n{passed}/{len(results)} scenarios passed ({summary.overall_score}/10)")
+    if args.json_report:
+        args.json_report.write_text(
+            json.dumps(
+                {
+                    "summary": summary.as_dict(),
+                    "results": [
+                        {
+                            "case_id": item.case_id,
+                            "category": item.category,
+                            "passed": item.passed,
+                            "failures": list(item.failures),
+                        }
+                        for item in results
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     return 0 if passed == len(results) else 1
 
 

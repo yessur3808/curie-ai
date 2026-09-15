@@ -68,6 +68,40 @@ _pending_attachments: dict[int, PendingAttachment] = {}
 _pending_lock = threading.Lock()
 _ATTACHMENT_TTL_SECONDS = 900
 
+# Telegram's ``filters.COMMAND`` excludes slash commands from the generic text
+# handler. Keep every workflow-owned command registered here so it remains
+# reachable instead of being silently discarded by the transport.
+WORKFLOW_COMMANDS = (
+    "agenda",
+    "birthday",
+    "task",
+    "audit",
+    "privacy",
+    "security",
+    "health",
+    "readiness",
+    "capabilities",
+    "proactive",
+    "adaptation",
+    "home",
+    "gmail",
+    "x",
+    "twitter",
+    "browser",
+    "memory",
+    "skill",
+    "approve",
+    "reject",
+    "reset_preferences",
+    "status",
+    "metrics",
+    "tasks",
+    "doctor",
+    "logs",
+    "stop",
+    "restart",
+)
+
 
 def set_workflow(workflow: ChatWorkflow):
     """Set the shared ChatWorkflow instance (called from main.py)."""
@@ -173,7 +207,11 @@ async def handle_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     question, options = parts[0], parts[1:]
-    if len(question) > 300 or len(options) > 10 or any(len(option) > 100 for option in options):
+    if (
+        len(question) > 300
+        or len(options) > 10
+        or any(len(option) > 100 for option in options)
+    ):
         await update.message.reply_text(
             "Polls support a 300-character question and 2 to 10 options of up to 100 characters each."
         )
@@ -186,7 +224,9 @@ async def handle_telegram_error(update: object, context: ContextTypes.DEFAULT_TY
     error = getattr(context, "error", None)
     error_types = {base.__name__ for base in type(error).__mro__} if error else set()
     if error_types & {"NetworkError", "TimedOut", "RetryAfter"}:
-        logger.warning("Transient Telegram network error; polling will retry: %s", error)
+        logger.warning(
+            "Transient Telegram network error; polling will retry: %s", error
+        )
         return
     logger.error(
         "Unhandled Telegram update error: %s", error, exc_info=error if error else True
@@ -942,19 +982,7 @@ def start_telegram_bot(workflow: ChatWorkflow):
     app.add_handler(CommandHandler("reminders", handle_reminders))
     app.add_handler(CommandHandler("poll", handle_poll))
     app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
-    for workflow_command in (
-        "agenda",
-        "birthday",
-        "task",
-        "audit",
-        "privacy",
-        "security",
-        "health",
-        "readiness",
-        "capabilities",
-        "proactive",
-        "adaptation",
-    ):
+    for workflow_command in WORKFLOW_COMMANDS:
         app.add_handler(CommandHandler(workflow_command, handle_workflow_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_message))

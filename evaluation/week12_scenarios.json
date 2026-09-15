@@ -1,0 +1,111 @@
+[
+  {
+    "id": "dreamview_off",
+    "category": "device_control",
+    "input": "Turn off the DreamView",
+    "simulation": {"initial_state": "on"},
+    "expected": {"route_intent": "capability", "capability": "home_control", "risk": "mutating", "response_mode": "command_ack", "memory_policy": "operational_minimal", "entities": ["DreamView"], "verification_status": "verified", "contains": ["now off"]}
+  },
+  {
+    "id": "dreamview_generic",
+    "category": "device_control",
+    "input": "Switch dream view off",
+    "simulation": {"initial_state": "on"},
+    "expected": {"capability": "home_control", "verification_status": "verified", "response_mode": "command_ack"}
+  },
+  {
+    "id": "dreamview_typo",
+    "category": "device_correlation",
+    "input": "Turn the dremview off",
+    "simulation": {"initial_state": "on"},
+    "expected": {"capability": "home_control", "verification_status": "verified"}
+  },
+  {
+    "id": "dreamview_already_off",
+    "category": "device_verification",
+    "input": "Turn off DreamView",
+    "simulation": {"initial_state": "off"},
+    "expected": {"capability": "home_control", "verification_status": "already_satisfied", "contains": ["already off"]}
+  },
+  {
+    "id": "dreamview_unverified",
+    "category": "device_verification",
+    "input": "Turn off DreamView",
+    "simulation": {"initial_state": "on", "transition": "no_change", "verify_ticks": 2},
+    "expected": {"capability": "home_control", "verification_status": "unverified", "contains": ["couldn't verify"], "forbidden": ["now off"]}
+  },
+  {
+    "id": "dreamview_offline",
+    "category": "device_verification",
+    "input": "Turn off DreamView",
+    "simulation": {"initial_state": "on", "available": false},
+    "expected": {"capability": "home_control", "verification_status": "failed", "contains": ["unavailable"], "forbidden": ["done"]}
+  },
+  {
+    "id": "dreamview_status",
+    "category": "natural_language",
+    "input": "Is the DreamView on?",
+    "sample_response": "DreamView status checked.",
+    "expected": {"route_intent": "capability", "capability": "home_status", "risk": "read_only", "response_mode": "status"}
+  },
+  {
+    "id": "pronoun_followup",
+    "category": "reference_resolution",
+    "input": "Turn it off",
+    "history": [{"role": "user", "content": "Is the DreamView on?"}, {"role": "assistant", "content": "It is on."}],
+    "simulation": {"initial_state": "on"},
+    "expected": {"capability": "home_control", "entities": ["DreamView"], "verification_status": "verified"}
+  },
+  {
+    "id": "device_followup",
+    "category": "reference_resolution",
+    "input": "The device is still on",
+    "history": [{"role": "user", "content": "Turn off DreamView"}, {"role": "assistant", "content": "The command was accepted but not verified."}],
+    "simulation": {"initial_state": "on"},
+    "expected": {"capability": "home_control", "entities": ["DreamView"], "verification_status": "verified"}
+  },
+  {
+    "id": "missing_reference",
+    "category": "clarification",
+    "input": "Turn it off",
+    "sample_response": "Which home device should I control? Please use its name.",
+    "expected": {"route_intent": "clarification", "response_mode": "clarification", "clarification": true}
+  },
+  {
+    "id": "correlate_then_off",
+    "category": "goal_planning",
+    "input": "Correlate DreamView with AI Sync Box strip and turn it off",
+    "simulation": {"initial_state": "on"},
+    "expected": {"route_intent": "compound_operation", "tool_sequence": ["home_alias", "home_control"], "risk": "mutating", "entities": ["DreamView", "AI Sync Box strip"], "verification_status": "verified"}
+  },
+  {
+    "id": "plural_followup",
+    "category": "reference_resolution",
+    "input": "Turn them on",
+    "history": [{"role": "user", "content": "Turn off the floor lamp and tv light"}],
+    "sample_response": "Both device targets were retained.",
+    "expected": {"capability": "home_control", "response_mode": "command_ack", "entities": ["floor lamp", "tv light"]}
+  },
+  {
+    "id": "normal_it_not_rewritten",
+    "category": "context_isolation",
+    "input": "I liked it because the ending was thoughtful",
+    "sample_response": "That thoughtful ending clearly landed for you.",
+    "expected": {"route_intent": "conversation", "memory_policy": "relevant_only", "response_mode": "brief"}
+  },
+  {
+    "id": "deep_mode",
+    "category": "response_mode",
+    "input": "Explain the memory architecture in depth",
+    "sample_response": "A focused architecture explanation.",
+    "expected": {"route_intent": "conversation", "response_mode": "deep"}
+  },
+  {
+    "id": "no_topic_loop",
+    "category": "relevance",
+    "input": "Let's discuss something new",
+    "sample_response": "Sure. What's on your mind?",
+    "recent_responses": ["We can keep discussing yesterday's server migration and its details."],
+    "expected": {"route_intent": "conversation", "max_recent_similarity": 0.4, "max_words": 12}
+  }
+]
