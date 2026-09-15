@@ -98,6 +98,33 @@ Chat commands:
 
 Posts, replies, and DMs always require a fresh approval.
 
+### Opt-in autonomous X posts
+
+Curie's autonomous poster is a separate operator mandate; it does not weaken
+fresh approval for manual `/x post`, reply, or DM commands. It is off by default,
+requires the owner's OAuth connection and an explicit topic allowlist, and has a
+non-configurable ceiling of 40 original posts per local day. A restart never
+releases missed posts in a burst. Current-event claims, financial/medical/legal
+advice, links, mentions, hashtags, cashtags, and near-duplicate posts are rejected.
+
+Start in preview mode:
+
+```dotenv
+X_AUTOPOST_ENABLED=true
+X_AUTOPOST_LIVE=false
+X_AUTOPOST_OWNER_ID=YOUR_INTERNAL_MASTER_USER_ID
+X_AUTOPOST_TOPICS=science,creative technology,curiosity
+X_AUTOPOST_TIMEZONE=Asia/Hong_Kong
+X_AUTOPOST_WINDOW_START_HOUR=8
+X_AUTOPOST_WINDOW_END_HOUR=23
+X_AUTOPOST_DAILY_MAX=40
+```
+
+Review the generated previews and audit records before setting
+`X_AUTOPOST_LIVE=true`. Keep the daily target well below 40 unless there is a
+genuine editorial reason for that volume. X's account, API, automation, and spam
+policies still apply independently of Curie's cap.
+
 ## GitHub
 
 Create a fine-grained personal access token restricted to Curie's repositories.

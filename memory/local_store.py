@@ -37,6 +37,13 @@ def _connect() -> sqlite3.Connection:
             internal_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS session_metadata (
+            platform TEXT NOT NULL, internal_id TEXT NOT NULL,
+            key TEXT NOT NULL, value_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY(platform, internal_id, key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_metadata_owner
+            ON session_metadata(internal_id, platform, updated_at);
         CREATE TABLE IF NOT EXISTS adaptive_memories (
             id TEXT PRIMARY KEY, internal_id TEXT NOT NULL, document_json TEXT NOT NULL
         );
@@ -328,6 +335,53 @@ def reset_history(platform: str, internal_id: str) -> None:
             "DELETE FROM messages WHERE platform=? AND internal_id=?",
             (platform, str(internal_id)),
         )
+        # A reset starts a genuinely fresh conversation. Keep unrelated session
+        # preferences, but never carry a model-generated working summary into it.
+        conn.execute(
+            "DELETE FROM session_metadata "
+            "WHERE platform=? AND internal_id=? AND key='working_context_v1'",
+            (platform, str(internal_id)),
+        )
+
+
+def get_session_metadata(platform: str, internal_id: str) -> dict:
+    """Return owner/session-scoped metadata without exposing other sessions."""
+    with _LOCK, _managed_connection() as conn:
+        rows = conn.execute(
+            "SELECT key,value_json FROM session_metadata "
+            "WHERE platform=? AND internal_id=?",
+            (str(platform), str(internal_id)),
+        ).fetchall()
+    result = {}
+    for row in rows:
+        try:
+            result[str(row["key"])] = json.loads(row["value_json"])
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def set_session_metadata(
+    platform: str, internal_id: str, key: str, value: object
+) -> None:
+    """Persist one JSON-safe metadata value for a single conversation session."""
+    clean_key = str(key).strip()
+    if not clean_key or len(clean_key) > 96:
+        raise ValueError("Session metadata key must be between 1 and 96 characters")
+    now = datetime.now(timezone.utc).isoformat()
+    with _LOCK, _managed_connection() as conn:
+        conn.execute(
+            "INSERT INTO session_metadata(platform,internal_id,key,value_json,updated_at) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(platform,internal_id,key) DO UPDATE SET "
+            "value_json=excluded.value_json,updated_at=excluded.updated_at",
+            (
+                str(platform),
+                str(internal_id),
+                clean_key,
+                json.dumps(value, default=str),
+                now,
+            ),
+        )
 
 
 def purge_expired_records(
@@ -380,6 +434,12 @@ class LocalSessionManager:
 
     def reset_session(self, platform: str, internal_id: str):
         reset_history(platform, internal_id)
+
+    def get_metadata(self, platform: str, internal_id: str):
+        return get_session_metadata(platform, internal_id)
+
+    def set_metadata(self, platform: str, internal_id: str, key: str, value):
+        set_session_metadata(platform, internal_id, key, value)
 
     def close(self):
         return None

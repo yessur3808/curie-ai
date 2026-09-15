@@ -780,6 +780,7 @@ def main():
 
     # Initialize proactive messaging after outbound connectors start below.
     proactive_service = None
+    x_autopost_service = None
     enable_proactive = os.getenv("ENABLE_PROACTIVE_MESSAGING", "true").lower() == "true"
     if not enable_proactive:
         logger.info(
@@ -894,6 +895,16 @@ def main():
         else:
             logger.info("Proactive messaging has no push-capable connector to use")
 
+    if os.getenv("X_AUTOPOST_ENABLED", "false").lower() == "true":
+        try:
+            from services.x_autopost import XAutopostService, status_snapshot
+
+            x_autopost_service = XAutopostService()
+            x_autopost_service.start()
+            logger.info("X autopost status: %s", status_snapshot())
+        except Exception as e:
+            logger.error("Failed to start X autopost service: %s", e, exc_info=True)
+
     if run_coder_flag:
         run_coder_interactive()
 
@@ -916,6 +927,8 @@ def main():
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:
+        if x_autopost_service:
+            x_autopost_service.stop()
         if proactive_service:
             proactive_service.stop()
         connector_registry.stop_all()

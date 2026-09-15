@@ -258,13 +258,16 @@ class SessionManager:
         )
 
     def reset_session(self, channel: str, user_id: str | int) -> None:
-        """Wipe the conversation history for this user (keeps metadata)."""
+        """Wipe conversation history and its derived working-context summary."""
         key = self._session_key(channel, user_id)
         # Ensure the session document exists with the full schema before resetting.
         self._get_or_create(channel, user_id)
         self._col.update_one(
             {"_id": key},
-            {"$set": {"messages": [], "updated_at": self._now()}},
+            {
+                "$set": {"messages": [], "updated_at": self._now()},
+                "$unset": {"metadata.working_context_v1": ""},
+            },
         )
         logger.info("Session reset  key=%s", key)
 

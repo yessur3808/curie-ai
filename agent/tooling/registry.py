@@ -312,6 +312,7 @@ def _build_runtime_registry() -> ToolRegistry:
         ("cron", "Cron Runner", "services.cron_runner", (), "service", ("scheduling",)),
         ("sessions", "Session Manager", "memory.session_manager", (), "service", ("memory",)),
         ("proactive_messaging", "Proactive Messaging", "services.proactive_messaging", (), "service", ("proactive",)),
+        ("x_autopost", "X Autopost", "services.x_autopost", (), "service", ("x", "social", "automation")),
         ("canvas", "Live Canvas", "cli.canvas_webview", (), "canvas", ("canvas", "nodes")),
         ("dashboard", "Agent Dashboard", "cli.agent_webview", (), "canvas", ("dashboard",)),
     )

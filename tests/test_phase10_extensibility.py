@@ -57,8 +57,8 @@ def test_sqlite_migrations_support_forward_and_rollback():
         "CREATE TABLE adaptive_memories(id TEXT PRIMARY KEY, internal_id TEXT, document_json TEXT);"
         "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT, applied_at TEXT);"
     )
-    assert apply_migrations(connection) == 2
-    assert current_version(connection) == 2
+    assert apply_migrations(connection) == 3
+    assert current_version(connection) == 3
     indexes = {
         row[0]
         for row in connection.execute(
@@ -67,6 +67,10 @@ def test_sqlite_migrations_support_forward_and_rollback():
     }
     assert "idx_messages_owner_time" in indexes
     assert "idx_adaptive_memories_owner" in indexes
+    assert "idx_session_metadata_owner" in indexes
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='session_metadata'"
+    ).fetchone()
     assert rollback_migrations(connection, 0) == 0
     assert apply_migrations(connection, 1) == 1
 

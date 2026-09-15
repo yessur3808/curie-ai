@@ -36,6 +36,22 @@ MIGRATIONS = (
         ),
         ("DROP INDEX IF EXISTS idx_adaptive_memories_owner",),
     ),
+    Migration(
+        3,
+        "session_working_context",
+        (
+            "CREATE TABLE IF NOT EXISTS session_metadata ("
+            "platform TEXT NOT NULL, internal_id TEXT NOT NULL, key TEXT NOT NULL, "
+            "value_json TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "PRIMARY KEY(platform, internal_id, key))",
+            "CREATE INDEX IF NOT EXISTS idx_session_metadata_owner "
+            "ON session_metadata(internal_id, platform, updated_at)",
+        ),
+        (
+            "DROP INDEX IF EXISTS idx_session_metadata_owner",
+            "DROP TABLE IF EXISTS session_metadata",
+        ),
+    ),
 )
 
 
