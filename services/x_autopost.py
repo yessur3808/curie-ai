@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
+from agent.persona_contract import apply_persona_contract
 from memory.local_store import list_personal_items, save_personal_item
 
 logger = logging.getLogger(__name__)
@@ -77,9 +78,12 @@ class XAutopostConfig:
             for item in os.getenv("X_AUTOPOST_TOPICS", "").split(",")
             if item.strip()
         )[:12]
-        timezone_name = os.getenv(
-            "X_AUTOPOST_TIMEZONE", os.getenv("DEFAULT_TIMEZONE", "UTC")
-        ).strip() or "UTC"
+        timezone_name = (
+            os.getenv(
+                "X_AUTOPOST_TIMEZONE", os.getenv("DEFAULT_TIMEZONE", "UTC")
+            ).strip()
+            or "UTC"
+        )
         try:
             ZoneInfo(timezone_name)
         except ZoneInfoNotFoundError:
@@ -87,7 +91,9 @@ class XAutopostConfig:
         return cls(
             enabled=_truthy(os.getenv("X_AUTOPOST_ENABLED")),
             live=_truthy(os.getenv("X_AUTOPOST_LIVE")),
-            owner_id=os.getenv("X_AUTOPOST_OWNER_ID", os.getenv("MASTER_USER_ID", "")).strip(),
+            owner_id=os.getenv(
+                "X_AUTOPOST_OWNER_ID", os.getenv("MASTER_USER_ID", "")
+            ).strip(),
             topics=topics,
             timezone_name=timezone_name,
             window_start_hour=_bounded_int(
@@ -166,9 +172,14 @@ def validate_autopost_text(text: str, recent: list[str] | tuple[str, ...] = ()) 
     if _TAG.search(clean):
         raise ValueError("Autoposts cannot use hashtags or cashtags")
     if _RISKY_ADVICE.search(clean) or _CURRENT_EVENT.search(clean):
-        raise ValueError("Autopost contains advice or an unverified current-event claim")
+        raise ValueError(
+            "Autopost contains advice or an unverified current-event claim"
+        )
     for prior in recent[-200:]:
-        if SequenceMatcher(None, clean.casefold(), str(prior).casefold()).ratio() >= 0.76:
+        if (
+            SequenceMatcher(None, clean.casefold(), str(prior).casefold()).ratio()
+            >= 0.76
+        ):
             raise ValueError("Autopost is too similar to recent content")
     return clean
 
@@ -187,6 +198,24 @@ def _save_state(owner_id: str, state: dict[str, Any]) -> None:
 
 def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def build_autopost_prompt(topic: str, recent: list[str]) -> str:
+    """Build a public-post prompt using Curie's complete active persona."""
+    task = (
+        "Write one original X post about this operator-approved topic: "
+        f"{topic}. Maximum 240 characters. Curie must be recognizable through her "
+        "warm scientific curiosity, precise observation, friendly candor, light French "
+        "rhythm, and occasional understated wit. A short natural French expression may "
+        "appear when it genuinely fits, but do not force one and do not use the same "
+        "mannerism repeatedly. Write an evergreen observation or question, not generic "
+        "brand content. Do not include news, live claims, financial, medical, or legal "
+        "advice, calls to action, links, mentions, hashtags, cashtags, private facts, or "
+        "claims of having senses or physical experiences. Do not repeat these recent posts:\n"
+        + "\n".join(f"- {item}" for item in recent[-12:])
+        + "\nReturn only the post text."
+    )
+    return apply_persona_contract(task, medium="public X post")
 
 
 class XAutopostService:
@@ -235,16 +264,13 @@ class XAutopostService:
         local_day = now.astimezone(self.config.timezone).date().isoformat()
         if state.get("local_day") == local_day:
             return state
-        schedule = build_daily_schedule(
-            date.fromisoformat(local_day), self.config
-        )
+        schedule = build_daily_schedule(date.fromisoformat(local_day), self.config)
         return {
             "id": state.get("id", _STATE_SOURCE_ID),
             "version": 1,
             "local_day": local_day,
             "schedule": [
-                {"due_at": value.isoformat(), "status": "pending"}
-                for value in schedule
+                {"due_at": value.isoformat(), "status": "pending"} for value in schedule
             ],
             "posted_count": 0,
             "halted_for_day": False,
@@ -256,17 +282,7 @@ class XAutopostService:
 
         topic = random.SystemRandom().choice(self.config.topics)
         recent = [str(item.get("text", "")) for item in state.get("recent_posts", [])]
-        prompt = (
-            "Write one original X post for Curie, a warm, curious, scientifically "
-            "minded AI companion. It should sound natural, concise, lightly witty, "
-            "and never over-the-top. Write an evergreen observation or question "
-            f"about this operator-approved topic: {topic}. Maximum 240 characters. "
-            "Do not include news, live claims, financial/medical/legal advice, calls "
-            "to action, links, mentions, hashtags, cashtags, private facts, or claims "
-            "of having senses or experiences. Do not repeat these recent posts:\n"
-            + "\n".join(f"- {item}" for item in recent[-12:])
-            + "\nReturn only the post text."
-        )
+        prompt = build_autopost_prompt(topic, recent)
         response = await asyncio.to_thread(
             ask_best_provider, prompt, temperature=0.75, max_tokens=100
         )
@@ -286,7 +302,10 @@ class XAutopostService:
             return {"status": "blocked", "reasons": blockers}
 
         state = self._ensure_today(_load_state(self.config.owner_id), now)
-        if state.get("halted_for_day") or int(state.get("posted_count", 0)) >= self.config.daily_max:
+        if (
+            state.get("halted_for_day")
+            or int(state.get("posted_count", 0)) >= self.config.daily_max
+        ):
             _save_state(self.config.owner_id, state)
             return {"status": "daily_complete"}
 

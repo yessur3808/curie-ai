@@ -60,7 +60,7 @@ class CodeReviewer:
             - summary: Summary of the review
         """
         context = f"File: {file_path}\n" if file_path else ""
-        prompt = (
+        task_prompt = (
             f"You are an expert code reviewer. Review the following code changes:\n\n"
             f"{context}"
             f"```diff\n{diff_content}\n```\n\n"
@@ -70,6 +70,14 @@ class CodeReviewer:
             f"3. Suggestions for improvement\n"
             f"4. Overall summary\n\n"
             f"Format your response as JSON with keys: score, issues, suggestions, summary"
+        )
+
+        from agent.persona_contract import apply_persona_contract
+
+        prompt = apply_persona_contract(
+            task_prompt,
+            medium="structured code-review report",
+            structured_output=True,
         )
 
         response = llm.manager.ask_llm(
@@ -162,7 +170,7 @@ class CodeReviewer:
             if len(content) > MAX_FILE_CONTENT_LENGTH:
                 truncated_content += "\n\n... (content truncated)"
 
-            prompt = (
+            task_prompt = (
                 f"You are an expert code reviewer. Review the following file:\n\n"
                 f"File: {file_path}\n\n"
                 f"```\n{truncated_content}\n```\n\n"
@@ -173,6 +181,14 @@ class CodeReviewer:
                 f"4. Performance considerations\n"
                 f"5. Suggestions for improvement\n\n"
                 f"Format as JSON with keys: score, issues, suggestions, summary"
+            )
+
+            from agent.persona_contract import apply_persona_contract
+
+            prompt = apply_persona_contract(
+                task_prompt,
+                medium="structured code-review report",
+                structured_output=True,
             )
 
             response = llm.manager.ask_llm(

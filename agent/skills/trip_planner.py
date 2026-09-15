@@ -25,6 +25,7 @@ import logging
 import re
 from typing import Optional
 
+from agent.persona_contract import apply_persona_contract
 from utils.formatting import escape_markdown
 
 logger = logging.getLogger(__name__)
@@ -279,6 +280,12 @@ async def handle_trip_query(
     else:
         # General travel question — pass through as-is
         prompt = _GENERAL_TRAVEL_PROMPT.format(question=text)
+
+    prompt = apply_persona_contract(
+        prompt,
+        medium="travel planning and practical written advice",
+        compact=compact,
+    )
 
     # Token budget: pass None for fully dynamic allocation so the model uses all
     # available context-window space.  For cloud providers, None means "use the

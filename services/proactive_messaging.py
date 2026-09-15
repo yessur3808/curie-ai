@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from agent.persona_contract import apply_persona_contract
 from memory import UserManager
 from memory.session_store import get_session_manager
 from services.proactive_policy import delivery_allowed, delivery_updates
@@ -65,13 +66,34 @@ _CHECK_IN_MESSAGES = (
 )
 _CONVERSATIONAL_FALLBACKS = (
     ("project spark", "What idea has been quietly tugging at your attention today?"),
-    ("curiosity", "A small question for you: what have you been unexpectedly curious about lately?"),
-    ("playful hypothetical", "Suppose you had a completely free evening and no obligations. What would you actually choose to do?"),
-    ("daily moment", "Tell me one oddly satisfying thing that happened today, however small."),
-    ("creative thought", "If we could turn one of your half-formed ideas into something real this week, which one deserves the chance?"),
-    ("opinion", "What is something everyone seems to love that you simply do not understand?"),
-    ("learning", "What is one subject you would happily disappear into for a few hours if time allowed?"),
-    ("evening reflection", "Before the day runs away entirely, what part of it felt most like yours?"),
+    (
+        "curiosity",
+        "A small question for you: what have you been unexpectedly curious about lately?",
+    ),
+    (
+        "playful hypothetical",
+        "Suppose you had a completely free evening and no obligations. What would you actually choose to do?",
+    ),
+    (
+        "daily moment",
+        "Tell me one oddly satisfying thing that happened today, however small.",
+    ),
+    (
+        "creative thought",
+        "If we could turn one of your half-formed ideas into something real this week, which one deserves the chance?",
+    ),
+    (
+        "opinion",
+        "What is something everyone seems to love that you simply do not understand?",
+    ),
+    (
+        "learning",
+        "What is one subject you would happily disappear into for a few hours if time allowed?",
+    ),
+    (
+        "evening reflection",
+        "Before the day runs away entirely, what part of it felt most like yours?",
+    ),
 )
 _RELATIONAL_RISK = re.compile(
     r"\b(?:you only need me|do not leave me|don't leave me|i need you|i miss you|"
@@ -81,8 +103,13 @@ _RELATIONAL_RISK = re.compile(
 
 
 def _message_topic(message: str) -> str:
-    words = [word.casefold() for word in _WORD.findall(message) if word.casefold() not in _STOPWORDS]
+    words = [
+        word.casefold()
+        for word in _WORD.findall(message)
+        if word.casefold() not in _STOPWORDS
+    ]
     return " ".join(words[:3]) or "general check-in"
+
 
 # ---------------------------------------------------------------------------
 # Platform column mappings — single source of truth used by both the reminder
@@ -552,10 +579,15 @@ class ProactiveMessagingService:
         if isinstance(last_generation, datetime):
             if last_generation.tzinfo is None:
                 last_generation = last_generation.replace(tzinfo=timezone.utc)
-            cooldown_hours = max(1.0, float(user_profile.get(
-                "proactive_generation_cooldown_hours",
-                os.getenv("PROACTIVE_GENERATION_COOLDOWN_HOURS", "4"),
-            )))
+            cooldown_hours = max(
+                1.0,
+                float(
+                    user_profile.get(
+                        "proactive_generation_cooldown_hours",
+                        os.getenv("PROACTIVE_GENERATION_COOLDOWN_HOURS", "4"),
+                    )
+                ),
+            )
             if now - last_generation < timedelta(hours=cooldown_hours):
                 return
 
@@ -614,9 +646,7 @@ class ProactiveMessagingService:
                 ]
         except Exception:
             pass
-        negative_signals = max(
-            0, int(user_profile.get("proactive_rejection_count", 0))
-        )
+        negative_signals = max(0, int(user_profile.get("proactive_rejection_count", 0)))
         min_interval_hours = float(min_interval_hours) * min(4, 1 + negative_signals)
 
         # Check if enough time has passed
@@ -716,8 +746,16 @@ class ProactiveMessagingService:
 
             briefing = daily_briefing_candidate(str(internal_id), user_profile)
             if briefing:
-                candidates.append({**briefing, "kind": "deadline", "confidence": 1.0,
-                                   "urgency": .8, "usefulness": .95, "priority": .9})
+                candidates.append(
+                    {
+                        **briefing,
+                        "kind": "deadline",
+                        "confidence": 1.0,
+                        "urgency": 0.8,
+                        "usefulness": 0.95,
+                        "priority": 0.9,
+                    }
+                )
         except Exception as exc:
             logger.debug("Personal agenda briefing unavailable: %s", exc)
 
@@ -739,12 +777,18 @@ class ProactiveMessagingService:
                 if prediction and self._prediction_is_grounded(
                     prediction, user_profile, history
                 ):
-                    candidates.append({
-                        "message": str(prediction["suggestion"]).strip(),
-                        "reason": str(prediction["reason"]), "topic": _message_topic(str(prediction["suggestion"])),
-                        "kind": "routine", "confidence": prediction.get("confidence", 0),
-                        "urgency": .25, "usefulness": .7, "priority": .6,
-                    })
+                    candidates.append(
+                        {
+                            "message": str(prediction["suggestion"]).strip(),
+                            "reason": str(prediction["reason"]),
+                            "topic": _message_topic(str(prediction["suggestion"])),
+                            "kind": "routine",
+                            "confidence": prediction.get("confidence", 0),
+                            "urgency": 0.25,
+                            "usefulness": 0.7,
+                            "priority": 0.6,
+                        }
+                    )
             except Exception as exc:
                 logger.debug("Proactive prediction unavailable: %s", exc)
 
@@ -760,7 +804,9 @@ class ProactiveMessagingService:
             for role, message in history
             if role == "assistant" and message.strip()
         }
-        recent_topics = list((user_profile.get("proactive_topic_last_sent") or {}).keys())[-3:]
+        recent_topics = list(
+            (user_profile.get("proactive_topic_last_sent") or {}).keys()
+        )[-3:]
         fallback_topic, fallback = next(
             (
                 (topic, message)
@@ -769,16 +815,30 @@ class ProactiveMessagingService:
             ),
             _CONVERSATIONAL_FALLBACKS[len(history) % len(_CONVERSATIONAL_FALLBACKS)],
         )
-        candidates.append({"message": fallback, "reason":
-                           "You opted in and the configured check-in interval elapsed.",
-                           "topic": fallback_topic, "kind": "check_in", "confidence": 1.0,
-                           "urgency": 0, "usefulness": .35, "priority": .3})
+        candidates.append(
+            {
+                "message": fallback,
+                "reason": "You opted in and the configured check-in interval elapsed.",
+                "topic": fallback_topic,
+                "kind": "check_in",
+                "confidence": 1.0,
+                "urgency": 0,
+                "usefulness": 0.35,
+                "priority": 0.3,
+            }
+        )
         from services.proactive_policy import rank_candidates
 
         selected = rank_candidates(candidates, user_profile)[0]
         self._generation_reasons[str(internal_id)] = str(selected["reason"])[:180]
-        self._generation_topics[str(internal_id)] = str(selected.get("topic") or "general check-in")[:80]
-        logger.info("Selected proactive candidate for %s: %s", internal_id, selected["ranking_reason"])
+        self._generation_topics[str(internal_id)] = str(
+            selected.get("topic") or "general check-in"
+        )[:80]
+        logger.info(
+            "Selected proactive candidate for %s: %s",
+            internal_id,
+            selected["ranking_reason"],
+        )
         return str(selected["message"])
 
     async def _generate_conversational_candidate(
@@ -799,14 +859,20 @@ class ProactiveMessagingService:
             "something the user has been learning or thinking about",
             "a warm evening or morning reflection",
         ]
-        if any(re.search(r"\b(?:project|idea|build|create|design)\b", item, re.I) for item in user_history):
+        if any(
+            re.search(r"\b(?:project|idea|build|create|design)\b", item, re.I)
+            for item in user_history
+        ):
             topics.extend(["a project idea or creative possibility"] * 2)
         topic = random.choice(topics)
-        context = "\n".join(f"- {item[:350]}" for item in user_history) or "- No recent user topic is available."
+        context = (
+            "\n".join(f"- {item[:350]}" for item in user_history)
+            or "- No recent user topic is available."
+        )
         avoid = "\n".join(f"- {item[:220]}" for item in recent_assistant) or "- None"
-        prompt = (
-            "Write one original unsolicited Telegram text as Curie, a warm, clever French "
-            "companion. The user explicitly wants natural friend-like, gently affectionate "
+        task_prompt = (
+            "Write one original unsolicited Telegram text as the active Curie persona. "
+            "The user explicitly wants natural friend-like, gently affectionate "
             "messages during the day. Make it feel spontaneous and specific, not like an "
             "assistant notification. Use 12 to 45 words and one coherent thought. A natural "
             "question is welcome but not mandatory. Do not say 'checking in', 'how is your day "
@@ -816,6 +882,11 @@ class ProactiveMessagingService:
             "recent assistant message. Return only the message, without quotes or labels.\n\n"
             f"Theme: {topic}\nRecent user messages:\n{context}\n"
             f"Recent assistant messages to avoid:\n{avoid}\n"
+        )
+        prompt = apply_persona_contract(
+            task_prompt,
+            medium="proactive Telegram companion message",
+            persona=getattr(self.workflow, "persona", None),
         )
         try:
             from llm.manager import ask_llm
@@ -840,7 +911,8 @@ class ProactiveMessagingService:
         ):
             return None
         if any(
-            difflib.SequenceMatcher(None, candidate.casefold(), old.casefold()).ratio() >= 0.78
+            difflib.SequenceMatcher(None, candidate.casefold(), old.casefold()).ratio()
+            >= 0.78
             for old in recent_assistant
         ):
             return None
@@ -900,7 +972,11 @@ class ProactiveMessagingService:
         # The predictor must identify at least two observations, or point to an
         # explicit recurring routine. One coincidental keyword is insufficient.
         evidence_count = int(prediction.get("evidence_count", 0) or 0)
-        recurring = bool(re.search(r"\b(?:every|daily|weekly|usually|routine|often)\b", evidence, re.I))
+        recurring = bool(
+            re.search(
+                r"\b(?:every|daily|weekly|usually|routine|often)\b", evidence, re.I
+            )
+        )
         matching_messages = sum(
             bool(set(_WORD.findall(str(message).casefold())) & reason_words)
             for role, message in history

@@ -9,6 +9,7 @@ from services.x_autopost import (
     HARD_DAILY_CAP,
     XAutopostConfig,
     XAutopostService,
+    build_autopost_prompt,
     build_daily_schedule,
     validate_autopost_text,
 )
@@ -33,9 +34,7 @@ def _config(**overrides):
 
 def test_daily_schedule_is_randomized_but_evenly_spread_and_hard_capped():
     config = _config()
-    schedule = build_daily_schedule(
-        date(2026, 9, 15), config, rng=random.Random(7)
-    )
+    schedule = build_daily_schedule(date(2026, 9, 15), config, rng=random.Random(7))
 
     assert len(schedule) == HARD_DAILY_CAP
     assert schedule == sorted(schedule)
@@ -73,6 +72,20 @@ def test_live_mode_requires_connected_x_account():
     assert config.blockers(account_connected=False) == ["x_account_not_connected"]
 
 
+def test_autopost_prompt_uses_complete_active_curie_persona():
+    prompt = build_autopost_prompt(
+        "science",
+        ["A prior observation."],
+    )
+
+    assert "[ACTIVE PERSONA: Curie]" in prompt
+    assert "complete active personality remains in force" in prompt
+    assert "public X post" in prompt
+    assert "light French identity" in prompt
+    assert "operator-approved topic: science" in prompt
+    assert "A prior observation." in prompt
+
+
 @pytest.mark.asyncio
 async def test_dry_run_processes_only_one_overdue_slot_and_persists_state(
     tmp_path, monkeypatch
@@ -93,3 +106,39 @@ async def test_dry_run_processes_only_one_overdue_slot_and_persists_state(
     assert statuses.count("previewed") == 1
     assert statuses.count("missed") == HARD_DAILY_CAP - 1
     assert state["posted_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_live_connected_mode_publishes_and_records_post_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
+    service = XAutopostService(_config(live=True, daily_max=1))
+
+    with (
+        patch(
+            "services.credential_vault.get_credential",
+            return_value={"connected": True},
+        ),
+        patch.object(
+            service,
+            "_generate",
+            return_value="Curiosity is disciplined wonder, with better notes. Voilà.",
+        ),
+        patch(
+            "connectors.twitter.create_post",
+            return_value={"data": {"id": "post-42"}},
+        ) as create_post,
+    ):
+        result = await service.check_once(
+            now=datetime(2026, 9, 15, 23, 30, tzinfo=timezone.utc)
+        )
+
+    assert result == {
+        "status": "posted",
+        "post_id": "post-42",
+        "text": "Curiosity is disciplined wonder, with better notes. Voilà.",
+    }
+    create_post.assert_awaited_once()
+    state = local_store.list_personal_items("owner-1", "x_autopost_state")[-1]
+    assert state["posted_count"] == 1
+    assert state["schedule"][0]["status"] == "posted"
+    assert state["schedule"][0]["post_id"] == "post-42"

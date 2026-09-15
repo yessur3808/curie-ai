@@ -151,7 +151,7 @@ class PerformanceAnalyzer:
             return "AI analysis not available - no LLM model configured"
 
         lang_context = f" ({language})" if language else ""
-        prompt = (
+        task_prompt = (
             f"You are an expert performance engineer. Analyze the following code{lang_context} "
             f"for performance issues and optimization opportunities.\n\n"
             f"Code:\n```\n{code}\n```\n\n"
@@ -165,6 +165,12 @@ class PerformanceAnalyzer:
         )
 
         try:
+            from agent.persona_contract import apply_persona_contract
+
+            prompt = apply_persona_contract(
+                task_prompt,
+                medium="technical performance-analysis report",
+            )
             analysis = llm.manager.ask_llm(
                 prompt, model_name=self.model_name, max_tokens=1536
             )

@@ -33,6 +33,7 @@ from memory import UserManager
 from memory.session_store import get_session_manager
 from llm import manager as llm_manager
 from agent.personality_context import PersonalityContext
+from agent.persona_contract import build_persona_contract
 from agent.provenance import response_provenance
 from agent.orchestration.response_policy import (  # noqa: F401
     ResponsePolicy,
@@ -1594,10 +1595,12 @@ class ChatWorkflow:
         else:
             lines = []
 
-            system_prompt = self.persona.get(
-                "system_prompt", "You are a helpful assistant."
+            lines.append(
+                build_persona_contract(
+                    self.persona,
+                    medium="direct conversation and task response",
+                )
             )
-            lines.append(system_prompt)
 
             lines.append("\n[PERSONALITY STATE]")
             lines.extend(personality_directives)

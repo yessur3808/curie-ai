@@ -187,10 +187,11 @@ def test_salient_episode_capture_is_bounded_private_and_searchable(
         adaptive.get_relevant_memories("u1", "Curie memory system")[0]["id"]
         == episode["id"]
     )
+    synthetic_secret = "sk-" + "1234567890" + "abcdefghijklmnop"
     assert (
         adaptive.record_conversation_episode(
             "u1",
-            "Remember this API key sk-1234567890abcdefghijklmnop",
+            f"Remember this API key {synthetic_secret}",
             source_channel="telegram",
         )
         is None

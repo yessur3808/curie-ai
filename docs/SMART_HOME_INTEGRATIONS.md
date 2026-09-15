@@ -77,7 +77,7 @@ Curie filters the account to air conditioners, air purifiers, humidifiers, and d
 Install the optional dependencies and configure each device's fixed LAN address and 32-character miIO token:
 
 ```dotenv
-MI_HOME_DEVICES_JSON=[{"name":"Office Air Purifier","host":"192.168.1.52","token":"0123456789abcdef0123456789abcdef","model":"zhimi.airpurifier","properties":["power","temperature","humidity","aqi","filter_life_remaining"]}]
+MI_HOME_DEVICES_JSON=[{"name":"Office Air Purifier","host":"192.168.1.52","token":"YOUR_32_CHARACTER_MIIO_TOKEN","model":"zhimi.airpurifier","properties":["power","temperature","humidity","aqi","filter_life_remaining"]}]
 ```
 
 The default generic commands are `get_prop` and `set_power`. Devices with different firmware methods can override `status_method`, `set_power_method`, `power_property`, `on_params`, and `off_params` in the entry. `python-miio` is an unofficial local protocol implementation, so verify each model before relying on it for safety-critical automation.

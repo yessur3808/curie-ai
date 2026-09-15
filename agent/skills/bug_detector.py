@@ -277,7 +277,7 @@ class BugDetector:
             return "AI analysis not available - no LLM model configured"
 
         lang_context = f" ({language})" if language else ""
-        prompt = (
+        task_prompt = (
             f"You are an expert code reviewer and bug detector. Analyze the following code{lang_context} "
             f"for potential bugs, security vulnerabilities, and code quality issues.\n\n"
             f"Code:\n```\n{code}\n```\n\n"
@@ -290,6 +290,12 @@ class BugDetector:
         )
 
         try:
+            from agent.persona_contract import apply_persona_contract
+
+            prompt = apply_persona_contract(
+                task_prompt,
+                medium="technical bug-analysis report",
+            )
             analysis = llm.manager.ask_llm(
                 prompt, model_name=self.model_name, max_tokens=1024
             )

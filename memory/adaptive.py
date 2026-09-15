@@ -146,9 +146,7 @@ def _normalize_stored_memory(document: dict, internal_id: str) -> dict:
         updates["status"] = (
             "recorded"
             if kind == "episode"
-            else "verified"
-            if source == "explicit_user_statement"
-            else "hypothesis"
+            else "verified" if source == "explicit_user_statement" else "hypothesis"
         )
     if item.get("confidence") is None:
         updates["confidence"] = (
@@ -547,9 +545,7 @@ def get_relevant_memories(internal_id: str, query: str, limit: int = 8) -> list[
                 _RETRIEVAL_PROJECTION,
             ).limit(max(100, min(int(os.getenv("MEMORY_MAX_CANDIDATES", "500")), 2000)))
         )
-        docs = [
-            _normalize_stored_memory(item, str(internal_id)) for item in docs
-        ]
+        docs = [_normalize_stored_memory(item, str(internal_id)) for item in docs]
     return rank_memories(query, docs, limit=limit)
 
 
@@ -943,7 +939,7 @@ def generate_helpful_prediction(
     ):
         return None
     context = "\n".join(f"{role}: {msg[:300]}" for role, msg in history[-10:])
-    prompt = (
+    task_prompt = (
         "Predict one small, concrete way a personal assistant might help next. Base it only "
         "on repeated or explicit evidence below. Return JSON with keys suggestion, reason, "
         "confidence (0 to 1), and evidence_count (number of distinct supporting observations). "
@@ -954,8 +950,14 @@ def generate_helpful_prediction(
         f"Profile: {json.dumps(profile, default=str)[:3000]}\nHistory:\n{context}\n\nJSON only:"
     )
     try:
+        from agent.persona_contract import apply_persona_contract
         from llm.manager import ask_llm
 
+        prompt = apply_persona_contract(
+            task_prompt,
+            medium="proactive recommendation",
+            structured_output=True,
+        )
         raw = ask_llm(prompt, temperature=0.1, max_tokens=220, role="reasoning")
         match = re.search(r"\{.*?\}", raw, re.S)
         data = json.loads(match.group(0)) if match else {}
