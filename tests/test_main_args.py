@@ -14,7 +14,9 @@ def test_legacy_agent_loaders_are_retired():
 def test_import_verifier_never_prints_token_values():
     from pathlib import Path
 
-    source = (Path(__file__).resolve().parents[1] / "scripts" / "test_import.py").read_text()
+    source = (
+        Path(__file__).resolve().parents[1] / "scripts" / "test_import.py"
+    ).read_text()
     assert "TELEGRAM_BOT_TOKEN', 'NOT SET')[:" not in source
     assert 'os.getenv("TELEGRAM_BOT_TOKEN")[:' not in source
 
@@ -24,6 +26,25 @@ def test_connector_flags_are_registered_once():
         args = main.parse_args()
     assert args.telegram is True
     assert args.slack is True
+
+
+def test_api_connector_uses_configured_port(monkeypatch):
+    monkeypatch.setenv("CURIE_API_PORT", "8010")
+    with patch("main.uvicorn.run") as run:
+        main.run_api()
+    run.assert_called_once_with(
+        main.fastapi_app,
+        host="0.0.0.0",
+        port=8010,
+        log_level="info",
+    )
+
+
+def test_api_connector_falls_back_from_invalid_port(monkeypatch):
+    monkeypatch.setenv("CURIE_API_PORT", "not-a-port")
+    with patch("main.uvicorn.run") as run:
+        main.run_api()
+    assert run.call_args.kwargs["port"] == 8000
 
 
 def test_logging_suppresses_token_bearing_http_urls():
