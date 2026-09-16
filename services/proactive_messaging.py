@@ -65,7 +65,7 @@ _CHECK_IN_MESSAGES = (
     "Quick check-in: how’s your day treating you?",
 )
 _CONVERSATIONAL_FALLBACKS = (
-    ("project spark", "What idea has been quietly tugging at your attention today?"),
+    ("attention", "What has been taking up most of your attention lately?"),
     (
         "curiosity",
         "A small question for you: what have you been unexpectedly curious about lately?",
@@ -78,17 +78,14 @@ _CONVERSATIONAL_FALLBACKS = (
         "daily moment",
         "Tell me one oddly satisfying thing that happened today, however small.",
     ),
-    (
-        "creative thought",
-        "If we could turn one of your half-formed ideas into something real this week, which one deserves the chance?",
-    ),
+    ("small pleasure", "What is one small thing you have genuinely enjoyed lately?"),
     (
         "opinion",
         "What is something everyone seems to love that you simply do not understand?",
     ),
     (
-        "learning",
-        "What is one subject you would happily disappear into for a few hours if time allowed?",
+        "curiosity trail",
+        "What is the last question that sent you down a useful rabbit hole?",
     ),
     (
         "evening reflection",
@@ -100,6 +97,33 @@ _RELATIONAL_RISK = re.compile(
     r"i was waiting for you|you belong to me|choose me over|no one understands you like me)\b",
     re.I,
 )
+_NON_TOPIC_TURN = re.compile(
+    r"^(?:(?:please\s+)?(?:turn|switch|power|set|start|stop|open|close|lock|unlock|"
+    r"enable|disable|run|send|show|check|cancel|pause|resume|remind|schedule)\b|"
+    r"(?:thanks(?: a lot)?|thank you|cheers|got it|okay|ok|cool|perfect|sounds good)"
+    r"[.! ]*$)",
+    re.I,
+)
+_ACTIVITY_EVIDENCE = (
+    (re.compile(r"\bprojects?\b", re.I), re.compile(r"\bprojects?\b", re.I)),
+    (
+        re.compile(r"\b(?:work|working|job)\b", re.I),
+        re.compile(r"\b(?:work|working|job)\b", re.I),
+    ),
+    (
+        re.compile(r"\b(?:learn|learning|study|studying)\b", re.I),
+        re.compile(r"\b(?:learn|learning|study|studying)\b", re.I),
+    ),
+    (
+        re.compile(r"\b(?:sleep|sleeping|bedtime|bed|resting|rest)\b", re.I),
+        re.compile(r"\b(?:sleep|sleeping|bedtime|bed|resting|rest)\b", re.I),
+    ),
+    (re.compile(r"\bcoffee\b", re.I), re.compile(r"\bcoffee\b", re.I)),
+    (
+        re.compile(r"\b(?:lights?|darkness|dark night)\b", re.I),
+        re.compile(r"\b(?:lights?|darkness|dark night)\b", re.I),
+    ),
+)
 
 
 def _message_topic(message: str) -> str:
@@ -109,6 +133,22 @@ def _message_topic(message: str) -> str:
         if word.casefold() not in _STOPWORDS
     ]
     return " ".join(words[:3]) or "general check-in"
+
+
+def _thematic_user_history(messages: list[str]) -> list[str]:
+    """Exclude commands and acknowledgements from companion-message themes."""
+    return [message for message in messages if not _NON_TOPIC_TURN.search(message)]
+
+
+def _has_unsupported_activity_reference(
+    candidate: str, thematic_history: list[str]
+) -> bool:
+    """Reject activity references that Curie inferred rather than learned."""
+    context = "\n".join(thematic_history)
+    return any(
+        candidate_pattern.search(candidate) and not evidence_pattern.search(context)
+        for candidate_pattern, evidence_pattern in _ACTIVITY_EVIDENCE
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +600,15 @@ class ProactiveMessagingService:
             logger.debug(f"User {internal_id} is busy, skipping proactive message")
             return
 
+        # One unanswered companion message is enough. Do not stack increasingly
+        # speculative check-ins merely because the cadence timer elapsed.
+        if user_profile.get("proactive_awaiting_response") is True:
+            logger.debug(
+                "User %s has not responded to the previous proactive message; skipping",
+                internal_id,
+            )
+            return
+
         # Get last conversation time (thread-safe)
         with self.last_contact_lock:
             last_contact_time = self.last_contact.get(internal_id)
@@ -845,18 +894,17 @@ class ProactiveMessagingService:
         self, profile: dict, history: list[tuple[str, str]]
     ) -> dict | None:
         """Generate one varied, grounded companion-style text with safe fallbacks."""
-        user_history = [
+        raw_user_history = [
             str(message).strip() for role, message in history if role == "user"
         ][-6:]
+        user_history = _thematic_user_history(raw_user_history)
         recent_assistant = [
             str(message).strip() for role, message in history if role == "assistant"
         ][-6:]
         topics = [
-            "a project idea or creative possibility",
             "a thoughtful curiosity question",
             "a playful but intelligent hypothetical",
             "an ordinary moment from the user's day",
-            "something the user has been learning or thinking about",
             "a warm evening or morning reflection",
         ]
         if any(
@@ -864,6 +912,13 @@ class ProactiveMessagingService:
             for item in user_history
         ):
             topics.extend(["a project idea or creative possibility"] * 2)
+        if any(
+            re.search(r"\b(?:learn|learning|study|studying|course|class)\b", item, re.I)
+            for item in user_history
+        ):
+            topics.extend(
+                ["something the user has been learning or thinking about"] * 2
+            )
         topic = random.choice(topics)
         context = (
             "\n".join(f"- {item[:350]}" for item in user_history)
@@ -878,7 +933,10 @@ class ProactiveMessagingService:
             "question is welcome but not mandatory. Do not say 'checking in', 'how is your day "
             "going', or 'anything I can help with'. Never claim physical presence, senses, human "
             "activities, neediness, jealousy, exclusivity, waiting, or missing the user. Refer to "
-            "personal details only when they appear in the supplied history. Do not repeat a "
+            "personal details only when they appear in the supplied history. A completed device "
+            "command or acknowledgement is not a conversation theme. Do not infer a project, "
+            "work, learning, bedtime, sleep, coffee, mood, or routine from the time of day or a "
+            "device state. Do not repeat a "
             "recent assistant message. Return only the message, without quotes or labels.\n\n"
             f"Theme: {topic}\nRecent user messages:\n{context}\n"
             f"Recent assistant messages to avoid:\n{avoid}\n"
@@ -908,6 +966,7 @@ class ProactiveMessagingService:
             or candidate.startswith("[Error")
             or _SENSORY_CLAIM.search(candidate)
             or _RELATIONAL_RISK.search(candidate)
+            or _has_unsupported_activity_reference(candidate, user_history)
         ):
             return None
         if any(

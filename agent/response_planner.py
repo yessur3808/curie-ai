@@ -35,6 +35,18 @@ _CASUAL_QUIP = re.compile(
     r"\b.{0,100}[.!?]*$",
     re.I | re.S,
 )
+_SOCIAL_ACKNOWLEDGEMENT = re.compile(
+    r"^(?:thanks(?: a lot)?|thank you|cheers|got it|okay|ok|cool|perfect|"
+    r"sounds good|all right|alright)[.! ]*$",
+    re.I,
+)
+_CORRECTION = re.compile(
+    r"^(?:no[,!. ]+)?(?:there (?:is|are) (?:no|none)\b|there(?:'s| is) none\b|"
+    r"that(?:['’]s| is) not\b|i (?:do not|don['’]t) (?:have|need|want)\b|"
+    r"i(?:['’]m| am) not\b|i(?:['’]m| am) working\b.{0,120}\b"
+    r"(?:do not|don['’]t) need\b)",
+    re.I,
+)
 _COMMAND = re.compile(
     r"^(?:(?:please\s+)|(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?))?"
     r"(?:turn|switch|set|start|stop|open|close|lock|unlock|"
@@ -66,8 +78,14 @@ _FORMAL = re.compile(
 
 def _interaction_kind(text: str) -> str:
     clean = text.strip()
-    if _SOCIAL.fullmatch(clean) or _CASUAL_QUIP.fullmatch(clean):
+    if (
+        _SOCIAL.fullmatch(clean)
+        or _CASUAL_QUIP.fullmatch(clean)
+        or _SOCIAL_ACKNOWLEDGEMENT.fullmatch(clean)
+    ):
         return "social"
+    if _CORRECTION.search(clean):
+        return "correction"
     if _COMMAND.search(clean):
         return "command"
     if _FOCUSED.search(clean):
@@ -76,7 +94,16 @@ def _interaction_kind(text: str) -> str:
 
 
 def _length_target(text: str, verbosity: str, *, urgent: bool, interaction: str) -> str:
-    if urgent or verbosity == "concise" or interaction in {"social", "command"}:
+    if (
+        urgent
+        or verbosity == "concise"
+        or interaction
+        in {
+            "social",
+            "command",
+            "correction",
+        }
+    ):
         return "brief"
     if _EXPLICIT_DEPTH.search(text):
         return "deep"
@@ -157,7 +184,11 @@ def plan_response(text: str, preferences: dict | None = None) -> dict[str, Any]:
         "next_action": (
             "report_verified_result_or_blocker"
             if interaction == "command"
-            else "one_practical_step_if_useful"
+            else (
+                "none"
+                if interaction in {"social", "correction"}
+                else "one_practical_step_only_if_requested_or_materially_useful"
+            )
         ),
         "length": length,
         "personality": (
@@ -190,6 +221,17 @@ def planner_directives(plan: dict[str, Any]) -> list[str]:
             "- Command style: lead with the verified result or the blocker. Keep it to one "
             "or two crisp sentences unless safety or recovery steps require more. Do not begin "
             "with 'Certainly', 'Absolutely', 'As requested', or a recap of the command."
+        )
+    elif plan.get("interaction") == "social":
+        directives.append(
+            "- Social acknowledgement style: reply to exactly what was said, then stop. "
+            "Do not add advice, a recommendation, a question, or a new topic."
+        )
+    elif plan.get("interaction") == "correction":
+        directives.append(
+            "- Correction style: accept the concrete correction plainly and update the "
+            "context. Do not defend the earlier assumption, praise the user's preference, "
+            "invent a benefit, suggest another action, or ask a follow-up unless needed."
         )
     if plan.get("layout") == "structured":
         directives.append(

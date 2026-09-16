@@ -93,13 +93,24 @@ def test_high_confidence_model_route_is_schema_validated(monkeypatch):
     assert request.params == {"query": "chip supply"}
 
 
-def test_medium_confidence_model_route_asks_before_acting(monkeypatch):
+def test_medium_confidence_model_route_falls_back_to_conversation(monkeypatch):
     request = _resolve_with_model(
         monkeypatch,
         '{"action":"research","params":{"query":"chip supply"},"confidence":0.6,"clarification":null}',
     )
-    assert request.action == "clarify"
-    assert "research" in request.params["message"]
+    assert request is None
+
+
+def test_medium_confidence_tool_guess_does_not_turn_correction_into_question(
+    monkeypatch,
+):
+    request = _resolve_with_model(
+        monkeypatch,
+        '{"action":"inspect_project","params":{},"confidence":0.5,'
+        '"clarification":"What project do you mean?"}',
+        text="There is no project",
+    )
+    assert request is None
 
 
 @pytest.mark.parametrize(

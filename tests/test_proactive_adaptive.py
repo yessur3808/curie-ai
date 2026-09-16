@@ -198,6 +198,28 @@ async def test_recent_generation_attempt_skips_regeneration():
 
 
 @pytest.mark.asyncio
+async def test_unanswered_proactive_message_does_not_stack_another():
+    service = ProactiveMessagingService(
+        SimpleNamespace(persona={}), connectors={"telegram": AsyncMock()}
+    )
+    profile = {
+        "proactive_messaging_enabled": True,
+        "proactive_awaiting_response": True,
+        "proactive_quiet_hours": {"start": 0, "end": 0},
+    }
+    with patch(
+        "services.proactive_messaging.UserManager.get_user_profile",
+        return_value=profile,
+    ), patch.object(
+        service, "_generate_proactive_message", new=AsyncMock()
+    ) as generate:
+        await service._maybe_send_proactive_message(
+            {"internal_id": "u1", "platform": "telegram", "external_user_id": "42"}
+        )
+    generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_ignored_messages_do_not_double_the_delivery_interval():
     from datetime import datetime, timedelta, timezone
 
@@ -264,6 +286,35 @@ async def test_companion_mode_generates_original_contextual_message():
     assert "dashboard idea" in message
     assert message != "What would you like it to show?"
     assert service._generation_topics["u1"]
+
+
+@pytest.mark.asyncio
+async def test_companion_mode_does_not_invent_activity_from_light_command():
+    service = ProactiveMessagingService(SimpleNamespace(persona={}))
+    sessions = MagicMock()
+    sessions.get_history.return_value = [
+        {"role": "user", "content": "Turn off all lights"},
+        {"role": "assistant", "content": "Done. Both lights are off."},
+        {"role": "user", "content": "Thanks"},
+        {"role": "assistant", "content": "Anytime."},
+    ]
+    with patch(
+        "services.proactive_messaging.UserManager.get_user_profile",
+        return_value={
+            "proactive_predictions_enabled": True,
+            "proactive_style": "companion",
+        },
+    ), patch(
+        "services.proactive_messaging.get_session_manager", return_value=sessions
+    ), patch(
+        "llm.manager.ask_llm",
+        return_value="Sleeping with the lights out will make tomorrow's coffee better.",
+    ):
+        message = await service._generate_proactive_message("u1", "telegram")
+
+    assert "sleep" not in message.casefold()
+    assert "light" not in message.casefold()
+    assert "coffee" not in message.casefold()
 
 
 def test_proactive_runtime_defaults_are_observable(monkeypatch):

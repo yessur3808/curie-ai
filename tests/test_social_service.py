@@ -15,6 +15,19 @@ def test_technical_win_gets_brief_banter_and_grounded_next_step():
     assert "commit the fix" in candidate.text
 
 
+def test_simple_corrections_and_preferences_are_natural_and_deterministic():
+    service = SocialConversationService()
+
+    assert service.handle("There is no project").text == (
+        "You're right. I made an assumption there."
+    )
+    assert service.handle("There is none").text == "Understood."
+    assert (
+        service.handle("I'm working now, and don't need lights on during the day").text
+        == "Got it. They can stay off."
+    )
+
+
 def test_technical_win_routes_without_model_inference():
     decision = asyncio.run(route_request("I finally fixed that stubborn bug."))
 

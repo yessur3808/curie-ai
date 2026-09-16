@@ -69,6 +69,23 @@ def test_response_policy_is_single_sanitize_and_personality_boundary():
     assert result.endswith("styled")
 
 
+def test_response_policy_removes_decorative_french_suffix():
+    class Personality:
+        def apply_response_style(
+            self, response, user_text, user_profile=None, history=None
+        ):
+            return response
+
+    policy = ResponsePolicy({"name": "Curie"}, Personality())
+    assert (
+        policy.finalize(
+            "Understood. The lights can stay off, *ça va*.",
+            "I don't need the lights on",
+        )
+        == "Understood. The lights can stay off"
+    )
+
+
 def test_model_service_uses_local_fallback(monkeypatch):
     local = SimpleNamespace(
         DEFAULT_LLAMA_MODEL="local-model",

@@ -62,6 +62,12 @@ class PersonalityContext:
                 "blocker first in one or two short sentences. Skip preambles and do not restate "
                 "the request."
             )
+        elif runtime.get("interaction_kind") == "correction":
+            directives.append(
+                "- Correction delivery: acknowledge the corrected fact in one natural "
+                "sentence and stop. Do not turn it into encouragement, advice, a device "
+                "suggestion, or a question."
+            )
         elif runtime.get("user_emotion") == "technical" and mode == "casual":
             directives.append(
                 "- Technical delivery: stay precise but conversational. Do not become formal "

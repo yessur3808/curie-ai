@@ -891,10 +891,7 @@ class ChatWorkflow:
             logger.debug("Could not process capability discovery: %s", exc)
 
         try:
-            from services.proactive_policy import (
-                handle_proactive_command,
-                mark_user_response,
-            )
+            from services.proactive_policy import handle_proactive_command
 
             proactive_response = handle_proactive_command(str(internal_id), user_text)
             if proactive_response is not None:
@@ -904,16 +901,19 @@ class ChatWorkflow:
                     "model_used": "proactive_controls",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
-            mark_user_response(
-                str(internal_id), UserManager.get_user_profile(internal_id) or {}
-            )
         except Exception as exc:
             logger.debug("Could not process proactive controls: %s", exc)
 
         try:
             from memory.adaptive import capture_proactive_feedback
+            from services.proactive_policy import mark_user_response
 
+            # Capture a correction while the previous proactive message is still
+            # marked as awaiting a response, then clear that state.
             capture_proactive_feedback(str(internal_id), user_text)
+            mark_user_response(
+                str(internal_id), UserManager.get_user_profile(internal_id) or {}
+            )
         except Exception as exc:
             logger.debug("Could not persist proactive feedback: %s", exc)
 

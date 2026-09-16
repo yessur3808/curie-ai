@@ -7,7 +7,10 @@ def test_planner_separates_emotion_length_and_expression():
     plan = plan_response("I am so tired and worn out", {"verbosity": "detailed"})
     assert plan["emotion"] == "fatigue"
     assert plan["acknowledgement"] == "acknowledge_once_then_reduce_load"
-    assert plan["next_action"] == "one_practical_step_if_useful"
+    assert (
+        plan["next_action"]
+        == "one_practical_step_only_if_requested_or_materially_useful"
+    )
     assert plan["length"] == "focused"
 
 
@@ -59,3 +62,25 @@ def test_short_casual_quip_is_social_and_stays_brief():
 
     assert plan["interaction"] == "social"
     assert plan["length"] == "brief"
+
+
+def test_thanks_is_social_without_an_unasked_next_step():
+    plan = plan_response("Thanks")
+    context = PersonalityAdapter().infer_context("Thanks", {}, [])
+
+    assert plan["interaction"] == "social"
+    assert plan["next_action"] == "none"
+    assert context["response_depth"] == "social"
+
+
+def test_plain_correction_stays_brief_and_does_not_invite_advice():
+    plan = plan_response("There is no project", {"verbosity": "detailed"})
+    context = PersonalityAdapter().infer_context(
+        "I'm working now, and don't need lights on during the day", {}, []
+    )
+
+    assert plan["interaction"] == "correction"
+    assert plan["length"] == "brief"
+    assert plan["next_action"] == "none"
+    assert context["interaction_kind"] == "correction"
+    assert context["response_depth"] == "brief"

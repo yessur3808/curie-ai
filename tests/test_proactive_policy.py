@@ -68,6 +68,7 @@ def test_delivery_updates_store_only_safe_reason_and_bounded_history():
     updates = delivery_updates(_profile(), "study", "Repeated routine evidence.", NOW)
     assert updates["proactive_last_reason"] == "Repeated routine evidence."
     assert updates["proactive_awaiting_response"] is True
+    assert updates["proactive_last_topic"] == "study"
     assert updates["proactive_topic_last_sent"]["study"] == NOW.isoformat()
 
 

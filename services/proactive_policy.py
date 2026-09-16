@@ -112,6 +112,7 @@ def delivery_updates(profile: dict, topic: str, reason: str, now: datetime | Non
     return {
         "proactive_sent_at": [*sent, now.isoformat()][-50:],
         "proactive_topic_last_sent": dict(list(topics.items())[-50:]),
+        "proactive_last_topic": str(topic)[:80],
         "proactive_last_reason": str(reason)[:180],
         "proactive_awaiting_response": True,
     }

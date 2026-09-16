@@ -115,6 +115,24 @@ def test_low_confidence_model_falls_back_to_conversation(monkeypatch):
     assert _route("Could you investigate chips somehow?").intent == "conversation"
 
 
+def test_simple_thanks_uses_bounded_social_route():
+    decision = _route("Thanks")
+    assert decision.intent == "social"
+
+
+def test_correction_with_tool_noun_uses_safe_social_route(monkeypatch):
+    async def fake_model(*args, **kwargs):
+        return (
+            '{"action":"inspect_project","params":{},"confidence":0.5,'
+            '"clarification":"What project do you mean?"}'
+        )
+
+    monkeypatch.setattr("agent.intent_router._ask_intent_model", fake_model)
+    decision = _route("There is no project")
+    assert decision.intent == "social"
+    assert decision.selected_capability is None
+
+
 def test_unrelated_specialist_cannot_intercept_conversation():
     decision = _route("My trip to Paris was fun, and the weather metaphor was clever")
     assert decision.intent == "conversation"

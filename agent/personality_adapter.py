@@ -32,6 +32,18 @@ class PersonalityAdapter:
         r"[?!. ]*$|^(?:hi+|hello+|hey+|bonjour)(?:\s+curie)?[?!. ]*$",
         re.IGNORECASE,
     )
+    _SOCIAL_ACKNOWLEDGEMENT_PATTERNS = re.compile(
+        r"^(?:thanks(?: a lot)?|thank you|cheers|got it|okay|ok|cool|perfect|"
+        r"sounds good|all right|alright)[.! ]*$",
+        re.IGNORECASE,
+    )
+    _CORRECTION_PATTERNS = re.compile(
+        r"^(?:no[,!. ]+)?(?:there (?:is|are) (?:no|none)\b|there(?:'s| is) none\b|"
+        r"that(?:['’]s| is) not\b|i (?:do not|don['’]t) (?:have|need|want)\b|"
+        r"i(?:['’]m| am) not\b|i(?:['’]m| am) working\b.{0,120}\b"
+        r"(?:do not|don['’]t) need\b)",
+        re.IGNORECASE,
+    )
     _DEEP_PATTERNS = re.compile(
         r"\b(?:in depth|deep dive|detailed|thorough|comprehensive|step[- ]by[- ]step|"
         r"explain fully|full analysis|all the details|from first principles)\b",
@@ -69,13 +81,15 @@ class PersonalityAdapter:
         urgency = bool(self._URGENT_PATTERNS.search(text))
         explicitly_formal = bool(self._FORMAL_PATTERNS.search(text))
         mode = (
-            "urgent"
-            if urgency
-            else ("professional" if explicitly_formal else "casual")
+            "urgent" if urgency else ("professional" if explicitly_formal else "casual")
         )
 
-        if self._SOCIAL_PATTERNS.fullmatch(text):
+        if self._SOCIAL_PATTERNS.fullmatch(
+            text
+        ) or self._SOCIAL_ACKNOWLEDGEMENT_PATTERNS.fullmatch(text):
             interaction_kind = "social"
+        elif self._CORRECTION_PATTERNS.search(text):
+            interaction_kind = "correction"
         elif self._COMMAND_PATTERNS.search(text):
             interaction_kind = "command"
         elif self._SUBSTANTIVE_PATTERNS.search(text):
@@ -90,11 +104,13 @@ class PersonalityAdapter:
         elif history_len >= 6:
             trust_signal = "medium"
 
-        if self._SOCIAL_PATTERNS.fullmatch(text):
+        if self._SOCIAL_PATTERNS.fullmatch(
+            text
+        ) or self._SOCIAL_ACKNOWLEDGEMENT_PATTERNS.fullmatch(text):
             response_depth = "social"
         elif self._DEEP_PATTERNS.search(text):
             response_depth = "deep"
-        elif interaction_kind == "command":
+        elif interaction_kind in {"command", "correction"}:
             response_depth = "brief"
         elif self._SUBSTANTIVE_PATTERNS.search(text) or len(text.split()) > 28:
             response_depth = "focused"
@@ -107,9 +123,7 @@ class PersonalityAdapter:
             if verbosity == "concise":
                 response_depth = "brief"
             elif verbosity == "detailed" and interaction_kind != "command":
-                response_depth = (
-                    "deep" if response_depth == "focused" else "focused"
-                )
+                response_depth = "deep" if response_depth == "focused" else "focused"
         if adaptation.get("research_depth") == "deep" and re.search(
             r"\b(?:research|investigate|compare sources?)\b", text, re.I
         ):

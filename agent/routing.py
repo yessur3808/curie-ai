@@ -24,7 +24,9 @@ _RISKS = {"none", "read_only", "mutating"}
 _MULTI_SPLIT = re.compile(r"\s*(?:;|\band then\b|\bthen also\b|\balso\b)\s*", re.I)
 _CONVERSATIONAL_CONTEXT = re.compile(
     r"\b(?:weather|storm|rain)\s+(?:metaphor|symbol|imagery)\b|"
-    r"\b(?:my|that)\s+(?:trip|project|memory)\b.{0,80}\b(?:was|felt|seemed)\b",
+    r"\b(?:my|that)\s+(?:trip|project|memory)\b.{0,80}\b(?:was|felt|seemed)\b|"
+    r"^(?:there (?:is|are) no\b|there(?:['’]s| is) none\b|"
+    r"i (?:do not|don['’]t) have\b)[^?]*[.! ]*$",
     re.I,
 )
 

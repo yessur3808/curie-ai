@@ -863,13 +863,13 @@ async def resolve_request(
         action, payload.get("params", {})
     )
     clarification = validation_question or payload.get("clarification")
-    if confidence < 0.45:
+    # A weak tool guess is not a reason to interrupt ordinary conversation with
+    # a tool-specific question.  Only ask for a missing parameter after the
+    # classifier is already confident that the user intended that tool.
+    if confidence < 0.78:
         return None
-    if confidence < 0.78 or clarification:
-        question = (
-            clarification
-            or f"Do you want me to use the {action.replace('_', ' ')} tool?"
-        )
+    if clarification:
+        question = clarification
         return ToolRequest(
             "clarify", {"message": str(question)}, confidence=confidence, source="model"
         )

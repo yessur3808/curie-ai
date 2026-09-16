@@ -886,6 +886,11 @@ _PROACTIVE_TOPIC_REJECTION = re.compile(
     r"i(?:'m| am) not interested in)\s+(.{2,80})",
     re.I,
 )
+_PROACTIVE_FACT_CORRECTION = re.compile(
+    r"^(?:no[,!. ]+)?(?:there (?:is|are) no(?: such)?\s+(?P<topic>.{2,80})|"
+    r"there(?:'s| is) none)\s*[.!?]*$",
+    re.I,
+)
 
 
 def capture_proactive_feedback(internal_id: str, user_text: str) -> dict:
@@ -902,13 +907,29 @@ def capture_proactive_feedback(internal_id: str, user_text: str) -> dict:
         }
     else:
         match = _PROACTIVE_TOPIC_REJECTION.search(user_text.strip())
-        if not match:
-            return {}
-        topic = re.sub(r"[^a-z0-9 +&'-]", "", match.group(1).casefold()).strip()
+        profile = UserManager.get_user_profile(internal_id) or {}
+        if match:
+            raw_topic = match.group(1)
+        else:
+            correction = _PROACTIVE_FACT_CORRECTION.search(user_text.strip())
+            last_topic = str(profile.get("proactive_last_topic") or "").strip()
+            if not (
+                correction
+                and profile.get("proactive_awaiting_response") is True
+                and last_topic
+            ):
+                return {}
+            corrected_topic = str(correction.groupdict().get("topic") or "").casefold()
+            corrected_words = re.findall(r"[a-z0-9]{3,}", corrected_topic)
+            if corrected_words and not any(
+                word in last_topic.casefold() for word in corrected_words
+            ):
+                return {}
+            raw_topic = last_topic
+        topic = re.sub(r"[^a-z0-9 +&'-]", "", raw_topic.casefold()).strip()
         topic = re.sub(r"\b(?:please|again|anymore)\b", "", topic).strip()
         if not topic:
             return {}
-        profile = UserManager.get_user_profile(internal_id) or {}
         existing = [
             str(item).casefold() for item in profile.get("proactive_avoid_topics", [])
         ]

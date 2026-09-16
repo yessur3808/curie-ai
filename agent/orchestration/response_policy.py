@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 
 
-SPEAKER_TAG_PATTERN = re.compile(r"^\s*(?:User:|Curie:|Assistant:|Coder:|System:)", re.I | re.M)
+SPEAKER_TAG_PATTERN = re.compile(
+    r"^\s*(?:User:|Curie:|Assistant:|Coder:|System:)", re.I | re.M
+)
 META_NOTE_PATTERN = re.compile(r"\[(?:Note|Meta|Aside|System):[^\]]*\]", re.I)
 ACTION_PATTERN = re.compile(
     r"\*(?:(?:I\s+)?(?:smiles?|gestures?|nods?|laughs?|sighs?|shrugs?|waves?|"
@@ -14,7 +16,8 @@ ACTION_PATTERN = re.compile(
 )
 THINK_PATTERN = re.compile(r"<think>[\s\S]*?</think>|<think>[\s\S]*$", re.I)
 CANNED_FRENCH_SUFFIX_PATTERN = re.compile(
-    r"\s*\*?(?:c['’]est\s+(?:dommage|magnifique)|très\s+bien)\*?"
+    r"(?:,\s*|\s+)\*?(?:c['’]est\s+(?:dommage|magnifique)|très\s+bien|"
+    r"ça\s+va|voilà|merci|d['’]accord|bien\s+sûr)\*?"
     r"(?:,?\s*(?:oui|non))?[?!.]*\s*$",
     re.I,
 )
@@ -32,7 +35,7 @@ def naturalize_prose_punctuation(text: str) -> str:
     parts: list[str] = []
     cursor = 0
     for match in protected.finditer(text):
-        parts.append(_rewrite_punctuation(text[cursor:match.start()]))
+        parts.append(_rewrite_punctuation(text[cursor : match.start()]))
         parts.append(match.group(0))
         cursor = match.end()
     parts.append(_rewrite_punctuation(text[cursor:]))
@@ -46,7 +49,9 @@ def _rewrite_punctuation(text: str) -> str:
 
 
 class ResponsePolicy:
-    def __init__(self, persona: dict, personality_context, minimal_sanitization: bool = True):
+    def __init__(
+        self, persona: dict, personality_context, minimal_sanitization: bool = True
+    ):
         self.persona = persona
         self.personality_context = personality_context
         self.minimal_sanitization = minimal_sanitization
@@ -67,7 +72,9 @@ class ResponsePolicy:
         response = re.sub(r"\n\n\n+", "\n\n", response)
         return response.strip()
 
-    def finalize(self, response: str, user_text: str, profile=None, history=None) -> str:
+    def finalize(
+        self, response: str, user_text: str, profile=None, history=None
+    ) -> str:
         sanitized = self.sanitize(response)
         return self.personality_context.apply_response_style(
             sanitized, user_text, user_profile=profile, history=history
