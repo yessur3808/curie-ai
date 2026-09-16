@@ -279,13 +279,47 @@ async def test_companion_mode_generates_original_contextual_message():
     ), patch(
         "services.proactive_messaging.get_session_manager", return_value=sessions
     ), patch(
+        "services.proactive_messaging.random.choice",
+        side_effect=lambda options: options[0],
+    ), patch(
         "llm.manager.ask_llm",
-        return_value="That home dashboard idea has character. Which part would make it feel genuinely yours?",
+        side_effect=AssertionError("companion check-ins must not call the model"),
     ):
         message = await service._generate_proactive_message("u1", "telegram")
-    assert "dashboard idea" in message
+    assert message == "How’s that project coming along?"
     assert message != "What would you like it to show?"
     assert service._generation_topics["u1"]
+
+
+@pytest.mark.asyncio
+async def test_companion_mode_uses_grounded_work_followup_without_model():
+    service = ProactiveMessagingService(SimpleNamespace(persona={}))
+    sessions = MagicMock()
+    sessions.get_history.return_value = [
+        {
+            "role": "user",
+            "content": "I'm working now, and don't need lights on during the day",
+        },
+        {"role": "assistant", "content": "Got it. They can stay off."},
+    ]
+    with patch(
+        "services.proactive_messaging.UserManager.get_user_profile",
+        return_value={
+            "proactive_predictions_enabled": True,
+            "proactive_style": "companion",
+        },
+    ), patch(
+        "services.proactive_messaging.get_session_manager", return_value=sessions
+    ), patch(
+        "services.proactive_messaging.random.choice",
+        side_effect=lambda options: options[0],
+    ), patch(
+        "llm.manager.ask_llm",
+        side_effect=AssertionError("companion check-ins must not call the model"),
+    ):
+        message = await service._generate_proactive_message("u1", "telegram")
+
+    assert message == "How’s work going?"
 
 
 @pytest.mark.asyncio
@@ -308,7 +342,7 @@ async def test_companion_mode_does_not_invent_activity_from_light_command():
         "services.proactive_messaging.get_session_manager", return_value=sessions
     ), patch(
         "llm.manager.ask_llm",
-        return_value="Sleeping with the lights out will make tomorrow's coffee better.",
+        side_effect=AssertionError("companion check-ins must not call the model"),
     ):
         message = await service._generate_proactive_message("u1", "telegram")
 

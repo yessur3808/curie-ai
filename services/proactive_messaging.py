@@ -10,7 +10,6 @@ This service:
 """
 
 import asyncio
-import difflib
 import logging
 import inspect
 import os
@@ -21,7 +20,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from agent.persona_contract import apply_persona_contract
 from memory import UserManager
 from memory.session_store import get_session_manager
 from services.proactive_policy import delivery_allowed, delivery_updates
@@ -59,38 +57,20 @@ _STOPWORDS = frozenset(
     }
 )
 _CHECK_IN_MESSAGES = (
-    "Salut, how’s your day going?",
+    "How’s your day going?",
     "How are things going today?",
-    "Anything you’d like a hand with today?",
-    "Quick check-in: how’s your day treating you?",
+    "What have you been up to?",
+    "How are things on your side?",
 )
 _CONVERSATIONAL_FALLBACKS = (
-    ("attention", "What has been taking up most of your attention lately?"),
-    (
-        "curiosity",
-        "A small question for you: what have you been unexpectedly curious about lately?",
-    ),
-    (
-        "playful hypothetical",
-        "Suppose you had a completely free evening and no obligations. What would you actually choose to do?",
-    ),
-    (
-        "daily moment",
-        "Tell me one oddly satisfying thing that happened today, however small.",
-    ),
-    ("small pleasure", "What is one small thing you have genuinely enjoyed lately?"),
-    (
-        "opinion",
-        "What is something everyone seems to love that you simply do not understand?",
-    ),
-    (
-        "curiosity trail",
-        "What is the last question that sent you down a useful rabbit hole?",
-    ),
-    (
-        "evening reflection",
-        "Before the day runs away entirely, what part of it felt most like yours?",
-    ),
+    ("day", "How’s your day going?"),
+    ("recent activity", "What have you been up to?"),
+    ("interest", "Found anything interesting lately?"),
+    ("current thoughts", "What’s been on your mind today?"),
+    ("day quality", "Has your day been decent so far?"),
+    ("current plans", "What are you getting into today?"),
+    ("general", "How are things on your side?"),
+    ("curiosity", "What have you been curious about lately?"),
 )
 _RELATIONAL_RISK = re.compile(
     r"\b(?:you only need me|do not leave me|don't leave me|i need you|i miss you|"
@@ -100,28 +80,42 @@ _RELATIONAL_RISK = re.compile(
 _NON_TOPIC_TURN = re.compile(
     r"^(?:(?:please\s+)?(?:turn|switch|power|set|start|stop|open|close|lock|unlock|"
     r"enable|disable|run|send|show|check|cancel|pause|resume|remind|schedule)\b|"
+    r"(?:there (?:is|are) no\b|there(?:['’]s| is) none\b|"
+    r"i (?:do not|don['’]t) have\b)|"
     r"(?:thanks(?: a lot)?|thank you|cheers|got it|okay|ok|cool|perfect|sounds good)"
     r"[.! ]*$)",
     re.I,
 )
-_ACTIVITY_EVIDENCE = (
-    (re.compile(r"\bprojects?\b", re.I), re.compile(r"\bprojects?\b", re.I)),
+_GROUNDED_FOLLOWUPS = (
     (
+        "bug fix",
+        re.compile(r"\b(?:fixed|solved|resolved)\b.{0,60}\b(?:bug|issue|error)\b", re.I),
+        ("Is that fix still holding up?", "Did that fix stay fixed?"),
+    ),
+    (
+        "work",
         re.compile(r"\b(?:work|working|job)\b", re.I),
-        re.compile(r"\b(?:work|working|job)\b", re.I),
+        ("How’s work going?", "Still busy with work?"),
     ),
     (
-        re.compile(r"\b(?:learn|learning|study|studying)\b", re.I),
-        re.compile(r"\b(?:learn|learning|study|studying)\b", re.I),
+        "project",
+        re.compile(r"\b(?:project|build|dashboard)\b", re.I),
+        ("How’s that project coming along?", "Made any progress on that project?"),
     ),
     (
-        re.compile(r"\b(?:sleep|sleeping|bedtime|bed|resting|rest)\b", re.I),
-        re.compile(r"\b(?:sleep|sleeping|bedtime|bed|resting|rest)\b", re.I),
+        "idea",
+        re.compile(r"\bidea\b", re.I),
+        ("Still thinking about that idea?", "Done anything more with that idea?"),
     ),
-    (re.compile(r"\bcoffee\b", re.I), re.compile(r"\bcoffee\b", re.I)),
     (
-        re.compile(r"\b(?:lights?|darkness|dark night)\b", re.I),
-        re.compile(r"\b(?:lights?|darkness|dark night)\b", re.I),
+        "study",
+        re.compile(r"\b(?:study|studying|course|class)\b", re.I),
+        ("How’s the studying going?", "How’s that course going?"),
+    ),
+    (
+        "trip",
+        re.compile(r"\b(?:trip|travel|travelling|traveling)\b", re.I),
+        ("How’s the trip going?", "How’s the travel going?"),
     ),
 )
 
@@ -140,15 +134,19 @@ def _thematic_user_history(messages: list[str]) -> list[str]:
     return [message for message in messages if not _NON_TOPIC_TURN.search(message)]
 
 
-def _has_unsupported_activity_reference(
-    candidate: str, thematic_history: list[str]
-) -> bool:
-    """Reject activity references that Curie inferred rather than learned."""
-    context = "\n".join(thematic_history)
-    return any(
-        candidate_pattern.search(candidate) and not evidence_pattern.search(context)
-        for candidate_pattern, evidence_pattern in _ACTIVITY_EVIDENCE
-    )
+def _grounded_companion_followup(
+    thematic_history: list[str], recent_assistant: list[str]
+) -> tuple[str, str] | None:
+    """Choose a short follow-up only from an explicitly mentioned user topic."""
+    recent = {message.casefold().strip() for message in recent_assistant}
+    for message in reversed(thematic_history):
+        for topic, pattern, options in _GROUNDED_FOLLOWUPS:
+            if not pattern.search(message):
+                continue
+            available = [option for option in options if option.casefold() not in recent]
+            if available:
+                return topic, random.choice(available)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -893,7 +891,7 @@ class ProactiveMessagingService:
     async def _generate_conversational_candidate(
         self, profile: dict, history: list[tuple[str, str]]
     ) -> dict | None:
-        """Generate one varied, grounded companion-style text with safe fallbacks."""
+        """Select one plain, grounded friend-like follow-up without model invention."""
         raw_user_history = [
             str(message).strip() for role, message in history if role == "user"
         ][-6:]
@@ -901,86 +899,15 @@ class ProactiveMessagingService:
         recent_assistant = [
             str(message).strip() for role, message in history if role == "assistant"
         ][-6:]
-        topics = [
-            "a thoughtful curiosity question",
-            "a playful but intelligent hypothetical",
-            "an ordinary moment from the user's day",
-            "a warm evening or morning reflection",
-        ]
-        if any(
-            re.search(r"\b(?:project|idea|build|create|design)\b", item, re.I)
-            for item in user_history
-        ):
-            topics.extend(["a project idea or creative possibility"] * 2)
-        if any(
-            re.search(r"\b(?:learn|learning|study|studying|course|class)\b", item, re.I)
-            for item in user_history
-        ):
-            topics.extend(
-                ["something the user has been learning or thinking about"] * 2
-            )
-        topic = random.choice(topics)
-        context = (
-            "\n".join(f"- {item[:350]}" for item in user_history)
-            or "- No recent user topic is available."
-        )
-        avoid = "\n".join(f"- {item[:220]}" for item in recent_assistant) or "- None"
-        task_prompt = (
-            "Write one original unsolicited Telegram text as the active Curie persona. "
-            "The user explicitly wants natural friend-like, gently affectionate "
-            "messages during the day. Make it feel spontaneous and specific, not like an "
-            "assistant notification. Use 12 to 45 words and one coherent thought. A natural "
-            "question is welcome but not mandatory. Do not say 'checking in', 'how is your day "
-            "going', or 'anything I can help with'. Never claim physical presence, senses, human "
-            "activities, neediness, jealousy, exclusivity, waiting, or missing the user. Refer to "
-            "personal details only when they appear in the supplied history. A completed device "
-            "command or acknowledgement is not a conversation theme. Do not infer a project, "
-            "work, learning, bedtime, sleep, coffee, mood, or routine from the time of day or a "
-            "device state. Do not repeat a "
-            "recent assistant message. Return only the message, without quotes or labels.\n\n"
-            f"Theme: {topic}\nRecent user messages:\n{context}\n"
-            f"Recent assistant messages to avoid:\n{avoid}\n"
-        )
-        prompt = apply_persona_contract(
-            task_prompt,
-            medium="proactive Telegram companion message",
-            persona=getattr(self.workflow, "persona", None),
-        )
-        try:
-            from llm.manager import ask_llm
-
-            candidate = await asyncio.to_thread(
-                ask_llm,
-                prompt,
-                temperature=0.8,
-                max_tokens=120,
-                role="general",
-            )
-        except Exception as exc:
-            logger.debug("Conversational proactive generation unavailable: %s", exc)
+        selected = _grounded_companion_followup(user_history, recent_assistant)
+        if selected is None:
             return None
-        candidate = str(candidate or "").strip().strip('"').strip()
-        words = candidate.split()
-        if (
-            not 8 <= len(words) <= 60
-            or candidate.startswith("[Error")
-            or _SENSORY_CLAIM.search(candidate)
-            or _RELATIONAL_RISK.search(candidate)
-            or _has_unsupported_activity_reference(candidate, user_history)
-        ):
-            return None
-        if any(
-            difflib.SequenceMatcher(None, candidate.casefold(), old.casefold()).ratio()
-            >= 0.78
-            for old in recent_assistant
-        ):
-            return None
-        topic_key = re.sub(r"[^a-z ]", "", topic.casefold()).strip()[:80]
+        topic, candidate = selected
         return {
             "message": candidate,
-            "reason": f"Companion mode selected {topic} using recent conversation context.",
-            "topic": topic_key,
-            "kind": "routine" if user_history else "check_in",
+            "reason": f"Companion mode matched an explicit recent {topic} topic.",
+            "topic": topic,
+            "kind": "routine",
             "confidence": 0.9,
             "urgency": 0.1,
             "usefulness": 0.55,
