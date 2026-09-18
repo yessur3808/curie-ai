@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "release": "2026.08-phase10",
-  "contract_version": "1.0.0",
+  "release": "2026.09-phase1-turn-kernel",
+  "contract_version": "1.1.0",
   "changelog": "CHANGELOG.md",
   "migration_notes": "docs/RELEASE_PROCESS.md",
-  "evaluation_delta": "evaluation/deltas/phase10.json",
+  "evaluation_delta": "evaluation/deltas/phase1-turn-kernel.json",
   "rollback": {
     "application": "Restart the prior reviewed revision using the normal instance launcher.",
     "sqlite_schema_target": 0,

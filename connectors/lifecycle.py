@@ -22,6 +22,14 @@ class ConnectorState(str, Enum):
     FAILED = "failed"
 
 
+class DeliveryStatus(str, Enum):
+    DELIVERED = "delivered"
+    REJECTED = "rejected"
+    NOT_READY = "not_ready"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True, slots=True)
 class ConnectorHealth:
     name: str
@@ -31,6 +39,24 @@ class ConnectorHealth:
     queue_size: int
     queue_capacity: int
     error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryReceipt:
+    connector: str
+    delivered: bool
+    status: DeliveryStatus
+    duration_ms: float
+    error_type: str | None = None
+
+    def as_dict(self) -> dict[str, str | bool | float | None]:
+        return {
+            "connector": self.connector,
+            "delivered": self.delivered,
+            "status": self.status.value,
+            "duration_ms": self.duration_ms,
+            "error_type": self.error_type,
+        }
 
 
 class BoundedAsyncWorkQueue:
@@ -83,6 +109,7 @@ class ConnectorApplication:
         self.thread: threading.Thread | None = None
         self.ready_event = threading.Event()
         self.outbound_queue = BoundedAsyncWorkQueue(queue_capacity)
+        self.last_delivery_receipt: DeliveryReceipt | None = None
 
     def start(self, workflow) -> threading.Thread:
         if self.thread and self.thread.is_alive():
@@ -107,10 +134,16 @@ class ConnectorApplication:
         return self.thread
 
     def refresh_readiness(self) -> bool:
-        if self.state in {ConnectorState.FAILED, ConnectorState.STOPPING, ConnectorState.STOPPED}:
+        if self.state in {
+            ConnectorState.FAILED,
+            ConnectorState.STOPPING,
+            ConnectorState.STOPPED,
+        }:
             return False
-        ready = bool(self.ready_probe()) if self.ready_probe else bool(
-            self.thread and self.thread.is_alive()
+        ready = (
+            bool(self.ready_probe())
+            if self.ready_probe
+            else bool(self.thread and self.thread.is_alive())
         )
         if ready:
             self.ready_event.set()
@@ -127,12 +160,45 @@ class ConnectorApplication:
             self.ready_event.wait(min(0.05, max(0.0, deadline - time.monotonic())))
         return self.refresh_readiness()
 
-    async def send(self, recipient: str, message: str) -> bool:
+    async def send_with_receipt(self, recipient: str, message: str) -> DeliveryReceipt:
+        """Attempt delivery and return truthful, privacy-safe outcome metadata."""
+        started = time.perf_counter()
+
+        def receipt(
+            delivered: bool,
+            status: DeliveryStatus,
+            error_type: str | None = None,
+        ) -> DeliveryReceipt:
+            value = DeliveryReceipt(
+                connector=self.name,
+                delivered=delivered,
+                status=status,
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                error_type=error_type,
+            )
+            self.last_delivery_receipt = value
+            return value
+
         if self.send_fn is None:
-            return False
-        if not self.refresh_readiness():
-            return False
-        return bool(await self.outbound_queue.run(lambda: self.send_fn(recipient, message)))
+            return receipt(False, DeliveryStatus.UNAVAILABLE)
+        try:
+            if not self.refresh_readiness():
+                return receipt(False, DeliveryStatus.NOT_READY)
+            delivered = bool(
+                await self.outbound_queue.run(lambda: self.send_fn(recipient, message))
+            )
+            return receipt(
+                delivered,
+                DeliveryStatus.DELIVERED if delivered else DeliveryStatus.REJECTED,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Connector %s delivery failed (%s)", self.name, type(exc).__name__
+            )
+            return receipt(False, DeliveryStatus.FAILED, type(exc).__name__)
+
+    async def send(self, recipient: str, message: str) -> bool:
+        return (await self.send_with_receipt(recipient, message)).delivered
 
     def stop(self) -> None:
         if self.state == ConnectorState.STOPPED:
@@ -146,12 +212,20 @@ class ConnectorApplication:
         self.ready_event.clear()
 
     def health(self) -> ConnectorHealth:
-        if self.state not in {ConnectorState.FAILED, ConnectorState.STOPPING, ConnectorState.STOPPED}:
+        if self.state not in {
+            ConnectorState.FAILED,
+            ConnectorState.STOPPING,
+            ConnectorState.STOPPED,
+        }:
             self.refresh_readiness()
         return ConnectorHealth(
-            self.name, self.state, self.ready_event.is_set(),
-            bool(self.thread and self.thread.is_alive()), self.outbound_queue.size,
-            self.outbound_queue.capacity, self.error,
+            self.name,
+            self.state,
+            self.ready_event.is_set(),
+            bool(self.thread and self.thread.is_alive()),
+            self.outbound_queue.size,
+            self.outbound_queue.capacity,
+            self.error,
         )
 
 
@@ -169,12 +243,22 @@ class ConnectorRegistry:
 
     def outbound(self) -> dict[str, Callable]:
         return {
-            name: connector.send for name, connector in self._connectors.items()
+            name: connector.send
+            for name, connector in self._connectors.items()
+            if connector.send_fn is not None
+        }
+
+    def outbound_with_receipts(self) -> dict[str, Callable]:
+        return {
+            name: connector.send_with_receipt
+            for name, connector in self._connectors.items()
             if connector.send_fn is not None
         }
 
     def health(self) -> dict[str, ConnectorHealth]:
-        return {name: connector.health() for name, connector in self._connectors.items()}
+        return {
+            name: connector.health() for name, connector in self._connectors.items()
+        }
 
     def wait_ready(self, timeout: float = 15.0) -> dict[str, bool]:
         """Wait up to one shared deadline for all registered connectors."""

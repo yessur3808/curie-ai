@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "baseline": "2026.08-phase10",
+  "candidate": "2026.09-phase1-turn-kernel",
+  "expected_regressions": [],
+  "required_gates": {
+    "correctness_pass_rate": 1.0,
+    "security_pass_rate": 1.0,
+    "connector_conformance_pass_rate": 1.0,
+    "known_regression_pass_rate": 1.0
+  },
+  "new_coverage": [
+    "fourteen-stage immutable turn pipeline",
+    "owner and connector feature flags",
+    "side-effect and authorization boundaries",
+    "cancellation and degraded context behavior",
+    "verified-result render fallback",
+    "privacy-safe stage serialization",
+    "truthful delivery receipts",
+    "architecture import boundaries",
+    "legacy-versus-shadow route comparison",
+    "atomic provider-neutral OAuth state consumption"
+  ]
+}

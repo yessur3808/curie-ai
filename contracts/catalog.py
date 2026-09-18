@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.0"
 
 
 def contract_catalog() -> dict[str, Any]:
+    from agent.kernel.pipeline import pipeline_contract
     from services.media_ingestion import media_conformance_contract
 
     return {
         "contract_version": CONTRACT_VERSION,
+        "turn_pipeline": pipeline_contract(),
         "connector": {
             "version": "1.0",
             "required_inbound": (

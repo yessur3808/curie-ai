@@ -49,12 +49,14 @@ from agent.observability import (
     turn_event_writer,
 )
 from agent.kernel.dialogue_state import DialogueStateStore
-from agent.kernel.planning import PlanExecutor, build_execution_plan
+from agent.kernel.feature_flags import PipelineFeatureFlags, PipelineMode
+from agent.kernel.planning import ExecutionPlan, PlanExecutor, build_execution_plan
 from agent.kernel.understanding import TurnAnalysis, analyze_turn
 from agent.orchestration.session_commands import SessionCommandService
 from agent.orchestration.specialist_router import SpecialistRouter
 from agent.orchestration.social_service import SocialConversationService
 from agent.orchestration.routing_service import UnifiedRoutingService
+from agent.orchestration.turn_pipeline import LegacyTurnPipelineAdapter
 from utils.persona import normalize_persona
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
@@ -466,6 +468,8 @@ class ChatWorkflow:
         self.plan_executor = PlanExecutor()
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
         self.prompt_cache = PromptCache(max_size=100)
+        self.pipeline_flags = PipelineFeatureFlags.from_env()
+        self.turn_pipeline = LegacyTurnPipelineAdapter(self)
 
         logger.info(
             f"ChatWorkflow initialized with persona: {self.persona.get('name', 'Unknown')}"
@@ -488,6 +492,94 @@ class ChatWorkflow:
         )
 
     async def process_message(self, normalized_input: Dict) -> Dict:
+        """Select the legacy, shadow, or active typed turn path."""
+        selected_input = dict(normalized_input or {})
+        mode = self.pipeline_flags.mode_for(selected_input)
+
+        # Owner flags must work even for connectors that leave identity
+        # resolution to the workflow. Shadow mode also resolves once so its
+        # comparison path never repeats an identity write.
+        owner_rollout_configured = bool(
+            self.pipeline_flags.active_owners or self.pipeline_flags.shadow_owners
+        )
+        if not selected_input.get("internal_id") and (
+            owner_rollout_configured or mode is PipelineMode.SHADOW
+        ):
+            platform = str(selected_input.get("platform") or "unknown")
+            external_user_id = selected_input.get("external_user_id")
+            external_chat_id = selected_input.get("external_chat_id")
+            text = str(selected_input.get("text") or "").strip()
+            if external_user_id and external_chat_id and text:
+                selected_input["internal_id"] = (
+                    UserManager.get_or_create_user_internal_id(
+                        channel=platform,
+                        external_id=str(external_user_id),
+                        secret_username=f"{platform}_{external_user_id}",
+                        updated_by="chat_workflow_pipeline_rollout",
+                    )
+                )
+                mode = self.pipeline_flags.mode_for(selected_input)
+
+        owner_scope = str(
+            selected_input.get("internal_id")
+            or selected_input.get("external_user_id")
+            or "anonymous"
+        )
+        owner_scope_hash = hashlib.sha256(owner_scope.encode()).hexdigest()[:16]
+        platform = str(selected_input.get("platform") or "unknown")
+
+        if mode is PipelineMode.LEGACY:
+            logger.info(
+                "Turn path=legacy platform=%s owner_scope=%s",
+                platform,
+                owner_scope_hash,
+            )
+            return await self._process_message_legacy(selected_input)
+
+        cancellation_event = selected_input.get("_cancellation_event")
+        if not isinstance(cancellation_event, asyncio.Event):
+            cancellation_event = None
+
+        if mode is PipelineMode.SHADOW:
+            legacy_result = await self._process_message_legacy(selected_input)
+            state = await self.turn_pipeline.run(
+                selected_input,
+                mode=PipelineMode.SHADOW,
+                shadow_result=legacy_result,
+                cancellation_event=cancellation_event,
+            )
+            comparison = self.turn_pipeline.shadow_comparison(state, legacy_result)
+            legacy_result["pipeline_shadow"] = state.as_dict()
+            legacy_result["pipeline_shadow_comparison"] = comparison
+            legacy_result["response_origin"] = "legacy_chat_workflow"
+            turn_event_writer.record_pipeline(
+                state,
+                response=legacy_result,
+                comparison=comparison,
+            )
+            logger.info(
+                "Turn path=shadow platform=%s owner_scope=%s route_match=%s",
+                platform,
+                state.owner_scope_hash,
+                comparison["route_match"],
+            )
+            return legacy_result
+
+        state = await self.turn_pipeline.run(
+            selected_input,
+            mode=PipelineMode.ACTIVE,
+            cancellation_event=cancellation_event,
+        )
+        result = self.turn_pipeline.finalize_active_result(state)
+        logger.info(
+            "Turn path=active platform=%s owner_scope=%s failed_stage=%s",
+            platform,
+            state.owner_scope_hash,
+            state.failed_stage or "none",
+        )
+        return result
+
+    async def _process_message_legacy(self, normalized_input: Dict) -> Dict:
         """Understand, execute, and trace one complete connector turn."""
         enriched = dict(normalized_input or {})
         original_text = str(enriched.get("text") or "").strip()
@@ -733,10 +825,15 @@ class ChatWorkflow:
         ):
             try:
                 user_profile = UserManager.get_user_profile(internal_id) or {}
-                plan = build_execution_plan(
-                    turn_analysis.state,
-                    turn_analysis.operational_decisions,
-                    preserve_order=turn_analysis.preserve_order,
+                prebuilt_plan = normalized_input.get("_execution_plan")
+                plan = (
+                    prebuilt_plan
+                    if isinstance(prebuilt_plan, ExecutionPlan)
+                    else build_execution_plan(
+                        turn_analysis.state,
+                        turn_analysis.operational_decisions,
+                        preserve_order=turn_analysis.preserve_order,
+                    )
                 )
 
                 async def execute_decision(decision):

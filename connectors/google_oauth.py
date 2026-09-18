@@ -6,7 +6,6 @@ import base64
 from datetime import datetime, timezone
 from email.message import EmailMessage
 import hashlib
-import json
 import os
 import secrets
 from urllib.parse import urlencode
@@ -14,6 +13,7 @@ from urllib.parse import urlencode
 import httpx
 
 from services.credential_vault import delete_credential, get_credential, put_credential
+from services.oauth_state import consume_oauth_state, save_oauth_state
 
 CALENDAR_READ_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
 CALENDAR_WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events"
@@ -49,11 +49,8 @@ def authorization_url(owner_id: str, *, product: str, write: bool = False) -> st
         raise RuntimeError("Google OAuth client ID and redirect URI are not configured")
     verifier, challenge = _pkce()
     state = secrets.token_urlsafe(32)
-    from memory.local_store import save_personal_item
-
-    save_personal_item(
+    save_oauth_state(
         owner_id,
-        "oauth_state",
         {
             "id": state,
             "state": state,
@@ -86,28 +83,7 @@ def authorization_url(owner_id: str, *, product: str, write: bool = False) -> st
 
 
 def _consume_state(state: str) -> tuple[str, dict]:
-    from memory.local_store import _LOCK, _connect, save_personal_item
-
-    with _LOCK, _connect() as connection:
-        rows = connection.execute(
-            "SELECT internal_id,document_json FROM personal_items "
-            "WHERE kind='oauth_state' ORDER BY updated_at DESC LIMIT 100"
-        ).fetchall()
-    for row in rows:
-        item = json.loads(row["document_json"])
-        if secrets.compare_digest(str(item.get("state", "")), state):
-            valid = (
-                item.get("provider") == "google"
-                and not item.get("used")
-                and float(item.get("expires_at", 0))
-                > datetime.now(timezone.utc).timestamp()
-            )
-            if not valid:
-                break
-            item["used"] = True
-            save_personal_item(str(row["internal_id"]), "oauth_state", item)
-            return str(row["internal_id"]), item
-    raise PermissionError("Google OAuth state is invalid, expired, or already used")
+    return consume_oauth_state(state, provider="google")
 
 
 async def exchange_authorization_code(state: str, code: str) -> tuple[str, str]:

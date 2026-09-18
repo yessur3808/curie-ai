@@ -8,6 +8,7 @@ from connectors.lifecycle import (
     ConnectorApplication,
     ConnectorRegistry,
     ConnectorState,
+    DeliveryStatus,
 )
 
 pytestmark = pytest.mark.integration
@@ -97,3 +98,25 @@ async def test_registry_exposes_only_push_capable_connectors():
     assert list(outbound) == ["push"]
     assert await outbound["push"]("123", "bonjour") is True
     assert sent == [("123", "bonjour")]
+
+
+@pytest.mark.asyncio
+async def test_delivery_failure_returns_a_failed_receipt_not_success():
+    async def fail_send(_recipient, _message):
+        raise RuntimeError("provider rejected delivery with private details")
+
+    connector = ConnectorApplication(
+        "telegram",
+        lambda workflow: None,
+        send_fn=fail_send,
+        ready_probe=lambda: True,
+    )
+    connector.state = ConnectorState.READY
+
+    receipt = await connector.send_with_receipt("private-recipient", "private text")
+
+    assert receipt.delivered is False
+    assert receipt.status is DeliveryStatus.FAILED
+    assert receipt.error_type == "RuntimeError"
+    assert "private" not in str(receipt.as_dict())
+    assert await connector.send("private-recipient", "private text") is False

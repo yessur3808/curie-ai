@@ -200,6 +200,19 @@ class TurnEventWriter:
         except OSError:
             pass
 
+    def _append(self, event: Mapping[str, Any]) -> None:
+        encoded = json.dumps(event, separators=(",", ":"), sort_keys=True)
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            try:
+                self.path.parent.chmod(0o700)
+            except OSError:
+                pass
+            self._rotate_if_needed()
+            with self.path.open("a", encoding="utf-8") as stream:
+                stream.write(encoded + "\n")
+            self.path.chmod(0o600)
+
     def record(self, state: Any, response: Mapping[str, Any]) -> None:
         """Write metadata only: never raw prompts, responses, IDs, or parameters."""
         try:
@@ -240,17 +253,86 @@ class TurnEventWriter:
                     else "completed"
                 ),
             }
-            encoded = json.dumps(event, separators=(",", ":"), sort_keys=True)
-            with self._lock:
-                self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                try:
-                    self.path.parent.chmod(0o700)
-                except OSError:
-                    pass
-                self._rotate_if_needed()
-                with self.path.open("a", encoding="utf-8") as stream:
-                    stream.write(encoded + "\n")
-                self.path.chmod(0o600)
+            pipeline = response.get("pipeline")
+            if isinstance(pipeline, Mapping):
+                stages = pipeline.get("stages")
+                event.update(
+                    {
+                        "pipeline_mode": str(pipeline.get("mode") or "unknown"),
+                        "pipeline_failed_stage": pipeline.get("failed_stage"),
+                        "pipeline_stage_statuses": {
+                            str(item.get("stage")): str(item.get("status"))
+                            for item in stages or ()
+                            if isinstance(item, Mapping)
+                        },
+                    }
+                )
+            event["response_origin"] = str(
+                response.get("response_origin") or "legacy_chat_workflow"
+            )
+            self._append(event)
+        except Exception:
+            # Observability must never alter the conversational outcome.
+            pass
+
+    def record_pipeline(
+        self,
+        state: Any,
+        *,
+        response: Mapping[str, Any] | None = None,
+        comparison: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Write an allowlisted stage trace without serializing stage artifacts."""
+        try:
+            safe = state.as_dict()
+            stages = tuple(safe.get("stages") or ())
+            event: dict[str, Any] = {
+                "schema_version": 1,
+                "event_type": "pipeline_trace",
+                "recorded_at": time.time(),
+                "trace_id": str(safe.get("trace_id") or ""),
+                "turn_id": str(safe.get("turn_id") or ""),
+                "platform": str(safe.get("platform") or "unknown"),
+                "owner_scope_hash": str(safe.get("owner_scope_hash") or ""),
+                "message_hash": str(safe.get("message_hash") or ""),
+                "message_chars": int(safe.get("message_chars") or 0),
+                "pipeline_mode": str(safe.get("mode") or "unknown"),
+                "pipeline_failed_stage": safe.get("failed_stage"),
+                "pipeline_stage_statuses": {
+                    str(item.get("stage")): str(item.get("status"))
+                    for item in stages
+                    if isinstance(item, Mapping)
+                },
+                "pipeline_stage_durations_ms": {
+                    str(item.get("stage")): float(item.get("duration_ms") or 0)
+                    for item in stages
+                    if isinstance(item, Mapping)
+                },
+            }
+            if response is not None:
+                event.update(
+                    {
+                        "response_origin": str(
+                            response.get("response_origin") or "unknown"
+                        ),
+                        "model_used": str(response.get("model_used") or "unknown"),
+                        "response_chars": len(str(response.get("text") or "")),
+                    }
+                )
+            if comparison is not None:
+                event["shadow_comparison"] = {
+                    "route_match": bool(comparison.get("route_match")),
+                    "expected_capability_count": int(
+                        comparison.get("expected_capability_count") or 0
+                    ),
+                    "legacy_capability_count": int(
+                        comparison.get("legacy_capability_count") or 0
+                    ),
+                    "legacy_response_present": bool(
+                        comparison.get("legacy_response_present")
+                    ),
+                }
+            self._append(event)
         except Exception:
             # Observability must never alter the conversational outcome.
             pass
