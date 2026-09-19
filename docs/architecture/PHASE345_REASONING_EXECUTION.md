@@ -74,8 +74,11 @@ timestamps.
 
 `DeviceInventoryService` refreshes providers concurrently, caches cheap reads,
 tracks provider failures separately, and marks previously observed devices
-unavailable before stale removal. One failing provider cannot erase successful
-inventory from another.
+unavailable before stale removal. Known owner inventories receive a bounded
+best-effort warm-up before connectors start, then refresh lazily at the
+configured interval. One failing provider cannot erase successful inventory
+from another. Refresh coordination is event-loop-local so Telegram, API, and
+other connector threads can safely share the canonical cache.
 
 ### Strict resolution order
 

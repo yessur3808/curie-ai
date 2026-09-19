@@ -9,6 +9,7 @@ import os
 import re
 import threading
 from typing import Iterable
+import weakref
 
 from .aliases import list_device_aliases, normalize_alias
 from .base import SmartHomeProvider
@@ -62,8 +63,27 @@ class DeviceInventoryService:
         self._devices: dict[tuple[str, str, str], CanonicalDevice] = {}
         self._issues: dict[tuple[str, str], ProviderIssue] = {}
         self._refreshed: dict[tuple[str, str], datetime] = {}
-        self._async_lock = asyncio.Lock()
+        self._async_locks: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, dict[str, asyncio.Lock]
+        ] = weakref.WeakKeyDictionary()
+        self._async_locks_guard = threading.Lock()
         self._read_lock = threading.RLock()
+
+    def _refresh_lock(self, owner_id: str) -> asyncio.Lock:
+        """Return a refresh lock owned by the caller's event loop.
+
+        Curie's connectors may run in separate threads and event loops. An
+        ``asyncio.Lock`` cannot safely be shared across those loops, while the
+        canonical cache itself remains protected by ``_read_lock``.
+        """
+        loop = asyncio.get_running_loop()
+        with self._async_locks_guard:
+            owner_locks = self._async_locks.setdefault(loop, {})
+            lock = owner_locks.get(owner_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                owner_locks[owner_id] = lock
+            return lock
 
     def _snapshot(
         self, owner_id: str, provider: str | None, *, cached: bool
@@ -123,7 +143,7 @@ class DeviceInventoryService:
             )
         if fresh and not force:
             return self._snapshot(owner, provider, cached=True)
-        async with self._async_lock:
+        async with self._refresh_lock(owner):
             # Another caller may have completed the same refresh while this one
             # was waiting for the lock. Avoid immediately querying every
             # provider a second time.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -737,6 +738,53 @@ def http_errors() -> tuple[type[Exception], ...]:
 
 
 _hub: SmartHomeHub | None = None
+
+
+async def warm_smart_home_inventory(
+    owner_ids: Iterable[str], *, timeout_seconds: float | None = None
+) -> dict[str, dict[str, Any]]:
+    """Warm each known owner's canonical inventory without exposing failures.
+
+    Startup warming is bounded per owner and never makes a connector depend on
+    one provider being healthy. Normal interval refreshes continue through the
+    same inventory service after startup.
+    """
+    owners = tuple(
+        dict.fromkeys(
+            str(owner_id).strip() for owner_id in owner_ids if str(owner_id).strip()
+        )
+    )[:100]
+    if not owners:
+        return {}
+    timeout = max(
+        1.0,
+        float(
+            timeout_seconds
+            if timeout_seconds is not None
+            else os.getenv("HOME_INVENTORY_STARTUP_OWNER_TIMEOUT_SECONDS", "15")
+        ),
+    )
+    hub = get_smart_home_hub()
+
+    async def refresh_owner(owner_id: str) -> tuple[str, dict[str, Any]]:
+        try:
+            devices, issues = await asyncio.wait_for(
+                hub.canonical_inventory(owner_id, force=True), timeout=timeout
+            )
+            return owner_id, {
+                "status": "ready",
+                "device_count": len(devices),
+                "provider_issue_count": len(issues),
+            }
+        except (TimeoutError, asyncio.TimeoutError):
+            return owner_id, {"status": "timeout"}
+        except Exception as exc:
+            return owner_id, {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            }
+
+    return dict(await asyncio.gather(*(refresh_owner(owner) for owner in owners)))
 
 
 def get_smart_home_hub() -> SmartHomeHub:

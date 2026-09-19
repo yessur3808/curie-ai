@@ -612,6 +612,43 @@ def init_llm_and_memory(no_init):
     manager.start_background_preload()
 
 
+def warm_smart_home_on_startup() -> None:
+    """Populate known owners' canonical device caches before connectors start."""
+    if os.getenv("HOME_INVENTORY_WARM_ON_STARTUP", "true").lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return
+    try:
+        from memory.repositories import get_repositories
+        from services.smart_home import warm_smart_home_inventory
+
+        owners = sorted(
+            {
+                str(item.get("internal_id") or "").strip()
+                for item in get_repositories().profiles.list_with_identities()
+                if str(item.get("internal_id") or "").strip()
+            }
+        )
+        if not owners:
+            logger.info("Smart-home startup warm-up skipped: no known owners")
+            return
+        outcomes = asyncio.run(warm_smart_home_inventory(owners))
+        ready = sum(item.get("status") == "ready" for item in outcomes.values())
+        degraded = len(outcomes) - ready
+        logger.info(
+            "Smart-home inventory warm-up complete: %s ready, %s degraded",
+            ready,
+            degraded,
+        )
+    except Exception as exc:
+        # Device discovery must not prevent Curie's connectors from starting.
+        logger.warning(
+            "Smart-home startup warm-up failed safely (%s)", type(exc).__name__
+        )
+
+
 # --- Coder Batch Mode Helpers ---
 def get_batch_coder_params_from_config(config_path):
     if not os.path.exists(config_path):
@@ -739,6 +776,8 @@ def main():
         run_signal_flag,
     ) = determine_what_to_run(args)
     init_llm_and_memory(args.no_init)
+    if not args.no_init:
+        warm_smart_home_on_startup()
 
     # Load persona and initialize ChatWorkflow
     persona_arg = getattr(args, "persona", None)

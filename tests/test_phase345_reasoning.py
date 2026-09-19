@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
+import threading
 
 import pytest
 
@@ -44,7 +45,7 @@ from services.smart_home.aliases import (
     record_alias_candidate,
     reject_device_alias,
 )
-from services.smart_home.hub import SmartHomeHub
+from services.smart_home.hub import SmartHomeHub, warm_smart_home_inventory
 from services.smart_home.inventory import DeviceInventoryService
 from services.smart_home.models import CanonicalDevice, ControlReceipt, DeviceSnapshot
 
@@ -437,6 +438,55 @@ def test_inventory_refreshes_independent_providers_concurrently():
     assert result.issues == ()
     assert set(entered) == {"one", "two"}
     assert first.list_calls == second.list_calls == 1
+
+
+def test_inventory_refresh_is_safe_across_connector_event_loops():
+    class SlowProvider(FakeProvider):
+        async def list_devices(self, owner_id):
+            self.list_calls += 1
+            await asyncio.sleep(0.02)
+            return list(self.devices)
+
+    provider = SlowProvider([_snapshot()])
+    inventory = DeviceInventoryService([provider], refresh_seconds=60)
+    results = []
+    errors = []
+
+    def refresh():
+        try:
+            results.append(asyncio.run(inventory.refresh("owner", force=True)))
+        except Exception as exc:  # pragma: no cover - assertion records failures
+            errors.append(exc)
+
+    threads = [threading.Thread(target=refresh) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=1)
+
+    assert not errors
+    assert len(results) == 2
+    assert all(result.devices[0].canonical_id == "fake:lamp-1" for result in results)
+
+
+def test_startup_inventory_warmup_is_owner_scoped_bounded_and_deduplicated(
+    monkeypatch,
+):
+    import services.smart_home.hub as hub_module
+
+    provider = FakeProvider([_snapshot()])
+    monkeypatch.setattr(hub_module, "_hub", SmartHomeHub([provider]))
+    result = asyncio.run(
+        warm_smart_home_inventory(["owner", "owner"], timeout_seconds=0.5)
+    )
+    assert result == {
+        "owner": {
+            "status": "ready",
+            "device_count": 1,
+            "provider_issue_count": 0,
+        }
+    }
+    assert provider.list_calls == 1
 
 
 def test_inventory_marks_provider_devices_unavailable_before_removal():

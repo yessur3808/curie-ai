@@ -9,13 +9,24 @@ from .models import CanonicalDevice, ControlReceipt, DeviceSnapshot, ProviderIss
 
 
 def __getattr__(name: str):
-    if name in {"SmartHomeHub", "get_smart_home_hub", "reset_smart_home_hub"}:
-        from .hub import SmartHomeHub, get_smart_home_hub, reset_smart_home_hub
+    if name in {
+        "SmartHomeHub",
+        "get_smart_home_hub",
+        "reset_smart_home_hub",
+        "warm_smart_home_inventory",
+    }:
+        from .hub import (
+            SmartHomeHub,
+            get_smart_home_hub,
+            reset_smart_home_hub,
+            warm_smart_home_inventory,
+        )
 
         return {
             "SmartHomeHub": SmartHomeHub,
             "get_smart_home_hub": get_smart_home_hub,
             "reset_smart_home_hub": reset_smart_home_hub,
+            "warm_smart_home_inventory": warm_smart_home_inventory,
         }[name]
     raise AttributeError(name)
 
@@ -30,4 +41,5 @@ __all__ = [
     "SmartHomeHub",
     "get_smart_home_hub",
     "reset_smart_home_hub",
+    "warm_smart_home_inventory",
 ]
