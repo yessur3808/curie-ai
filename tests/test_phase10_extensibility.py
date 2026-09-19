@@ -57,8 +57,8 @@ def test_sqlite_migrations_support_forward_and_rollback():
         "CREATE TABLE adaptive_memories(id TEXT PRIMARY KEY, internal_id TEXT, document_json TEXT);"
         "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT, applied_at TEXT);"
     )
-    assert apply_migrations(connection) == 3
-    assert current_version(connection) == 3
+    assert apply_migrations(connection) == 4
+    assert current_version(connection) == 4
     indexes = {
         row[0]
         for row in connection.execute(

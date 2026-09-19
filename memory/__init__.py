@@ -11,6 +11,13 @@ from .adaptive import (
 )
 from .hierarchy import memory_stats, memory_tier, rank_memories
 from .repositories import get_repositories
+from .service import (
+    ConfirmationState,
+    MemoryRecord,
+    MemoryService,
+    MemoryTier,
+    get_memory_service,
+)
 
 
 def init_memory():
@@ -30,4 +37,9 @@ __all__ = [
     "memory_stats",
     "memory_tier",
     "get_repositories",
+    "MemoryRecord",
+    "MemoryService",
+    "MemoryTier",
+    "ConfirmationState",
+    "get_memory_service",
 ]

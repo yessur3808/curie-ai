@@ -25,6 +25,11 @@ from agent.kernel.pipeline import (
 from agent.kernel.planning import ExecutionPlan, build_execution_plan
 from agent.kernel.understanding import TurnAnalysis, analyze_turn
 from agent.observability import turn_event_writer
+from agent.response_composer import (
+    ResponsePlan,
+    build_response_plan,
+    render_response as render_planned_response,
+)
 
 if TYPE_CHECKING:
     from agent.chat_workflow import ChatWorkflow
@@ -357,19 +362,40 @@ class LegacyTurnPipelineAdapter:
 
         async def plan_response(state: PipelineState) -> StageOutput:
             result = _artifact(state, PipelineStage.VERIFY, PipelineStage.EXECUTE)
-            text = str(result.get("text") or "")
-            return StageOutput(
+            understood = _artifact(state, PipelineStage.UNDERSTAND)
+            analysis = understood.get("analysis")
+            identity = _artifact(state, PipelineStage.RESOLVE_IDENTITY)
+            response_mode = (
+                analysis.state.response_mode.value
+                if isinstance(analysis, TurnAnalysis)
+                else "brief"
+            )
+            response_plan = build_response_plan(
                 result,
+                user_text=str(identity.get("text") or ""),
+                response_mode=response_mode,
+                connector=str(identity.get("platform") or "unknown"),
+            )
+            planned = dict(result)
+            planned["_response_plan"] = response_plan.as_dict(include_content=True)
+            return StageOutput(
+                planned,
                 {
-                    "has_direct_answer": bool(text.strip()),
-                    "message_parts": len(result.get("message_parts") or ())
-                    or int(bool(text)),
-                    "detail_source": "legacy_response_policy",
+                    "has_direct_answer": bool(response_plan.source_text),
+                    "message_parts": len(response_plan.message_parts),
+                    "detail": response_plan.detail.value,
+                    "outcome": response_plan.outcome.value,
+                    "fact_lock": response_plan.fact_fingerprint[:12],
                 },
             )
 
         async def render_response(state: PipelineState) -> StageOutput:
-            result = _artifact(state, PipelineStage.PLAN_RESPONSE)
+            planned = _artifact(state, PipelineStage.PLAN_RESPONSE)
+            response_plan_data = planned.pop("_response_plan", None)
+            if not isinstance(response_plan_data, Mapping):
+                raise ValueError("response plan is missing")
+            response_plan = ResponsePlan.from_dict(response_plan_data)
+            result = render_planned_response(response_plan, planned)
             if not str(result.get("text") or "").strip():
                 raise ValueError("response renderer produced empty text")
             return StageOutput(
@@ -377,6 +403,9 @@ class LegacyTurnPipelineAdapter:
                 {
                     "rendered": True,
                     "response_chars": len(str(result["text"])),
+                    "detail": response_plan.detail.value,
+                    "outcome": response_plan.outcome.value,
+                    "fact_lock_verified": True,
                 },
             )
 
@@ -433,6 +462,7 @@ class LegacyTurnPipelineAdapter:
                 else "I couldn't format that response. Please check the task status before retrying."
             )
         result["text"] = text
+        result.pop("_response_plan", None)
         result["model_used"] = (
             str(result.get("model_used") or "pipeline") + ":render_fallback"
         )

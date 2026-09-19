@@ -1737,36 +1737,6 @@ class ChatWorkflow:
                 )
             )
 
-        profile_runtime_keys = frozenset(
-            {
-                "timezone",
-                "location",
-                "last_user_interaction_at",
-                "last_proactive_at",
-                "last_proactive_generation_at",
-                "proactive_count_date",
-                "proactive_count_today",
-            }
-        )
-        for key, value in _select_relevant_facts(
-            dict(user_profile or {}), user_text
-        ).items():
-            if key in profile_runtime_keys:
-                continue
-            safe_id = hashlib.sha256(str(key).encode()).hexdigest()[:10]
-            candidates.append(
-                ContextCandidate(
-                    f"profile-{safe_id}",
-                    ContextSection.DURABLE_MEMORY,
-                    f"{key}: {value}",
-                    "verified profile fact relevant to the current request",
-                    rejected=self._context_mentions_rejected_topic(
-                        f"{key} {value}", rejected_topics
-                    ),
-                    payload={"kind": "profile", "key": key},
-                )
-            )
-
         adaptive_memories: list[dict] = []
         matching_abilities: list[dict] = []
         memory_conflicts: list[dict] = []
@@ -1793,7 +1763,9 @@ class ChatWorkflow:
                     get_relevant_memories,
                 )
 
-                adaptive_memories = get_relevant_memories(internal_id, user_text)
+                adaptive_memories = get_relevant_memories(
+                    internal_id, user_text, profile=dict(user_profile or {})
+                )
                 matching_abilities = get_matching_abilities(internal_id, user_text)
                 memory_conflicts = get_pending_memory_conflicts(internal_id)
             except Exception as exc:
@@ -2146,7 +2118,9 @@ class ChatWorkflow:
                     get_relevant_memories,
                 )
 
-                adaptive_memories = get_relevant_memories(internal_id, user_text)
+                adaptive_memories = get_relevant_memories(
+                    internal_id, user_text, profile=user_profile
+                )
                 memory_conflicts = get_pending_memory_conflicts(internal_id)
                 matching_abilities = get_matching_abilities(internal_id, user_text)
             except Exception as exc:
@@ -2416,6 +2390,13 @@ class ChatWorkflow:
                     for k, v in _select_relevant_facts(user_profile, user_text).items()
                     if k not in _context_keys
                 }
+                if any(
+                    memory.get("source") == "legacy_verified_profile"
+                    for memory in adaptive_memories
+                ):
+                    # The unified memory service already ranked these legacy
+                    # profile facts, so do not inject them a second time.
+                    extra_relevant = {}
                 if context_envelope is not None:
                     allowed_profile_keys = {
                         str(item.payload.get("key"))

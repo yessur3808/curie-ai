@@ -20,6 +20,9 @@ CANNED_FRENCH_SUFFIX_PATTERN = re.compile(
     r"(?:,?\s*(?:oui|non))?[?!.]*\s*$",
     re.I,
 )
+CANNED_ADDRESS_SUFFIX_PATTERN = re.compile(
+    r"(?:,\s*|\s+)(?:monsieur|madame|mon ami)[?!.]*\s*$", re.I
+)
 CODE_BLOCK_PATTERN = re.compile(r"```[\s\S]*?```|```[\s\S]*$", re.M)
 INLINE_CODE_PATTERN = re.compile(r"`[^`]+`")
 DEPENDENCY_PATTERN = re.compile(
@@ -63,6 +66,10 @@ class ResponsePolicy:
         response = DEPENDENCY_PATTERN.sub("I’m here to help", response).strip()
         if (self.persona.get("name") or "").strip().lower() == "curie":
             response = CANNED_FRENCH_SUFFIX_PATTERN.sub("", response).rstrip()
+            # A French address can be charming when context earns it.  Appending
+            # one to every answer is mechanical and makes command replies sound
+            # formal, so the shared boundary removes only canned end tags.
+            response = CANNED_ADDRESS_SUFFIX_PATTERN.sub("", response).rstrip()
             response = naturalize_prose_punctuation(response)
         if not self.minimal_sanitization:
             response = CODE_BLOCK_PATTERN.sub("", response).strip()

@@ -9,6 +9,7 @@ from contextlib import suppress
 import datetime
 import os
 import logging
+import re
 import secrets
 import hashlib
 from dataclasses import dataclass
@@ -394,30 +395,57 @@ async def notify_master_awake(application) -> None:
     logger.info("Sent startup-ready notification to the configured master user")
 
 
+_TELEGRAM_PROTECTED = re.compile(r"```[\s\S]*?```|`[^`\n]+`|https?://[^\s<>]+", re.I)
+
+
+def _protected_split_ranges(text: str, hard_limit: int) -> list[tuple[int, int]]:
+    """Return markup spans that fit in one Telegram message and must stay whole."""
+    return [
+        (match.start(), match.end())
+        for match in _TELEGRAM_PROTECTED.finditer(text)
+        if match.end() - match.start() <= hard_limit
+    ]
+
+
+def _safe_telegram_split(text: str, target: int, hard_limit: int) -> int:
+    window = text[: min(len(text), target + 1)]
+    candidates = [
+        window.rfind("\n\n"),
+        window.rfind("\n"),
+        window.rfind(". "),
+        window.rfind("? "),
+        window.rfind("! "),
+        window.rfind(" "),
+    ]
+    split_at = max(candidates)
+    if split_at < target // 2:
+        split_at = min(target, hard_limit)
+    elif window[split_at : split_at + 2] in {". ", "? ", "! "}:
+        split_at += 1
+
+    for start, end in _protected_split_ranges(text[:hard_limit], hard_limit):
+        if start < split_at < end:
+            if start >= max(1, target // 3):
+                split_at = start
+            elif end <= hard_limit:
+                split_at = end
+            break
+    return max(1, min(split_at, hard_limit))
+
+
 def split_telegram_message(
     text: str, limit: int = 3500, preferred_limit: int = 1400
 ) -> list[str]:
-    """Split long replies at natural boundaries below Telegram's hard limit."""
+    """Split at natural boundaries without cutting URLs or Markdown code."""
     text = (text or "").strip()
     if not text:
         return [""]
-    chunks = []
+    limit = max(64, int(limit))
+    chunks: list[str] = []
     remaining = text
     target_limit = min(limit, max(400, preferred_limit))
     while len(remaining) > target_limit:
-        window = remaining[: target_limit + 1]
-        split_at = max(
-            window.rfind("\n\n"),
-            window.rfind("\n"),
-            window.rfind(". "),
-            window.rfind("? "),
-            window.rfind("! "),
-            window.rfind(" "),
-        )
-        if split_at < target_limit // 2:
-            split_at = target_limit
-        elif window[split_at : split_at + 2] in {". ", "? ", "! "}:
-            split_at += 1
+        split_at = _safe_telegram_split(remaining, target_limit, limit)
         chunks.append(remaining[:split_at].strip())
         remaining = remaining[split_at:].strip()
     if remaining:

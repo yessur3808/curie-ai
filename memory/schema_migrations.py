@@ -52,6 +52,42 @@ MIGRATIONS = (
             "DROP TABLE IF EXISTS session_metadata",
         ),
     ),
+    Migration(
+        4,
+        "unified_memory_service",
+        (
+            "CREATE TABLE IF NOT EXISTS memory_records ("
+            "record_id TEXT NOT NULL, owner_id TEXT NOT NULL, tier TEXT NOT NULL, "
+            "type TEXT NOT NULL, subject TEXT NOT NULL, predicate TEXT NOT NULL, "
+            "document_json TEXT NOT NULL, tombstone INTEGER NOT NULL DEFAULT 0, "
+            "updated_at TEXT NOT NULL, PRIMARY KEY(owner_id, record_id))",
+            "CREATE INDEX IF NOT EXISTS idx_memory_records_owner_tier "
+            "ON memory_records(owner_id, tier, tombstone, updated_at)",
+            "CREATE INDEX IF NOT EXISTS idx_memory_records_owner_predicate "
+            "ON memory_records(owner_id, predicate)",
+            "CREATE TABLE IF NOT EXISTS memory_retrieval_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL, "
+            "query_hash TEXT NOT NULL, record_ids_json TEXT NOT NULL, "
+            "outcome TEXT NOT NULL, created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS idx_memory_retrieval_owner_time "
+            "ON memory_retrieval_events(owner_id, created_at)",
+            "CREATE TABLE IF NOT EXISTS memory_migration_backups ("
+            "run_id TEXT NOT NULL, owner_id TEXT NOT NULL, backup_json TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, expires_at TEXT NOT NULL, "
+            "PRIMARY KEY(run_id, owner_id))",
+            "CREATE TABLE IF NOT EXISTS memory_owner_cutovers ("
+            "owner_id TEXT PRIMARY KEY, mode TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        ),
+        (
+            "DROP TABLE IF EXISTS memory_owner_cutovers",
+            "DROP TABLE IF EXISTS memory_migration_backups",
+            "DROP INDEX IF EXISTS idx_memory_retrieval_owner_time",
+            "DROP TABLE IF EXISTS memory_retrieval_events",
+            "DROP INDEX IF EXISTS idx_memory_records_owner_predicate",
+            "DROP INDEX IF EXISTS idx_memory_records_owner_tier",
+            "DROP TABLE IF EXISTS memory_records",
+        ),
+    ),
 )
 
 

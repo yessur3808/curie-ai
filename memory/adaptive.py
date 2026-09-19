@@ -13,8 +13,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Optional
-import uuid
+from typing import Any, Mapping, Optional
 
 from memory.database import mongo_db
 from memory.hierarchy import (
@@ -201,6 +200,14 @@ def _memory_enabled(internal_id: str, channel: str | None = None) -> bool:
     )
 
 
+def _unified_memory_service():
+    from memory.service import get_memory_service
+
+    return get_memory_service(
+        mongo_database=mongo_db if os.getenv("MONGODB_URI") else None
+    )
+
+
 def _all_owner_memories(internal_id: str) -> list[dict]:
     if not os.getenv("MONGODB_URI"):
         from memory.local_store import list_adaptive_memories
@@ -312,104 +319,34 @@ def record_memories(
     source_message_id: str = "",
     source_channel: str = "unknown",
 ) -> list[dict]:
-    """Persist facts with provenance and reinforcement counts."""
+    """Persist facts through the unified policy and repository boundary."""
+    service = _unified_memory_service()
+    unified_results: list[dict] = []
     if not internal_id or not facts:
-        return []
+        return unified_results
     if not _memory_enabled(internal_id, source_channel) or _DO_NOT_REMEMBER.search(
         evidence
     ):
-        return []
-    now = _now()
-    results = []
-    # Fact extraction commonly returns several fields. Loading the owner's
-    # store once avoids one complete database scan per field.
-    owner_memories = _all_owner_memories(str(internal_id))
+        return unified_results
     for key, value in facts.items():
-        if _SENSITIVE.search(f"{key} {value}"):
-            continue
         kind = _memory_kind(str(key), source)
-        existing = [
-            item
-            for item in owner_memories
-            if item.get("active", True)
-            and str(item.get("key", "")).casefold() == str(key).casefold()
-        ]
-        same = next((item for item in existing if item.get("value") == value), None)
-        contradictory = [item for item in existing if item.get("value") != value]
-        memory_id = (
-            str(same.get("id") or same.get("_id")) if same else str(uuid.uuid4())
+        record = service.remember(
+            str(internal_id),
+            predicate=str(key),
+            value=value,
+            type=kind,
+            source=source,
+            source_turn=source_message_id,
+            source_channel=source_channel,
+            evidence=evidence,
         )
-        status = (
-            "pending_confirmation"
-            if contradictory
-            else "verified" if source == "explicit_user_statement" else "hypothesis"
-        )
-        document = {
-            "_id": memory_id,
-            "id": memory_id,
-            "owner_id": str(internal_id),
-            "internal_id": str(internal_id),  # migration compatibility
-            "kind": kind,
-            "key": str(key)[:64],
-            "value": value,
-            "source": source,
-            "source_message_id": str(source_message_id)[:128],
-            "source_channel": str(source_channel)[:64],
-            "confidence": (
-                1.0 if source == "explicit_user_statement" else _MEMORY_MIN_CONFIDENCE
-            ),
-            "evidence": evidence[:500],
-            "contradicts": [
-                str(item.get("id") or item.get("_id")) for item in contradictory
-            ],
-            "status": status,
-            "sensitivity": "ordinary",
-            "importance": default_importance(kind),
-            "created_at": same.get("created_at", now) if same else now,
-            "updated_at": now,
-            "last_confirmed_at": now if source == "explicit_user_statement" else None,
-            "last_seen_at": now,
-            "expires_at": (
-                now + timedelta(days=_TEMPORARY_TTL_DAYS)
-                if kind == "temporary_context"
-                else (
-                    None
-                    if source == "explicit_user_statement"
-                    else now + timedelta(days=_INFERRED_TTL_DAYS)
-                )
-            ),
-            "active": not contradictory,
-        }
-        if not os.getenv("MONGODB_URI"):
-            from memory.local_store import upsert_adaptive_memory
-
-            upsert_adaptive_memory(document)
-        else:
-            mongo_db.adaptive_memories.update_one(
-                {"_id": memory_id},
-                {
-                    "$set": {
-                        **{
-                            k: v
-                            for k, v in document.items()
-                            if k not in {"_id", "created_at"}
-                        },
-                    },
-                    "$inc": {"confirmation_count": 1},
-                    "$setOnInsert": {"created_at": document["created_at"]},
-                },
-                upsert=True,
-            )
+        if record is None:
+            continue
+        document = record.to_document()
         if document["active"] and document["status"] == "verified":
             _sync_core_profile(str(internal_id), str(key), value)
-        owner_memories = [
-            item
-            for item in owner_memories
-            if str(item.get("id") or item.get("_id")) != memory_id
-        ]
-        owner_memories.append(document)
-        results.append(document)
-    return results
+        unified_results.append(document)
+    return unified_results
 
 
 def record_conversation_episode(
@@ -434,127 +371,52 @@ def record_conversation_episode(
         or not _memory_enabled(str(internal_id), source_channel)
     ):
         return None
-    now = _now()
     content = clean[:350]
-    digest = hashlib.sha256(f"{internal_id}:{content.casefold()}".encode()).hexdigest()[
-        :24
-    ]
-    memory_id = f"episode-{digest}"
-    existing = next(
-        (
-            item
-            for item in _all_owner_memories(str(internal_id))
-            if str(item.get("id") or item.get("_id")) == memory_id
-        ),
-        None,
+    from memory.service import MemoryTier
+
+    record = _unified_memory_service().remember(
+        str(internal_id),
+        predicate=f"episode_{_slug(content[:90])}"[:64],
+        value=content,
+        type="episode",
+        source="explicit_conversation_episode",
+        source_turn=source_message_id,
+        source_channel=source_channel,
+        evidence=content,
+        tier=MemoryTier.EPISODIC,
+        confidence=0.95,
+        valid_until=_now() + timedelta(days=max(1, _EPISODE_TTL_DAYS)),
     )
-    document = {
-        "_id": memory_id,
-        "id": memory_id,
-        "owner_id": str(internal_id),
-        "internal_id": str(internal_id),
-        "kind": "episode",
-        "tier": "episodic",
-        "key": f"episode_{_slug(content[:90])}"[:64],
-        "value": content,
-        "source": "explicit_conversation_episode",
-        "source_message_id": str(source_message_id)[:128],
-        "source_channel": str(source_channel)[:64],
-        "confidence": 0.95,
-        "importance": default_importance("episode"),
-        "evidence": content,
-        "contradicts": [],
-        "status": "recorded",
-        "sensitivity": "ordinary",
-        "created_at": existing.get("created_at", now) if existing else now,
-        "updated_at": now,
-        "last_seen_at": now,
-        "last_confirmed_at": now,
-        "expires_at": now + timedelta(days=max(1, _EPISODE_TTL_DAYS)),
-        "active": True,
-    }
-    if not os.getenv("MONGODB_URI"):
-        from memory.local_store import upsert_adaptive_memory
-
-        upsert_adaptive_memory(document)
-        return document
-    mongo_db.adaptive_memories.update_one(
-        {"_id": memory_id},
-        {
-            "$set": {
-                **{
-                    key: value
-                    for key, value in document.items()
-                    if key not in {"_id", "created_at"}
-                }
-            },
-            "$inc": {"confirmation_count": 1},
-            "$setOnInsert": {"created_at": document["created_at"]},
-        },
-        upsert=True,
-    )
-    return document
+    return record.to_document() if record else None
 
 
-def get_relevant_memories(internal_id: str, query: str, limit: int = 8) -> list[dict]:
-    """Owner-filter first, then return a gated, budgeted hierarchical recall."""
+def get_relevant_memories(
+    internal_id: str,
+    query: str,
+    limit: int = 8,
+    *,
+    profile: Mapping[str, Any] | None = None,
+) -> list[dict]:
+    """Return owner-scoped recall from the unified memory service."""
     if not _memory_enabled(internal_id):
         return []
-    now = _now()
-    if not os.getenv("MONGODB_URI"):
-        from memory.local_store import list_adaptive_memories
-
-        docs = [
-            _normalize_stored_memory(item, str(internal_id))
-            for item in list_adaptive_memories(str(internal_id))
-        ]
-        active_docs = []
-        for doc in docs:
-            if not doc.get("active", True):
-                continue
-            expires_at = doc.get("expires_at")
-            if isinstance(expires_at, str):
-                try:
-                    expires_at = datetime.fromisoformat(
-                        expires_at.replace("Z", "+00:00")
-                    )
-                except ValueError:
-                    continue
-            if isinstance(expires_at, datetime):
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if expires_at <= now:
-                    continue
-            active_docs.append(doc)
-        docs = active_docs
-    else:
-        docs = list(
-            mongo_db.adaptive_memories.find(
-                {
-                    "$and": [
-                        {
-                            "$or": [
-                                {"owner_id": str(internal_id)},
-                                {"internal_id": str(internal_id)},
-                            ]
-                        },
-                        {"$or": [{"expires_at": None}, {"expires_at": {"$gt": now}}]},
-                    ],
-                    "active": True,
-                },
-                _RETRIEVAL_PROJECTION,
-            ).limit(max(100, min(int(os.getenv("MEMORY_MAX_CANDIDATES", "500")), 2000)))
-        )
-        docs = [_normalize_stored_memory(item, str(internal_id)) for item in docs]
-    return rank_memories(query, docs, limit=limit)
+    service = _unified_memory_service()
+    return service.retrieve(
+        str(internal_id),
+        query,
+        limit=limit,
+        supplemental_records=service.profile_records(str(internal_id), profile or {}),
+    ).as_documents()
 
 
 def get_pending_memory_conflicts(internal_id: str) -> list[dict]:
     """Return only this owner's unresolved contradictions for confirmation UI."""
+    from memory.service import ConfirmationState
+
     return [
-        item
-        for item in _all_owner_memories(str(internal_id))
-        if item.get("status") == "pending_confirmation"
+        item.to_document()
+        for item in _unified_memory_service().inspect(str(internal_id))
+        if item.confirmation_state is ConfirmationState.CONFLICTED
     ][:10]
 
 
@@ -658,17 +520,21 @@ def _set_memory_enabled(internal_id: str, enabled: bool) -> None:
 
 
 def _forget_memories(internal_id: str, key: str | None = None) -> int:
+    unified_count = _unified_memory_service().forget(
+        str(internal_id), predicate=key if key is not None else None
+    )
     if not os.getenv("MONGODB_URI"):
         from memory.local_store import delete_adaptive_memories
 
-        return delete_adaptive_memories(internal_id, key)
+        return max(unified_count, delete_adaptive_memories(internal_id, key))
     query: dict[str, Any] = {
         "$or": [{"owner_id": internal_id}, {"internal_id": internal_id}]
     }
     if key is not None:
         query["key"] = {"$regex": f"^{re.escape(key)}$", "$options": "i"}
-    return int(
-        getattr(mongo_db.adaptive_memories.delete_many(query), "deleted_count", 0)
+    return max(
+        unified_count,
+        int(getattr(mongo_db.adaptive_memories.delete_many(query), "deleted_count", 0)),
     )
 
 
@@ -691,14 +557,41 @@ def _forget_core_profile(internal_id: str, key: str | None = None) -> int:
 
 
 def _update_memory(internal_id: str, memory_id: str, updates: dict) -> bool:
+    from memory.service import MemoryRecord
+
     if not os.getenv("MONGODB_URI"):
         from memory.local_store import update_adaptive_memory
 
-        return update_adaptive_memory(memory_id, internal_id, updates)
-    result = mongo_db.adaptive_memories.update_one(
-        {"_id": memory_id, "owner_id": internal_id}, {"$set": updates}
-    )
-    return bool(getattr(result, "modified_count", 0))
+        modified = update_adaptive_memory(memory_id, internal_id, updates)
+    else:
+        result = mongo_db.adaptive_memories.update_one(
+            {"_id": memory_id, "owner_id": internal_id}, {"$set": updates}
+        )
+        modified = bool(getattr(result, "modified_count", 0))
+    service = _unified_memory_service()
+    current = service.repository.get(str(internal_id), str(memory_id))
+    if current is not None:
+        document = current.to_document()
+        document.update(updates)
+        if "status" in updates:
+            document["confirmation_state"] = {
+                "verified": "confirmed",
+                "recorded": "recorded",
+                "hypothesis": "candidate",
+                "pending_confirmation": "conflicted",
+                "corrected": "invalidated",
+                "superseded": "invalidated",
+                "rolled_back": "invalidated",
+            }.get(str(updates["status"]), document["confirmation_state"])
+            document["tombstone"] = str(updates["status"]) in {
+                "corrected",
+                "superseded",
+                "rolled_back",
+            }
+        document["updated_at"] = _now().isoformat()
+        service.repository.upsert(MemoryRecord.from_document(document))
+        modified = True
+    return modified
 
 
 def _handle_memory_command(internal_id: str, action: str, argument: str) -> str:

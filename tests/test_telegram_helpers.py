@@ -26,6 +26,18 @@ def test_long_telegram_answer_is_split_into_separate_readable_messages():
     assert all(len(chunk) <= 1400 for chunk in chunks)
 
 
+def test_split_keeps_urls_and_code_spans_intact():
+    url = "https://example.com/" + ("path-segment/" * 25) + "?a=1&b=2"
+    code = "`device_registry.resolve('dreamview')`"
+    text = ("Useful context. " * 25) + url + " " + code + (" More detail." * 30)
+
+    chunks = telegram.split_telegram_message(text, limit=500, preferred_limit=400)
+
+    assert any(url in chunk for chunk in chunks)
+    assert any(code in chunk for chunk in chunks)
+    assert all(len(chunk) <= 500 for chunk in chunks)
+
+
 def test_reply_in_chunks_uses_safe_telegram_html():
     replies = []
 

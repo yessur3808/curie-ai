@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
+from typing import Any, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from memory import UserManager
@@ -21,6 +23,96 @@ _KIND_WEIGHT = {
     "routine": 0.55,
     "check_in": 0.2,
 }
+_DEVICE_COMMAND_THEME = re.compile(
+    r"\b(?:turn|switch|power)\s+(?:on|off)\b|\b(?:all|both)\s+(?:lights?|devices?)\b",
+    re.I,
+)
+_UNSUPPORTED_PERSONAL_CLAIM = re.compile(
+    r"\bi\s+(?:saw|noticed|heard|watched|felt|remembered)\b|"
+    r"\b(?:the sky|your mood|your expression)\s+(?:looks?|seems?)\b",
+    re.I,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ProactiveEvidence:
+    source: str
+    reference: str
+    confidence: float
+    observed_at: str = ""
+
+    @classmethod
+    def from_value(cls, value: Mapping[str, Any]) -> "ProactiveEvidence":
+        return cls(
+            source=str(value.get("source") or "unknown")[:64],
+            reference=str(value.get("reference") or "")[:160],
+            confidence=max(0.0, min(float(value.get("confidence", 0)), 1.0)),
+            observed_at=str(value.get("observed_at") or "")[:64],
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "reference": self.reference,
+            "confidence": self.confidence,
+            "observed_at": self.observed_at,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProactiveCandidate:
+    kind: str
+    topic: str
+    reason: str
+    confidence: float
+    urgency: float = 0.0
+    usefulness: float = 0.0
+    priority: float = 0.5
+    message: str = ""
+    evidence: tuple[ProactiveEvidence, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ProactiveCandidate":
+        evidence = tuple(
+            ProactiveEvidence.from_value(item)
+            for item in value.get("evidence", ())
+            if isinstance(item, Mapping)
+        )
+        return cls(
+            kind=str(value.get("kind") or "routine")[:40],
+            topic=str(value.get("topic") or "general")[:80],
+            reason=str(value.get("reason") or "")[:180],
+            confidence=max(0.0, min(float(value.get("confidence", 0)), 1.0)),
+            urgency=max(0.0, min(float(value.get("urgency", 0)), 1.0)),
+            usefulness=max(0.0, min(float(value.get("usefulness", 0)), 1.0)),
+            priority=max(0.0, min(float(value.get("priority", 0.5)), 1.0)),
+            message=str(value.get("message") or "")[:1000],
+            evidence=evidence,
+        )
+
+    def rejection_reason(self) -> str | None:
+        if not self.reason:
+            return "missing_reason"
+        if _DEVICE_COMMAND_THEME.search(f"{self.topic} {self.message}"):
+            return "device_command_is_not_a_theme"
+        if _UNSUPPORTED_PERSONAL_CLAIM.search(self.message) and not self.evidence:
+            return "unsupported_personal_claim"
+        if self.evidence and max(item.confidence for item in self.evidence) < 0.65:
+            return "weak_evidence"
+        return None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "topic": self.topic,
+            "reason": self.reason,
+            "confidence": self.confidence,
+            "urgency": self.urgency,
+            "usefulness": self.usefulness,
+            "priority": self.priority,
+            "message": self.message,
+            "evidence": [item.as_dict() for item in self.evidence],
+        }
 
 
 def rank_candidates(candidates: list[dict], profile: dict) -> list[dict]:
@@ -29,18 +121,20 @@ def rank_candidates(candidates: list[dict], profile: dict) -> list[dict]:
         str(value).casefold() for value in profile.get("proactive_avoid_topics", [])
     }
     ranked = []
-    for candidate in candidates:
-        topic = str(candidate.get("topic", "general")).casefold()
-        reason = str(candidate.get("reason", "")).strip()
-        if any(item and item in topic for item in excluded) or not reason:
+    for raw_candidate in candidates:
+        candidate = ProactiveCandidate.from_mapping(raw_candidate)
+        topic = candidate.topic.casefold()
+        if any(item and item in topic for item in excluded):
             continue
-        confidence = max(0.0, min(float(candidate.get("confidence", 0)), 1.0))
+        if candidate.rejection_reason() is not None:
+            continue
+        confidence = candidate.confidence
         if confidence < 0.65:
             continue
-        urgency = max(0.0, min(float(candidate.get("urgency", 0)), 1.0))
-        usefulness = max(0.0, min(float(candidate.get("usefulness", 0)), 1.0))
-        priority = max(0.0, min(float(candidate.get("priority", 0.5)), 1.0))
-        kind = str(candidate.get("kind", "routine"))
+        urgency = candidate.urgency
+        usefulness = candidate.usefulness
+        priority = candidate.priority
+        kind = candidate.kind
         score = (
             0.28 * urgency
             + 0.28 * usefulness
@@ -50,7 +144,7 @@ def rank_candidates(candidates: list[dict], profile: dict) -> list[dict]:
         )
         ranked.append(
             {
-                **candidate,
+                **candidate.as_dict(),
                 "score": round(score, 4),
                 "ranking_reason": f"kind={kind}; urgency={urgency:.2f}; usefulness={usefulness:.2f}; confidence={confidence:.2f}; priority={priority:.2f}",
             }
