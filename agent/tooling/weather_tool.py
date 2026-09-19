@@ -14,11 +14,18 @@ _MONTHS = {
     for number, names in enumerate(
         (
             (),
-            ("jan", "january"), ("feb", "february"),
-            ("mar", "march"), ("apr", "april"), ("may",),
-            ("jun", "june"), ("jul", "july"), ("aug", "august"),
-            ("sep", "sept", "september"), ("oct", "october"),
-            ("nov", "november"), ("dec", "december"),
+            ("jan", "january"),
+            ("feb", "february"),
+            ("mar", "march"),
+            ("apr", "april"),
+            ("may",),
+            ("jun", "june"),
+            ("jul", "july"),
+            ("aug", "august"),
+            ("sep", "sept", "september"),
+            ("oct", "october"),
+            ("nov", "november"),
+            ("dec", "december"),
         )
     )
     for name in names
@@ -52,7 +59,9 @@ def _requested_range(query: str, today: date | None = None) -> tuple[date, date]
     return start, end
 
 
-def _recent_weather_context(context: ToolContext) -> tuple[str | None, tuple[date, date] | None]:
+def _recent_weather_context(
+    context: ToolContext,
+) -> tuple[str | None, tuple[date, date] | None]:
     if context.platform == "unknown":
         return None, None
     try:
@@ -80,7 +89,9 @@ class WeatherTool:
     name = "weather"
     read_only = True
 
-    async def execute(self, params: Mapping[str, Any], context: ToolContext) -> ToolResult:
+    async def execute(
+        self, params: Mapping[str, Any], context: ToolContext
+    ) -> ToolResult:
         from utils.datetime_info import extract_city_from_message
         from utils.weather import get_weather, get_weather_range
 
@@ -93,7 +104,9 @@ class WeatherTool:
             requested = requested or recent_range
         city = city or context.profile.get("location")
         if not city:
-            return ToolResult("Which city should I check? I can remember it for future forecasts.")
+            return ToolResult(
+                "Which city should I check? I can remember it for future forecasts."
+            )
 
         if requested:
             start, end = requested
@@ -110,14 +123,21 @@ class WeatherTool:
                     f"Curie’s live forecast window is 16 days. Ask again on or after "
                     f"{available_on.strftime('%b %-d')} for the complete range; I won’t substitute "
                     "your home location or invent conditions.",
-                    data={"city": city, "start_date": start.isoformat(), "end_date": end.isoformat(), "available_on": available_on.isoformat()},
+                    data={
+                        "city": city,
+                        "start_date": start.isoformat(),
+                        "end_date": end.isoformat(),
+                        "available_on": available_on.isoformat(),
+                    },
                     source="Open-Meteo",
                 )
             forecast = await get_weather_range(city, start, end)
             days = list(forecast["days"])
             lows = [float(day["low"]) for day in days]
             highs = [float(day["high"]) for day in days]
-            rain_chance = max(int(day.get("precipitation_probability") or 0) for day in days)
+            rain_chance = max(
+                int(day.get("precipitation_probability") or 0) for day in days
+            )
             tip = " Bring a light jacket." if min(lows) < 16 else ""
             if rain_chance >= 40:
                 tip += " Pack an umbrella."
@@ -129,10 +149,16 @@ class WeatherTool:
             )
             return ToolResult(text=text, data=forecast, source=forecast.get("source"))
 
-        weather = await get_weather(city, day_offset=1 if "tomorrow" in query.lower() else 0)
+        weather = await get_weather(
+            city, day_offset=1 if "tomorrow" in query.lower() else 0
+        )
         preferences = " ".join(
             str(context.profile.get(key, ""))
-            for key in ("jacket_preference", "temperature_preference", "clothing_preferences")
+            for key in (
+                "jacket_preference",
+                "temperature_preference",
+                "clothing_preferences",
+            )
         ).strip()
         tip = " ".join(weather.get("tips", []))
         if preferences:

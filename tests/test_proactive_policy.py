@@ -7,7 +7,6 @@ from services.proactive_policy import (
     rank_candidates,
 )
 
-
 NOW = datetime(2026, 8, 23, 12, tzinfo=timezone.utc)
 
 
@@ -33,18 +32,29 @@ def test_requires_explicit_opt_in_and_valid_timezone():
 
 
 def test_quiet_hours_snooze_daily_and_weekly_limits():
-    assert delivery_allowed(_profile(), "study", NOW.replace(hour=23))[1] == "quiet_hours"
-    assert delivery_allowed(
-        _profile(proactive_snoozed_until=(NOW + timedelta(hours=1)).isoformat()),
-        "study",
-        NOW,
-    )[1] == "snoozed"
+    assert (
+        delivery_allowed(_profile(), "study", NOW.replace(hour=23))[1] == "quiet_hours"
+    )
+    assert (
+        delivery_allowed(
+            _profile(proactive_snoozed_until=(NOW + timedelta(hours=1)).isoformat()),
+            "study",
+            NOW,
+        )[1]
+        == "snoozed"
+    )
     recent = [(NOW - timedelta(hours=hour)).isoformat() for hour in (1, 2)]
-    assert delivery_allowed(_profile(proactive_sent_at=recent), "study", NOW)[1] == "daily_limit"
+    assert (
+        delivery_allowed(_profile(proactive_sent_at=recent), "study", NOW)[1]
+        == "daily_limit"
+    )
     week = [(NOW - timedelta(days=day)).isoformat() for day in range(1, 8)]
-    assert delivery_allowed(
-        _profile(proactive_daily_max=10, proactive_sent_at=week), "study", NOW
-    )[1] == "weekly_limit"
+    assert (
+        delivery_allowed(
+            _profile(proactive_daily_max=10, proactive_sent_at=week), "study", NOW
+        )[1]
+        == "weekly_limit"
+    )
 
 
 def test_topic_cooldown_grows_after_rejection():
@@ -76,7 +86,11 @@ def test_controls_enable_disable_snooze_settings_and_why(monkeypatch):
     stored = {}
     monkeypatch.setattr(
         "services.proactive_policy.UserManager.get_user_profile",
-        lambda _user: {**_profile(), **stored, "proactive_last_reason": "A repeated routine suggested it."},
+        lambda _user: {
+            **_profile(),
+            **stored,
+            "proactive_last_reason": "A repeated routine suggested it.",
+        },
     )
     monkeypatch.setattr(
         "services.proactive_policy.UserManager.update_user_profile",
@@ -87,7 +101,9 @@ def test_controls_enable_disable_snooze_settings_and_why(monkeypatch):
     assert stored["proactive_messaging_enabled"] is False
     assert "enabled" in handle_proactive_command("u1", "/proactive enable")
     assert "snoozed until" in handle_proactive_command("u1", "/proactive snooze 1d")
-    assert "repeated routine" in handle_proactive_command("u1", "why did you send this?")
+    assert "repeated routine" in handle_proactive_command(
+        "u1", "why did you send this?"
+    )
     assert "sports" in handle_proactive_command("u1", "/proactive exclude sports")
     assert "telegram" in handle_proactive_command("u1", "/proactive channel telegram")
     assert "4 messages per day" in handle_proactive_command(
@@ -99,11 +115,35 @@ def test_controls_enable_disable_snooze_settings_and_why(monkeypatch):
 
 
 def test_candidates_are_grounded_ranked_and_excluded():
-    ranked = rank_candidates([
-        {"kind": "check_in", "topic": "general", "reason": "Opted-in interval", "confidence": .9, "urgency": .1, "usefulness": .2},
-        {"kind": "deadline", "topic": "project", "reason": "Tracked deadline is near", "confidence": .9, "urgency": .9, "usefulness": .9},
-        {"kind": "routine", "topic": "sports", "reason": "Repeated routine", "confidence": .95, "urgency": .2, "usefulness": .5},
-        {"kind": "routine", "topic": "guess", "reason": "", "confidence": .99},
-    ], {"proactive_avoid_topics": ["sports"]})
+    ranked = rank_candidates(
+        [
+            {
+                "kind": "check_in",
+                "topic": "general",
+                "reason": "Opted-in interval",
+                "confidence": 0.9,
+                "urgency": 0.1,
+                "usefulness": 0.2,
+            },
+            {
+                "kind": "deadline",
+                "topic": "project",
+                "reason": "Tracked deadline is near",
+                "confidence": 0.9,
+                "urgency": 0.9,
+                "usefulness": 0.9,
+            },
+            {
+                "kind": "routine",
+                "topic": "sports",
+                "reason": "Repeated routine",
+                "confidence": 0.95,
+                "urgency": 0.2,
+                "usefulness": 0.5,
+            },
+            {"kind": "routine", "topic": "guess", "reason": "", "confidence": 0.99},
+        ],
+        {"proactive_avoid_topics": ["sports"]},
+    )
     assert [item["kind"] for item in ranked] == ["deadline", "check_in"]
     assert "urgency=" in ranked[0]["ranking_reason"]

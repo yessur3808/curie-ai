@@ -6,7 +6,9 @@ from agent.orchestration.contracts import ResponseCandidate
 
 
 class ActionConversationService:
-    async def handle(self, text: str, internal_id: str, profile: dict) -> ResponseCandidate | None:
+    async def handle(
+        self, text: str, internal_id: str, profile: dict
+    ) -> ResponseCandidate | None:
         from agent.action_router import execute_request, resolve_request
 
         request = await resolve_request(text)

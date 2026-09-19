@@ -22,11 +22,18 @@ def custom_voice_health(config: dict | None = None) -> dict:
     consent = config.get("custom_voice_consent") is True
     try:
         import TTS  # noqa: F401
+
         installed = True
     except ImportError:
         installed = False
     return {
-        "ready": bool(consent and installed and model.is_file() and model_config.is_file() and reference.is_file()),
+        "ready": bool(
+            consent
+            and installed
+            and model.is_file()
+            and model_config.is_file()
+            and reference.is_file()
+        ),
         "consented": consent,
         "engine_installed": installed,
         "model_configured": model.is_file() and model_config.is_file(),

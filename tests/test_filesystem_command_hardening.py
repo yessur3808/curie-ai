@@ -140,7 +140,10 @@ def test_nonzero_sandbox_exit_is_a_typed_safe_failure(monkeypatch, tmp_path):
             pass
 
         def communicate(self, timeout=None):
-            return b"", b"bwrap: Creating new namespace failed: Resource temporarily unavailable"
+            return (
+                b"",
+                b"bwrap: Creating new namespace failed: Resource temporarily unavailable",
+            )
 
     monkeypatch.setattr(policies.shutil, "which", lambda _name: "/usr/bin/bwrap")
     monkeypatch.setattr(policies.subprocess, "Popen", FakeProcess)

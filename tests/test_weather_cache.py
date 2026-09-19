@@ -8,7 +8,9 @@ class _Response:
         return None
 
     def json(self):
-        return {"results": [{"name": "Hong Kong", "latitude": 22.3, "longitude": 114.2}]}
+        return {
+            "results": [{"name": "Hong Kong", "latitude": 22.3, "longitude": 114.2}]
+        }
 
 
 class _Client:

@@ -91,8 +91,7 @@ class ModelConversationService:
         stripped = prompt.rstrip()
         if stripped.endswith("Assistant:"):
             return (
-                stripped[: -len("Assistant:")].rstrip()
-                + f"\n\n{guidance}\nAssistant:"
+                stripped[: -len("Assistant:")].rstrip() + f"\n\n{guidance}\nAssistant:"
             )
         return f"{stripped}\n\n{guidance}"
 

@@ -10,12 +10,42 @@ import time
 import asyncio
 import re
 
-_FRENCH_WORDS = frozenset({
-    "bonjour", "salut", "merci", "oui", "non", "voilà", "alors", "donc",
-    "bien", "sûr", "mon", "ami", "amie", "cœur", "chérie", "compris",
-    "d’accord", "avec", "pour", "très", "bonne", "bon", "soir", "matin",
-    "je", "tu", "vous", "nous", "est", "suis", "comment", "encore",
-})
+_FRENCH_WORDS = frozenset(
+    {
+        "bonjour",
+        "salut",
+        "merci",
+        "oui",
+        "non",
+        "voilà",
+        "alors",
+        "donc",
+        "bien",
+        "sûr",
+        "mon",
+        "ami",
+        "amie",
+        "cœur",
+        "chérie",
+        "compris",
+        "d’accord",
+        "avec",
+        "pour",
+        "très",
+        "bonne",
+        "bon",
+        "soir",
+        "matin",
+        "je",
+        "tu",
+        "vous",
+        "nous",
+        "est",
+        "suis",
+        "comment",
+        "encore",
+    }
+)
 
 
 def detect_language_spans(text: str, accent: str = "subtle") -> list[tuple[str, str]]:
@@ -45,22 +75,36 @@ def _profile_config(preferences: dict, history: list[dict] | None = None) -> dic
     presets = {
         "clear": {"speed": "normal", "warmth": "neutral", "expressiveness": "calm"},
         "soft": {"speed": "normal", "warmth": "warm", "expressiveness": "calm"},
-        "expressive": {"speed": "normal", "warmth": "gentle", "expressiveness": "expressive"},
-        "french": {"speed": "slow", "warmth": "warm", "expressiveness": "balanced", "accent": "strong"},
+        "expressive": {
+            "speed": "normal",
+            "warmth": "gentle",
+            "expressiveness": "expressive",
+        },
+        "french": {
+            "speed": "slow",
+            "warmth": "warm",
+            "expressiveness": "balanced",
+            "accent": "strong",
+        },
     }
     configured = dict(presets.get(profile, presets["soft"]))
     explicit = {str(item.get("setting")) for item in (history or [])}
     for setting, key in (
-        ("voice_speed", "speed"), ("voice_warmth", "warmth"),
-        ("voice_expressiveness", "expressiveness"), ("voice_accent", "accent"),
+        ("voice_speed", "speed"),
+        ("voice_warmth", "warmth"),
+        ("voice_expressiveness", "expressiveness"),
+        ("voice_accent", "accent"),
     ):
         if setting in explicit:
             configured[key] = preferences.get(setting, configured.get(key))
-    configured.update({
-        "accent": configured.get("accent", "subtle"), "profile": profile,
-        "custom_voice_consent": preferences.get("custom_voice_consent", False),
-        "custom_voice_reference": preferences.get("custom_voice_reference", ""),
-    })
+    configured.update(
+        {
+            "accent": configured.get("accent", "subtle"),
+            "profile": profile,
+            "custom_voice_consent": preferences.get("custom_voice_consent", False),
+            "custom_voice_reference": preferences.get("custom_voice_reference", ""),
+        }
+    )
     return configured
 
 
@@ -84,17 +128,22 @@ def voice_health() -> dict:
     piper_model = os.getenv("PIPER_MODEL_PATH", "").strip()
     english_model = os.getenv("PIPER_ENGLISH_MODEL_PATH", "").strip()
     piper_ready = bool(
-        get_piper_executable()
-        and piper_model
-        and Path(piper_model).is_file()
+        get_piper_executable() and piper_model and Path(piper_model).is_file()
     )
     espeak_ready = bool(shutil.which("espeak-ng") or shutil.which("espeak"))
     allow_espeak = os.getenv("LOCAL_TTS_ALLOW_ESPEAK", "true").lower() in {
-        "1", "true", "yes", "on"
+        "1",
+        "true",
+        "yes",
+        "on",
     }
     return {
         "ready": piper_ready or (allow_espeak and espeak_ready),
-        "backend": "piper" if piper_ready else "espeak" if allow_espeak and espeak_ready else None,
+        "backend": (
+            "piper"
+            if piper_ready
+            else "espeak" if allow_espeak and espeak_ready else None
+        ),
         "piper_ready": piper_ready,
         "bilingual_ready": bool(
             piper_ready and english_model and Path(english_model).is_file()
@@ -144,8 +193,15 @@ async def synthesize_reply(
                     else:
                         ffmpeg = get_ffmpeg_executable()
                         encoder = await asyncio.create_subprocess_exec(
-                            ffmpeg, "-y", "-loglevel", "error", "-i", custom_wav,
-                            "-c:a", "libopus", path,
+                            ffmpeg,
+                            "-y",
+                            "-loglevel",
+                            "error",
+                            "-i",
+                            custom_wav,
+                            "-c:a",
+                            "libopus",
+                            path,
                             stdout=asyncio.subprocess.DEVNULL,
                             stderr=asyncio.subprocess.PIPE,
                         )
@@ -156,15 +212,29 @@ async def synthesize_reply(
             finally:
                 Path(custom_wav).unlink(missing_ok=True)
         english_model = os.getenv("PIPER_ENGLISH_MODEL_PATH", "").strip()
-        french_model = os.getenv("PIPER_FRENCH_MODEL_PATH", "").strip() or os.getenv("PIPER_MODEL_PATH", "").strip()
+        french_model = (
+            os.getenv("PIPER_FRENCH_MODEL_PATH", "").strip()
+            or os.getenv("PIPER_MODEL_PATH", "").strip()
+        )
         spans = detect_language_spans(text, str(config.get("accent", "subtle")))
-        if english_model and french_model and all(Path(item).is_file() for item in (english_model, french_model)):
+        if (
+            english_model
+            and french_model
+            and all(Path(item).is_file() for item in (english_model, french_model))
+        ):
             wav_paths = []
             try:
                 for language, span in spans:
-                    chunk_fd, chunk_path = tempfile.mkstemp(prefix="curie_voice_span_", suffix=".wav")
+                    chunk_fd, chunk_path = tempfile.mkstemp(
+                        prefix="curie_voice_span_", suffix=".wav"
+                    )
                     os.close(chunk_fd)
-                    span_config = {**config, "model_path": french_model if language == "fr" else english_model}
+                    span_config = {
+                        **config,
+                        "model_path": (
+                            french_model if language == "fr" else english_model
+                        ),
+                    }
                     if not await text_to_speech(span, chunk_path, span_config):
                         return None
                     wav_paths.append(chunk_path)
@@ -175,9 +245,17 @@ async def synthesize_reply(
                     else:
                         ffmpeg = get_ffmpeg_executable()
                         encoder = await asyncio.create_subprocess_exec(
-                            ffmpeg, "-y", "-loglevel", "error", "-i", wav_paths[0],
-                            "-c:a", "libopus", path,
-                            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                            ffmpeg,
+                            "-y",
+                            "-loglevel",
+                            "error",
+                            "-i",
+                            wav_paths[0],
+                            "-c:a",
+                            "libopus",
+                            path,
+                            stdout=asyncio.subprocess.DEVNULL,
+                            stderr=asyncio.subprocess.PIPE,
                         )
                         await encoder.communicate()
                         if encoder.returncode:
@@ -187,9 +265,19 @@ async def synthesize_reply(
                     args = [ffmpeg, "-y", "-loglevel", "error"]
                     for wav_path in wav_paths:
                         args.extend(["-i", wav_path])
-                    args.extend(["-filter_complex", f"concat=n={len(wav_paths)}:v=0:a=1", "-c:a", "libopus", path])
+                    args.extend(
+                        [
+                            "-filter_complex",
+                            f"concat=n={len(wav_paths)}:v=0:a=1",
+                            "-c:a",
+                            "libopus",
+                            path,
+                        ]
+                    )
                     encoder = await asyncio.create_subprocess_exec(
-                        *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+                        *args,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.PIPE,
                     )
                     await encoder.communicate()
                     if encoder.returncode:

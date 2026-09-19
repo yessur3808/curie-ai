@@ -1,0 +1,20 @@
+# Lightweight, deterministic dependency set for Curie's offline CI jobs.
+# Keep security-sensitive versions aligned with requirements.txt.
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==6.1.1
+python-dotenv==1.2.3
+pytz==2024.2
+fastapi==0.141.1
+starlette==1.6.0
+pydantic==2.13.5
+uvicorn==0.53.0
+click==8.5.0
+psycopg2-binary==2.9.10
+pymongo==4.13.0
+httpx==0.28.1
+aiohttp==3.14.3
+gitpython==3.1.62
+beautifulsoup4==4.12.3
+PyGithub==2.6.1
+python-multipart==0.0.32

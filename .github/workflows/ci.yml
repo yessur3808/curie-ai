@@ -13,10 +13,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -36,16 +36,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install black
-        run: pip install black==25.1.0
+        run: pip install black==26.5.1
 
       - name: Check formatting
         run: black --check agent/ connectors/ llm/ memory/ services/ utils/ main.py tests/
@@ -57,10 +57,10 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -69,22 +69,7 @@ jobs:
         # Install only the lightweight subset needed for the unit tests.
         # Heavy optional packages (llama-cpp-python, discord.py, etc.) are
         # mocked inside the test suite and are not required here.
-        run: |
-          pip install \
-            pytest \
-            pytest-asyncio \
-            pytest-cov \
-            python-dotenv \
-            pytz \
-            fastapi \
-            pydantic \
-            psycopg2-binary \
-            pymongo \
-            httpx \
-            gitpython \
-            beautifulsoup4 \
-            PyGithub \
-            python-multipart==0.0.22
+        run: pip install -r requirements-ci.txt
 
       - name: Run the deterministic offline suite in one process
         run: pytest -q
@@ -95,13 +80,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
       - name: Install integration dependencies
-        run: pip install pytest pytest-asyncio python-dotenv pytz fastapi pydantic psycopg2-binary pymongo httpx gitpython beautifulsoup4 PyGithub python-multipart==0.0.22
+        run: pip install -r requirements-ci.txt
       - name: Run local component boundaries
         run: pytest -q -m integration
 
@@ -111,13 +96,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
       - name: Install security test dependencies
-        run: pip install pytest pytest-asyncio pytest-cov python-dotenv pytz fastapi pydantic psycopg2-binary pymongo httpx gitpython beautifulsoup4 PyGithub python-multipart==0.0.22
+        run: pip install -r requirements-ci.txt
       - name: Verify permissions, path safety, audit isolation, and tool schemas
         run: >-
           pytest -q -m security
@@ -133,22 +118,25 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
       - name: Install scanners
-        run: pip install pip-audit bandit detect-secrets
+        run: pip install pip-audit bandit detect-secrets==1.5.0
       - name: Audit pinned dependencies
-        run: pip-audit -r requirements.txt
+        # diskcache is pulled by llama-cpp-python. 5.6.3 is the latest release
+        # and PYSEC-2026-2447 has no fixed version; see docs/security.md.
+        run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-2447
       - name: Scan Python for high-severity findings
         run: bandit -q -r agent connectors llm memory services utils -lll
       - name: Scan tracked files for likely secrets
         run: >-
           git ls-files -z | xargs -0 detect-secrets-hook
+          --baseline .secrets.baseline
           --exclude-files '(\.env\.example|tests/fixtures/)'
 
   deterministic-evaluation:
@@ -157,12 +145,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install evaluation dependencies
-        run: pip install pytest pytest-asyncio python-dotenv fastapi pydantic httpx
+        run: pip install -r requirements-ci.txt
       - name: Run deterministic quality gates
         run: |
           pytest -q tests/test_evaluation_runner.py
@@ -175,13 +163,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
       - name: Install contract-test dependencies
-        run: pip install pytest pytest-asyncio python-dotenv fastapi pydantic psycopg2-binary pymongo httpx gitpython beautifulsoup4 PyGithub python-multipart==0.0.22
+        run: pip install -r requirements-ci.txt
       - name: Validate release evidence
         run: python -m scripts.check_release
       - name: Run public contract and migration conformance

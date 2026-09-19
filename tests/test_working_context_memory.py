@@ -23,9 +23,7 @@ def _history(count=24):
 
 
 def _workflow():
-    workflow = ChatWorkflow(
-        persona={"name": "Curie", "system_prompt": "Be helpful."}
-    )
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
     # Deployment settings may raise the threshold through .env. These tests
     # exercise compaction itself with a stable, intentionally small boundary.
     workflow._HISTORY_SUMMARISE_THRESHOLD = 20
@@ -96,9 +94,13 @@ def test_local_session_metadata_is_owner_scoped_and_reset_clears_only_summary(
 ):
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
     manager = local_store.LocalSessionManager()
-    manager.set_metadata("telegram", "owner-1", "working_context_v1", {"summary": "one"})
+    manager.set_metadata(
+        "telegram", "owner-1", "working_context_v1", {"summary": "one"}
+    )
     manager.set_metadata("telegram", "owner-1", "theme", "dark")
-    manager.set_metadata("telegram", "owner-2", "working_context_v1", {"summary": "two"})
+    manager.set_metadata(
+        "telegram", "owner-2", "working_context_v1", {"summary": "two"}
+    )
 
     assert manager.get_metadata("telegram", "owner-1")["working_context_v1"] == {
         "summary": "one"

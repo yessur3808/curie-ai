@@ -1,7 +1,11 @@
 import asyncio
 from pathlib import Path
 
-from services.voice_delivery import detect_language_spans, synthesize_reply, voice_health
+from services.voice_delivery import (
+    detect_language_spans,
+    synthesize_reply,
+    voice_health,
+)
 from utils.voice import get_piper_executable, normalize_for_speech
 
 
@@ -49,7 +53,8 @@ def test_project_local_piper_is_resolved_when_path_lookup_fails(monkeypatch):
 
 def test_language_spans_keep_english_clear_and_french_natural():
     assert detect_language_spans("Bonjour, mon ami. The system is ready.") == [
-        ("fr", "Bonjour, mon ami."), ("en", " The system is ready.")
+        ("fr", "Bonjour, mon ami."),
+        ("en", " The system is ready."),
     ]
     assert detect_language_spans("English only.", "strong") == [("fr", "English only.")]
     assert detect_language_spans("Bonjour.", "neutral") == [("en", "Bonjour.")]

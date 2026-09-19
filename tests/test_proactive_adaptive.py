@@ -20,6 +20,7 @@ def test_quiet_window_supports_overnight_and_disabled_window():
 @pytest.mark.asyncio
 async def test_connector_false_result_is_a_failed_delivery():
     service = ProactiveMessagingService(SimpleNamespace(persona={}))
+
     async def sender(_user, _message):
         return False
 
@@ -40,13 +41,15 @@ async def test_prediction_is_permission_seeking_message():
         {"role": "user", "content": "I study every evening"},
         {"role": "user", "content": "My daily study routine matters"},
     ]
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value={"proactive_predictions_enabled": True},
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
-    ), patch(
-        "memory.adaptive.generate_helpful_prediction", return_value=prediction
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value={"proactive_predictions_enabled": True},
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
+        patch("memory.adaptive.generate_helpful_prediction", return_value=prediction),
     ):
         message = await service._generate_proactive_message("u1", "telegram")
     assert message.endswith("?")
@@ -72,17 +75,19 @@ async def test_successful_proactive_send_persists_cadence():
         "timezone": "UTC",
     }
     sessions = MagicMock()
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value=profile,
-    ), patch(
-        "services.proactive_messaging.UserManager.update_user_profile"
-    ) as update, patch.object(
-        service, "_generate_proactive_message", new=AsyncMock(return_value="Hello")
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
-    ), patch(
-        "services.proactive_messaging.random.random", return_value=0.0
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value=profile,
+        ),
+        patch("services.proactive_messaging.UserManager.update_user_profile") as update,
+        patch.object(
+            service, "_generate_proactive_message", new=AsyncMock(return_value="Hello")
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
+        patch("services.proactive_messaging.random.random", return_value=0.0),
     ):
         await service._maybe_send_proactive_message(
             {
@@ -117,17 +122,21 @@ async def test_null_timezone_falls_back_to_utc():
         "timezone": None,
     }
     sessions = MagicMock()
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value=profile,
-    ), patch(
-        "services.proactive_messaging.UserManager.update_user_profile"
-    ), patch.object(
-        service, "_generate_proactive_message", new=AsyncMock(return_value="Bonjour")
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
-    ), patch(
-        "services.proactive_messaging.random.random", return_value=0.0
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value=profile,
+        ),
+        patch("services.proactive_messaging.UserManager.update_user_profile"),
+        patch.object(
+            service,
+            "_generate_proactive_message",
+            new=AsyncMock(return_value="Bonjour"),
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
+        patch("services.proactive_messaging.random.random", return_value=0.0),
     ):
         await service._maybe_send_proactive_message(
             {"internal_id": "u1", "platform": "telegram", "external_user_id": "42"}
@@ -145,13 +154,15 @@ async def test_ungrounded_sensory_prediction_uses_neutral_checkin():
         "reason": "I saw a cloud pattern",
         "confidence": 0.99,
     }
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value={"proactive_predictions_enabled": True},
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
-    ), patch(
-        "memory.adaptive.generate_helpful_prediction", return_value=prediction
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value={"proactive_predictions_enabled": True},
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
+        patch("memory.adaptive.generate_helpful_prediction", return_value=prediction),
     ):
         message = await service._generate_proactive_message("u1", "telegram")
     assert "cloud pattern" not in message
@@ -165,11 +176,14 @@ async def test_recent_fallback_is_not_repeated_verbatim():
     sessions.get_history.return_value = [
         {"role": "assistant", "content": "Salut, how’s your day going?"}
     ]
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value={"proactive_predictions_enabled": False},
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value={"proactive_predictions_enabled": False},
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
     ):
         message = await service._generate_proactive_message("u1", "telegram")
     assert message != "Salut, how’s your day going?"
@@ -185,12 +199,15 @@ async def test_recent_generation_attempt_skips_regeneration():
         "proactive_quiet_hours": {"start": 0, "end": 0},
         "last_proactive_generation_at": "2099-01-01T00:00:00+00:00",
     }
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value=profile,
-    ), patch.object(
-        service, "_generate_proactive_message", new=AsyncMock()
-    ) as generate:
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value=profile,
+        ),
+        patch.object(
+            service, "_generate_proactive_message", new=AsyncMock()
+        ) as generate,
+    ):
         await service._maybe_send_proactive_message(
             {"internal_id": "u1", "platform": "telegram", "external_user_id": "42"}
         )
@@ -207,12 +224,15 @@ async def test_unanswered_proactive_message_does_not_stack_another():
         "proactive_awaiting_response": True,
         "proactive_quiet_hours": {"start": 0, "end": 0},
     }
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value=profile,
-    ), patch.object(
-        service, "_generate_proactive_message", new=AsyncMock()
-    ) as generate:
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value=profile,
+        ),
+        patch.object(
+            service, "_generate_proactive_message", new=AsyncMock()
+        ) as generate,
+    ):
         await service._maybe_send_proactive_message(
             {"internal_id": "u1", "platform": "telegram", "external_user_id": "42"}
         )
@@ -244,17 +264,21 @@ async def test_ignored_messages_do_not_double_the_delivery_interval():
         ).isoformat(),
     }
     sessions = MagicMock()
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value=profile,
-    ), patch(
-        "services.proactive_messaging.UserManager.update_user_profile"
-    ), patch.object(
-        service, "_generate_proactive_message", new=AsyncMock(return_value="A fresh thought")
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
-    ), patch(
-        "services.proactive_messaging.random.random", return_value=0.0
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value=profile,
+        ),
+        patch("services.proactive_messaging.UserManager.update_user_profile"),
+        patch.object(
+            service,
+            "_generate_proactive_message",
+            new=AsyncMock(return_value="A fresh thought"),
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
+        patch("services.proactive_messaging.random.random", return_value=0.0),
     ):
         await service._maybe_send_proactive_message(
             {"internal_id": "u1", "platform": "telegram", "external_user_id": "42"}
@@ -270,20 +294,25 @@ async def test_companion_mode_generates_original_contextual_message():
         {"role": "user", "content": "I have an idea for a local home dashboard"},
         {"role": "assistant", "content": "What would you like it to show?"},
     ]
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value={
-            "proactive_predictions_enabled": True,
-            "proactive_style": "companion",
-        },
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
-    ), patch(
-        "services.proactive_messaging.random.choice",
-        side_effect=lambda options: options[0],
-    ), patch(
-        "llm.manager.ask_llm",
-        side_effect=AssertionError("companion check-ins must not call the model"),
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value={
+                "proactive_predictions_enabled": True,
+                "proactive_style": "companion",
+            },
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
+        patch(
+            "services.proactive_messaging.random.choice",
+            side_effect=lambda options: options[0],
+        ),
+        patch(
+            "llm.manager.ask_llm",
+            side_effect=AssertionError("companion check-ins must not call the model"),
+        ),
     ):
         message = await service._generate_proactive_message("u1", "telegram")
     assert message == "How’s that project coming along?"
@@ -302,20 +331,25 @@ async def test_companion_mode_uses_grounded_work_followup_without_model():
         },
         {"role": "assistant", "content": "Got it. They can stay off."},
     ]
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value={
-            "proactive_predictions_enabled": True,
-            "proactive_style": "companion",
-        },
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
-    ), patch(
-        "services.proactive_messaging.random.choice",
-        side_effect=lambda options: options[0],
-    ), patch(
-        "llm.manager.ask_llm",
-        side_effect=AssertionError("companion check-ins must not call the model"),
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value={
+                "proactive_predictions_enabled": True,
+                "proactive_style": "companion",
+            },
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
+        patch(
+            "services.proactive_messaging.random.choice",
+            side_effect=lambda options: options[0],
+        ),
+        patch(
+            "llm.manager.ask_llm",
+            side_effect=AssertionError("companion check-ins must not call the model"),
+        ),
     ):
         message = await service._generate_proactive_message("u1", "telegram")
 
@@ -332,17 +366,21 @@ async def test_companion_mode_does_not_invent_activity_from_light_command():
         {"role": "user", "content": "Thanks"},
         {"role": "assistant", "content": "Anytime."},
     ]
-    with patch(
-        "services.proactive_messaging.UserManager.get_user_profile",
-        return_value={
-            "proactive_predictions_enabled": True,
-            "proactive_style": "companion",
-        },
-    ), patch(
-        "services.proactive_messaging.get_session_manager", return_value=sessions
-    ), patch(
-        "llm.manager.ask_llm",
-        side_effect=AssertionError("companion check-ins must not call the model"),
+    with (
+        patch(
+            "services.proactive_messaging.UserManager.get_user_profile",
+            return_value={
+                "proactive_predictions_enabled": True,
+                "proactive_style": "companion",
+            },
+        ),
+        patch(
+            "services.proactive_messaging.get_session_manager", return_value=sessions
+        ),
+        patch(
+            "llm.manager.ask_llm",
+            side_effect=AssertionError("companion check-ins must not call the model"),
+        ),
     ):
         message = await service._generate_proactive_message("u1", "telegram")
 

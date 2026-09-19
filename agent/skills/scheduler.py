@@ -203,6 +203,7 @@ def add_reminder(
     Persist a new reminder and return a human-readable confirmation.
     """
     from memory.repositories import get_repositories
+
     reminder_id = get_repositories().reminders.create(
         internal_id, platform, message, due_at
     )
@@ -221,6 +222,7 @@ def list_reminders(internal_id: str) -> str:
     """Return a formatted list of pending reminders for the user."""
     now = datetime.now(timezone.utc)
     from memory.repositories import get_repositories
+
     docs = get_repositories().reminders.upcoming(internal_id, now)
 
     if not docs:
@@ -241,6 +243,7 @@ def delete_reminder(internal_id: str, index: Optional[int] = None) -> str:
     """
     now = datetime.now(timezone.utc)
     from memory.repositories import get_repositories
+
     repository = get_repositories().reminders
 
     if index is None:

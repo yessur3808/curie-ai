@@ -20,7 +20,6 @@ import threading
 import time
 from typing import Any, Iterable
 
-
 _STOP_WORDS = frozenset(
     "a about again all am an and any are as at be been before by can could did do "
     "does for from had has have hello hey hi how i if in into is it its me my of on "

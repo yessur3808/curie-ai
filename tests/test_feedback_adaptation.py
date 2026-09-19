@@ -137,23 +137,28 @@ def test_voice_reply_preference_can_be_channel_specific(tmp_path, monkeypatch):
     )
 
 
-def test_natural_send_voice_message_phrase_enables_current_channel(tmp_path, monkeypatch):
+def test_natural_send_voice_message_phrase_enables_current_channel(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
-    response = handle_adaptation_command(
-        "u1", "Send me a voice message", "telegram"
-    )
+    response = handle_adaptation_command("u1", "Send me a voice message", "telegram")
     assert response == "Voice replies are now enabled on telegram."
     from services.voice_delivery import voice_replies_enabled
 
     assert voice_replies_enabled("u1", "telegram") is True
 
 
-def test_embedded_text_request_disables_voice_without_consuming_task(tmp_path, monkeypatch):
+def test_embedded_text_request_disables_voice_without_consuming_task(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
     handle_adaptation_command("u1", "/voice on", "telegram")
-    assert apply_voice_modality_preference(
-        "u1", "Can you explain it to me in text", "telegram"
-    ) is False
+    assert (
+        apply_voice_modality_preference(
+            "u1", "Can you explain it to me in text", "telegram"
+        )
+        is False
+    )
     from services.voice_delivery import voice_replies_enabled
 
     assert voice_replies_enabled("u1", "telegram") is False

@@ -14,7 +14,6 @@ import uuid
 
 from agent.tooling.errors import SandboxCommandError
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_ROOT = Path(os.getenv("CURIE_WORKSPACE_ROOT", str(REPO_ROOT))).resolve()
 PROJECTS_ROOT = Path(

@@ -71,11 +71,11 @@ class SmartThingsProvider:
         running = (
             True
             if activity_text in {"run", "running", "active", "working"}
-            else False
-            if activity_text in {"idle", "paused", "stopped", "inactive"}
-            else power == "on"
-            if power != "unknown"
-            else None
+            else (
+                False
+                if activity_text in {"idle", "paused", "stopped", "inactive"}
+                else power == "on" if power != "unknown" else None
+            )
         )
         return DeviceSnapshot(
             provider="smartthings",

@@ -9,7 +9,6 @@ from typing import Any, Mapping
 
 from memory.local_store import _LOCK, _managed_connection, save_personal_item
 
-
 _STATE_KIND = "oauth_state"
 _MAX_RECENT_STATES = 100
 

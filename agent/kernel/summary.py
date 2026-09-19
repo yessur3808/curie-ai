@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Iterable, Mapping
 
-
 _CORRECTION_PATTERNS = (
     re.compile(
         r"\bthere\s+(?:is|are)\s+no\s+(?:device\s+called\s+)?"

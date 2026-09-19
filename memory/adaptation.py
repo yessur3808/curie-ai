@@ -50,7 +50,8 @@ _TOO_SHORT = re.compile(
     r"\b(?:too short|more detail|be more detailed|expand on that)\b", re.I
 )
 _WRONG = re.compile(
-    r"\b(?:wrong answer|that's wrong|that is wrong|incorrect|you got that wrong)\b", re.I
+    r"\b(?:wrong answer|that's wrong|that is wrong|incorrect|you got that wrong)\b",
+    re.I,
 )
 _CORRECTION = re.compile(r"\b(?:actually|correction|i meant|use this instead)\b", re.I)
 _STYLE = re.compile(
@@ -188,22 +189,25 @@ def _set(owner_id: str, setting: str, value: Any, source: str) -> dict:
 def set_voice_preference(owner_id: str, setting: str, value: str) -> dict:
     """Validate and persist one user-visible voice setting."""
     if setting not in {
-        "voice_speed", "voice_warmth", "voice_expressiveness",
-        "voice_profile", "voice_accent",
+        "voice_speed",
+        "voice_warmth",
+        "voice_expressiveness",
+        "voice_profile",
+        "voice_accent",
     }:
         raise ValueError(f"Unknown voice setting: {setting}")
     normalized = str(value).strip().casefold()
     if normalized not in _ALLOWED[setting]:
-        raise ValueError(
-            f"Choose one of: {', '.join(sorted(_ALLOWED[setting]))}."
-        )
+        raise ValueError(f"Choose one of: {', '.join(sorted(_ALLOWED[setting]))}.")
     return _set(owner_id, setting, normalized, "explicit:voice_setting")
 
 
 def set_custom_voice_consent(owner_id: str, consent: bool) -> dict:
     """Persist explicit consent for owner-scoped voice-reference processing."""
     return _set(
-        owner_id, "custom_voice_consent", bool(consent),
+        owner_id,
+        "custom_voice_consent",
+        bool(consent),
         "explicit:custom_voice_consent",
     )
 
@@ -214,7 +218,9 @@ def set_custom_voice_reference(owner_id: str, path: str) -> dict:
     if not profile["preferences"].get("custom_voice_consent"):
         raise PermissionError("Custom voice consent is required before enrollment.")
     return _set(
-        owner_id, "custom_voice_reference", str(path),
+        owner_id,
+        "custom_voice_reference",
+        str(path),
         "explicit:custom_voice_enrollment",
     )
 
@@ -314,12 +320,16 @@ def handle_adaptation_command(
             scope = f" on {channel}" if channel else ""
             return f"Voice replies are {'on' if enabled else 'off'}{scope}."
         if channel:
-            overrides = dict(_load(owner_id)["preferences"].get("voice_reply_channels", {}))
+            overrides = dict(
+                _load(owner_id)["preferences"].get("voice_reply_channels", {})
+            )
             overrides[channel] = requested == "on"
             _set(owner_id, "voice_reply_channels", overrides, "explicit:voice_command")
             state = "enabled" if requested == "on" else "disabled"
             return f"Voice replies are now {state} on {channel}."
-        profile = _set(owner_id, "voice_reply", requested == "on", "explicit:voice_command")
+        profile = _set(
+            owner_id, "voice_reply", requested == "on", "explicit:voice_command"
+        )
         return f"Voice replies are now {'on' if profile['preferences']['voice_reply'] else 'off'}."
     reset = _RESET.fullmatch(text.strip())
     if reset:

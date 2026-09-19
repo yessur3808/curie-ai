@@ -124,23 +124,29 @@ def test_local_semantic_ranking_prefers_related_memory(tmp_path, monkeypatch):
 
 def test_natural_controls_channel_pause_timeline_and_rollback(tmp_path, monkeypatch):
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
-    adaptive.record_memories("u1", {"drink": "tea"}, "I drink tea", source_channel="telegram")
-    assert "timeline" in adaptive.handle_adaptive_command("u1", "/memory timeline").casefold()
+    adaptive.record_memories(
+        "u1", {"drink": "tea"}, "I drink tea", source_channel="telegram"
+    )
+    assert (
+        "timeline"
+        in adaptive.handle_adaptive_command("u1", "/memory timeline").casefold()
+    )
     adaptive.handle_adaptive_command("u1", "/memory correct drink = coffee")
     assert "tea" in adaptive.handle_adaptive_command("u1", "/memory rollback drink")
     assert "won’t learn" in adaptive.handle_adaptive_command(
         "u1", "do not learn from this chat", "telegram"
     )
-    assert adaptive.record_memories(
-        "u1", {"hobby": "cycling"}, "I cycle", source_channel="telegram"
-    ) == []
+    assert (
+        adaptive.record_memories(
+            "u1", {"hobby": "cycling"}, "I cycle", source_channel="telegram"
+        )
+        == []
+    )
 
 
 def test_memory_stats_search_and_safe_ambiguous_forget(tmp_path, monkeypatch):
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
-    adaptive.record_memories(
-        "u1", {"favorite_drink": "coffee"}, "I prefer coffee"
-    )
+    adaptive.record_memories("u1", {"favorite_drink": "coffee"}, "I prefer coffee")
 
     stats = adaptive.handle_adaptive_command("u1", "/memory stats")
     search = adaptive.handle_adaptive_command("u1", "/memory search coffee")
@@ -151,22 +157,16 @@ def test_memory_stats_search_and_safe_ambiguous_forget(tmp_path, monkeypatch):
     assert "favorite_drink" in adaptive.handle_adaptive_command(
         "u1", "what do you remember about me?"
     )
-    assert "which memory" in adaptive.handle_adaptive_command(
-        "u1", "forget that"
-    )
+    assert "which memory" in adaptive.handle_adaptive_command("u1", "forget that")
 
 
-def test_forget_removes_core_fact_but_preserves_runtime_controls(
-    tmp_path, monkeypatch
-):
+def test_forget_removes_core_fact_but_preserves_runtime_controls(tmp_path, monkeypatch):
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
     local_store.update_profile(
         "u1",
         {"proactive_messaging_enabled": False, "legacy_hobby": "cycling"},
     )
-    adaptive.record_memories(
-        "u1", {"favorite_drink": "tea"}, "I prefer tea"
-    )
+    adaptive.record_memories("u1", {"favorite_drink": "tea"}, "I prefer tea")
 
     adaptive.handle_adaptive_command("u1", "/memory forget all")
     profile = local_store.get_profile("u1")

@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import zipfile
 
-
 DEFAULT_RETENTION = {
     "messages": 30,
     "transcripts": 7,

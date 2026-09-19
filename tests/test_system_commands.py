@@ -32,7 +32,6 @@ from agent.skills.system_commands import (
     _render_logs,
 )
 
-
 # ─── detect_system_command ────────────────────────────────────────────────────
 
 

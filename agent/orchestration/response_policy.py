@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-
 SPEAKER_TAG_PATTERN = re.compile(
     r"^\s*(?:User:|Curie:|Assistant:|Coder:|System:)", re.I | re.M
 )

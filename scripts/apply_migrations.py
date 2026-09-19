@@ -14,7 +14,7 @@ PG_CONN_INFO = {
     "port": int(os.getenv("POSTGRES_PORT", 5432)),
     "database": os.getenv("POSTGRES_DB", "assistant_db"),
     "user": os.getenv("POSTGRES_USER", "assistant"),
-    "password": os.getenv("POSTGRES_PASSWORD", "assistantpass"),
+    "password": os.getenv("POSTGRES_PASSWORD"),
 }
 _MIGRATION = re.compile(r"^(\d{6})_(.+)\.up\.sql$")
 

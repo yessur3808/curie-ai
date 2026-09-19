@@ -51,9 +51,12 @@ def test_pm2_status_returns_empty_when_pm2_is_unavailable(monkeypatch):
 
 def test_connectors_use_runtime_supervisor_environment(monkeypatch):
     monkeypatch.setattr(dashboard.daemon, "read_daemon_state", lambda name: {})
-    assert dashboard._connectors(
-        "default", {}, {"RUN_API": "false", "RUN_TELEGRAM": "true"}
-    ) == "telegram"
+    assert (
+        dashboard._connectors(
+            "default", {}, {"RUN_API": "false", "RUN_TELEGRAM": "true"}
+        )
+        == "telegram"
+    )
 
 
 def test_discover_instances_from_configs_and_runtime(monkeypatch, tmp_path):
@@ -73,7 +76,9 @@ def test_instance_env_overlay_and_model_summary(monkeypatch, tmp_path):
     root = tmp_path
     instances = root / "instances"
     instances.mkdir()
-    (root / ".env").write_text("LLM_PROVIDER_PRIORITY=llama.cpp\nLLM_GENERAL_MODEL=base.gguf\n")
+    (root / ".env").write_text(
+        "LLM_PROVIDER_PRIORITY=llama.cpp\nLLM_GENERAL_MODEL=base.gguf\n"
+    )
     (instances / "bot.env").write_text("LLM_GENERAL_MODEL=special.gguf\n")
     monkeypatch.setattr(dashboard, "REPO_ROOT", root)
     monkeypatch.setattr(dashboard, "INSTANCE_DIR", instances)
@@ -102,15 +107,28 @@ def test_dashboard_parser_defaults():
 
 def test_runtime_path_is_scoped_per_instance(monkeypatch, tmp_path):
     monkeypatch.setattr(dashboard.daemon, "CURIE_DIR", tmp_path)
-    assert dashboard._runtime_path("default", "telemetry") == tmp_path / "telemetry.json"
-    assert dashboard._runtime_path("andreja", "tasks") == tmp_path / "instance-andreja-tasks.json"
+    assert (
+        dashboard._runtime_path("default", "telemetry") == tmp_path / "telemetry.json"
+    )
+    assert (
+        dashboard._runtime_path("andreja", "tasks")
+        == tmp_path / "instance-andreja-tasks.json"
+    )
 
 
 def test_task_status_reports_active_work(monkeypatch, tmp_path):
     monkeypatch.setattr(dashboard.daemon, "CURIE_DIR", tmp_path)
     (tmp_path / "instance-curie-tasks.json").write_text(
         json.dumps(
-            {"tasks": {"one": {"status": "running", "description": "Researching hardware", "started_at": 1}}}
+            {
+                "tasks": {
+                    "one": {
+                        "status": "running",
+                        "description": "Researching hardware",
+                        "started_at": 1,
+                    }
+                }
+            }
         )
     )
     assert dashboard._task_status("curie") == ("Researching hardware", 1)

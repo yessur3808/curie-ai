@@ -1,6 +1,6 @@
 # Core Libraries
 python-telegram-bot==21.4
-python-dotenv==1.1.0
+python-dotenv==1.2.3
 cryptography>=44,<51
 # Qwen 3.5 support landed after the original 0.3.9 pin.
 llama-cpp-python==0.3.34
@@ -8,24 +8,28 @@ llama-cpp-python==0.3.34
 psycopg2-binary==2.9.10
 pymongo==4.13.0
 
-GitPython==3.1.44
+GitPython==3.1.62
 PyGithub==2.6.1
 python-gitlab==4.4.0
 requests>=2.32.3
 
-fastapi==0.115.12
-uvicorn==0.34.3
-black==25.1.0
+fastapi==0.141.1
+starlette==1.6.0
+pydantic==2.13.5
+uvicorn==0.53.0
+click==8.5.0
+black==26.5.1
 flake8>=7.0.0
 pre-commit>=3.0.0
-pytest==8.3.4
-pytest-asyncio==0.25.3
+pytest==9.1.1
+pytest-asyncio==1.4.0
 
 python-weather==2.1.0
 
 duckduckgo-search==8.0.4
 
 httpx==0.28.1
+aiohttp==3.14.3
 beautifulsoup4==4.12.3
 
 icrawler==0.6.10
@@ -34,11 +38,10 @@ icrawler==0.6.10
 # Note: openai-whisper is optional - see requirements-optional.txt
 pydub==0.25.1
 SpeechRecognition==3.12.0
-gTTS==2.5.4
 
 # WebSocket support for Web UI
 websockets>=14.1
-python-multipart==0.0.22
+python-multipart==0.0.32
 
 # Timezone support
 pytz==2024.2

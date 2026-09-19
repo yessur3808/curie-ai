@@ -32,7 +32,9 @@ class UserManager:
         with get_pg_conn() as conn:
             cur = conn.cursor()
             field = f"{channel}_id"
-            cur.execute(f"SELECT {field} FROM users WHERE internal_id = %s", (str(internal_id),))
+            cur.execute(
+                f"SELECT {field} FROM users WHERE internal_id = %s", (str(internal_id),)
+            )
             row = cur.fetchone()
             if not row or not row[field]:
                 return None

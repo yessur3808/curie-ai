@@ -43,9 +43,10 @@ def test_non_qwen_models_do_not_receive_qwen_control_tokens(monkeypatch):
 def test_direct_model_output_never_exposes_thinking_tags():
     from llm.manager import _sanity_filter_response
 
-    assert _sanity_filter_response(
-        "<think>secret work</think>\nFinal answer"
-    ) == "Final answer"
+    assert (
+        _sanity_filter_response("<think>secret work</think>\nFinal answer")
+        == "Final answer"
+    )
 
 
 def test_harmony_output_returns_only_final_channel():
@@ -56,9 +57,12 @@ def test_harmony_output_returns_only_final_channel():
         "<|channel|>final<|message|>16:10.<|end|>"
     )
     assert clean_assistant_reply(output) == "16:10."
-    assert clean_assistant_reply(
-        "<|channel|>analysis<|message|>unfinished private calculation"
-    ) == ""
+    assert (
+        clean_assistant_reply(
+            "<|channel|>analysis<|message|>unfinished private calculation"
+        )
+        == ""
+    )
 
 
 def test_tagged_prompt_is_converted_to_chat_messages():

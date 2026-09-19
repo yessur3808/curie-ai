@@ -89,7 +89,9 @@ _NON_TOPIC_TURN = re.compile(
 _GROUNDED_FOLLOWUPS = (
     (
         "bug fix",
-        re.compile(r"\b(?:fixed|solved|resolved)\b.{0,60}\b(?:bug|issue|error)\b", re.I),
+        re.compile(
+            r"\b(?:fixed|solved|resolved)\b.{0,60}\b(?:bug|issue|error)\b", re.I
+        ),
         ("Is that fix still holding up?", "Did that fix stay fixed?"),
     ),
     (
@@ -143,7 +145,9 @@ def _grounded_companion_followup(
         for topic, pattern, options in _GROUNDED_FOLLOWUPS:
             if not pattern.search(message):
                 continue
-            available = [option for option in options if option.casefold() not in recent]
+            available = [
+                option for option in options if option.casefold() not in recent
+            ]
             if available:
                 return topic, random.choice(available)
     return None

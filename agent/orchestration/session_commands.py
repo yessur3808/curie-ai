@@ -11,7 +11,9 @@ class SessionCommandService:
     def __init__(self, session_factory: Callable):
         self._session_factory = session_factory
 
-    def handle(self, text: str, platform: str, internal_id: str) -> ResponseCandidate | None:
+    def handle(
+        self, text: str, platform: str, internal_id: str
+    ) -> ResponseCandidate | None:
         command = text.strip().lower()
         store = self._session_factory()
         if command in {"/reset", "/new"}:

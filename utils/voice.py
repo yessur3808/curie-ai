@@ -33,6 +33,7 @@ def get_piper_executable() -> Optional[str]:
             return str(local)
     return None
 
+
 # Cache for Whisper models to avoid reloading on each transcription
 _whisper_model_cache = {}
 
@@ -58,21 +59,6 @@ ACCENT_LANGUAGE_MAP = {
     "korean": "ko-KR",
     "arabic": "ar-SA",
     "hindi": "hi-IN",
-}
-
-# Voice settings for different TTS engines
-VOICE_PROFILES = {
-    "american": {"lang": "en", "tld": "com", "slow": False},
-    "british": {"lang": "en", "tld": "co.uk", "slow": False},
-    "australian": {"lang": "en", "tld": "com.au", "slow": False},
-    "indian": {"lang": "en", "tld": "co.in", "slow": False},
-    "french": {"lang": "fr", "tld": "fr", "slow": False},
-    "german": {"lang": "de", "tld": "de", "slow": False},
-    "spanish": {"lang": "es", "tld": "es", "slow": False},
-    "mexican": {"lang": "es", "tld": "com.mx", "slow": False},
-    "italian": {"lang": "it", "tld": "it", "slow": False},
-    "portuguese": {"lang": "pt", "tld": "pt", "slow": False},
-    "brazilian": {"lang": "pt", "tld": "com.br", "slow": False},
 }
 
 
@@ -310,17 +296,25 @@ async def text_to_speech(
     os.close(fd)
     try:
         piper = get_piper_executable()
-        model = str(config.get("model_path") or os.getenv("PIPER_MODEL_PATH", "")).strip()
+        model = str(
+            config.get("model_path") or os.getenv("PIPER_MODEL_PATH", "")
+        ).strip()
         if piper and model and Path(model).is_file():
-            speed_scale = {"slow": 1.16, "normal": 1.0, "fast": .86}.get(
+            speed_scale = {"slow": 1.16, "normal": 1.0, "fast": 0.86}.get(
                 config.get("speed"), 1.0
             )
             expression = config.get("expressiveness", "balanced")
-            noise_scale = {"calm": .42, "balanced": .58, "expressive": .72}.get(expression, .58)
-            noise_w_scale = {"calm": .55, "balanced": .70, "expressive": .82}.get(expression, .70)
+            noise_scale = {"calm": 0.42, "balanced": 0.58, "expressive": 0.72}.get(
+                expression, 0.58
+            )
+            noise_w_scale = {"calm": 0.55, "balanced": 0.70, "expressive": 0.82}.get(
+                expression, 0.70
+            )
             warmth = config.get("warmth", "gentle")
-            sentence_silence = {"neutral": .12, "gentle": .20, "warm": .25}.get(warmth, .20)
-            volume = {"neutral": .92, "gentle": .86, "warm": .82}.get(warmth, .86)
+            sentence_silence = {"neutral": 0.12, "gentle": 0.20, "warm": 0.25}.get(
+                warmth, 0.20
+            )
+            volume = {"neutral": 0.92, "gentle": 0.86, "warm": 0.82}.get(warmth, 0.86)
             process = await asyncio.create_subprocess_exec(
                 piper,
                 "--model",
@@ -347,7 +341,10 @@ async def text_to_speech(
             )
         else:
             allow_espeak = os.getenv("LOCAL_TTS_ALLOW_ESPEAK", "true").lower() in {
-                "1", "true", "yes", "on"
+                "1",
+                "true",
+                "yes",
+                "on",
             }
             if not allow_espeak:
                 logger.warning(
@@ -360,10 +357,18 @@ async def text_to_speech(
                 return False
             voice = os.getenv("LOCAL_TTS_ESPEAK_VOICE", "en+f4")
             speed_base = int(os.getenv("LOCAL_TTS_SPEED", "155"))
-            speed = str({"slow": speed_base - 25, "fast": speed_base + 25}.get(config.get("speed"), speed_base))
+            speed = str(
+                {"slow": speed_base - 25, "fast": speed_base + 25}.get(
+                    config.get("speed"), speed_base
+                )
+            )
             pitch_base = int(os.getenv("LOCAL_TTS_PITCH", "58"))
-            warmth = {"neutral": 0, "gentle": -3, "warm": -6}.get(config.get("warmth"), -3)
-            expression = {"calm": -2, "balanced": 0, "expressive": 4}.get(config.get("expressiveness"), 0)
+            warmth = {"neutral": 0, "gentle": -3, "warm": -6}.get(
+                config.get("warmth"), -3
+            )
+            expression = {"calm": -2, "balanced": 0, "expressive": 4}.get(
+                config.get("expressiveness"), 0
+            )
             pitch = str(max(0, min(99, pitch_base + warmth + expression)))
             process = await asyncio.create_subprocess_exec(
                 espeak,
@@ -428,76 +433,6 @@ async def text_to_speech(
     finally:
         if wav_path:
             Path(wav_path).unlink(missing_ok=True)
-
-
-async def text_to_speech_gtts(
-    text: str, output_path: str, voice_config: Optional[Dict[str, Any]] = None
-) -> bool:
-    """
-    Convert text to speech using gTTS (Google Text-to-Speech) with accent support.
-    gTTS supports different accents through TLD (top-level domain) parameter.
-
-    Args:
-        text: Text to convert
-        output_path: Path to save audio file
-        voice_config: Voice configuration with accent, language, speed
-
-    Returns:
-        True if successful, False otherwise
-    """
-    from gtts import gTTS
-
-    # Parse voice configuration
-    if voice_config is None:
-        voice_config = {}
-
-    accent = voice_config.get("accent", "american").lower()
-    language = voice_config.get("language", "en")
-    speed = voice_config.get("speed", "normal")
-
-    # Get voice profile for accent
-    profile = VOICE_PROFILES.get(accent, VOICE_PROFILES["american"])
-
-    # Override language if specified in config
-    if language:
-        profile["lang"] = language
-
-    # Set speed
-    slow = speed == "slow" or profile.get("slow", False)
-
-    logger.info(f"Converting text to speech: {len(text)} characters")
-    logger.info(
-        f"Voice config: accent={accent}, language={profile['lang']}, tld={profile.get('tld', 'com')}, slow={slow}"
-    )
-
-    # Create TTS object and save to file in executor to avoid blocking event loop
-    loop = asyncio.get_running_loop()
-
-    def _create_and_save_tts():
-        try:
-            tts = gTTS(
-                text=text,
-                lang=profile["lang"],
-                slow=slow,
-                tld=profile.get("tld", "com"),  # TLD controls accent
-            )
-            # Save to file
-            tts.save(output_path)
-            return True
-        except Exception as e:
-            logger.error(f"gTTS error: {e}")
-            # Fallback to basic settings
-            logger.info("Falling back to basic TTS without accent")
-            tts = gTTS(text=text, lang=profile["lang"], slow=slow)
-            tts.save(output_path)
-            return True
-
-    success = await loop.run_in_executor(None, _create_and_save_tts)
-
-    if success:
-        logger.info(f"Speech saved to: {output_path}")
-
-    return success
 
 
 def get_audio_duration(audio_path: str) -> float:

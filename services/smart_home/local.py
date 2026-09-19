@@ -345,9 +345,7 @@ class MiHomeProvider:
     def _read_sync(config: Mapping[str, Any]) -> DeviceSnapshot:
         device = MiHomeProvider._client(config)
         host = _lan_host(str(config.get("host", "")))
-        properties = list(
-            config.get("properties") or ["power"]
-        )
+        properties = list(config.get("properties") or ["power"])
         values = device.send(str(config.get("status_method") or "get_prop"), properties)
         values = values if isinstance(values, list) else [values]
         status = dict(zip(properties, values))

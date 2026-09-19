@@ -25,7 +25,6 @@ from .aliases import (
 from .inventory import DeviceInventoryService
 from .models import CanonicalDevice, ControlReceipt, DeviceSnapshot, ProviderIssue
 
-
 PROVIDER_ALIASES = {
     "smartthings": "smartthings",
     "smart things": "smartthings",

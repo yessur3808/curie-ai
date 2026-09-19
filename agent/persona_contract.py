@@ -10,7 +10,6 @@ from typing import Any, Mapping
 
 from utils.persona import normalize_persona
 
-
 _PERSONA_ROOT = Path(__file__).resolve().parents[1] / "assets" / "personality"
 
 

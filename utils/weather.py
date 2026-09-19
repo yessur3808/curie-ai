@@ -177,7 +177,9 @@ async def get_weather_range(
     start_offset = (start_date - today).days
     end_offset = (end_date - today).days
     if start_offset < 0:
-        raise ValueError("Historical weather is not available through this forecast tool")
+        raise ValueError(
+            "Historical weather is not available through this forecast tool"
+        )
     if end_offset > 15:
         raise ValueError("Forecast is not available that far ahead")
 
@@ -210,9 +212,9 @@ async def get_weather_range(
                 "date": daily["time"][index],
                 "low": daily["temperature_2m_min"][index],
                 "high": daily["temperature_2m_max"][index],
-                "precipitation_probability": daily[
-                    "precipitation_probability_max"
-                ][index],
+                "precipitation_probability": daily["precipitation_probability_max"][
+                    index
+                ],
                 "description": _WMO.get(code, "Unknown conditions"),
                 "rain_mm": rain,
                 "is_raining": rain > 0 or code in _WET_CODES,
