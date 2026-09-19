@@ -77,6 +77,15 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_durable_tasks_owner_status
             ON durable_tasks(internal_id, status, updated_at);
+        CREATE TABLE IF NOT EXISTS mutation_attempts (
+            internal_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+            capability TEXT NOT NULL, request_hash TEXT NOT NULL,
+            status TEXT NOT NULL, receipt_json TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY(internal_id, idempotency_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mutation_attempts_owner_status
+            ON mutation_attempts(internal_id, status, updated_at);
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT, internal_id TEXT NOT NULL,
             document_json TEXT NOT NULL, created_at TEXT NOT NULL
@@ -717,6 +726,76 @@ def list_routing_outcomes(internal_id: str) -> list[dict]:
             }
             for row in rows
         ]
+
+
+def reserve_mutation_attempt(
+    internal_id: str,
+    idempotency_key: str,
+    capability: str,
+    request_hash: str,
+) -> dict | None:
+    """Atomically reserve a mutation key, returning an existing attempt if any."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _LOCK, _managed_connection() as conn:
+        inserted = conn.execute(
+            "INSERT INTO mutation_attempts(internal_id,idempotency_key,capability,"
+            "request_hash,status,receipt_json,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(internal_id,idempotency_key) DO NOTHING",
+            (
+                str(internal_id),
+                str(idempotency_key),
+                str(capability),
+                str(request_hash),
+                "started",
+                None,
+                now,
+                now,
+            ),
+        )
+        if inserted.rowcount == 1:
+            return None
+        existing = conn.execute(
+            "SELECT capability,request_hash,status,receipt_json,created_at,updated_at "
+            "FROM mutation_attempts WHERE internal_id=? AND idempotency_key=?",
+            (str(internal_id), str(idempotency_key)),
+        ).fetchone()
+        if existing:
+            return {
+                "capability": existing["capability"],
+                "request_hash": existing["request_hash"],
+                "status": existing["status"],
+                "receipt": (
+                    json.loads(existing["receipt_json"])
+                    if existing["receipt_json"]
+                    else None
+                ),
+                "created_at": existing["created_at"],
+                "updated_at": existing["updated_at"],
+            }
+        raise RuntimeError("Mutation reservation disappeared after a conflict")
+
+
+def finish_mutation_attempt(
+    internal_id: str,
+    idempotency_key: str,
+    status: str,
+    receipt: dict | None = None,
+) -> None:
+    if status not in {"completed", "failed", "uncertain", "cancelled"}:
+        raise ValueError("Invalid mutation-attempt status")
+    with _LOCK, _managed_connection() as conn:
+        conn.execute(
+            "UPDATE mutation_attempts SET status=?,receipt_json=?,updated_at=? "
+            "WHERE internal_id=? AND idempotency_key=?",
+            (
+                status,
+                json.dumps(receipt, default=str) if receipt is not None else None,
+                datetime.now(timezone.utc).isoformat(),
+                str(internal_id),
+                str(idempotency_key),
+            ),
+        )
 
 
 def save_durable_task(document: dict) -> None:

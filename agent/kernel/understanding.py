@@ -9,6 +9,8 @@ import uuid
 
 from agent.response_planner import select_response_mode
 from agent.routing import RoutingDecision, route_operational_request
+from agent.understanding.decomposition import CompoundRequest, decompose_request
+from agent.understanding.recognizers import Recognition, recognize_deterministic
 from .contracts import EntityReference, GoalConstraint, GoalSpec, SubGoal, TurnState
 
 _CORRELATE_AND_CONTROL = re.compile(
@@ -18,10 +20,6 @@ _CORRELATE_AND_CONTROL = re.compile(
     r"(?:\s+please)?[.!?]?$",
     re.I | re.S,
 )
-_SEQUENTIAL_SPLIT = re.compile(
-    r"\s*(?:;|\band then\b|\bthen also\b|\bafter that\b)\s*", re.I
-)
-_PARALLEL_SPLIT = re.compile(r"\s+\band\b\s+", re.I)
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +28,8 @@ class TurnAnalysis:
     effective_text: str
     operational_decisions: tuple[RoutingDecision, ...] = ()
     preserve_order: bool = True
+    recognition: Recognition | None = None
+    decomposition: CompoundRequest | None = None
 
     @property
     def operational_decision(self) -> RoutingDecision | None:
@@ -38,6 +38,17 @@ class TurnAnalysis:
             if len(self.operational_decisions) == 1
             else None
         )
+
+    @property
+    def dependency_kinds(self) -> dict[int, str]:
+        """Map live plan-step indexes to their explicit dependency semantics."""
+        if not self.decomposition:
+            return {}
+        return {
+            index: clause.relation.value
+            for index, clause in enumerate(self.decomposition.clauses)
+            if clause.depends_on
+        }
 
 
 def _targets(decision: RoutingDecision) -> list[str]:
@@ -108,36 +119,26 @@ def _compound_home_plan(
 
 def _compound_operational_plan(
     text: str, owner_id: str, history: Sequence[Any] | None
-) -> tuple[tuple[RoutingDecision, ...], bool]:
+) -> tuple[tuple[RoutingDecision, ...], bool, CompoundRequest | None]:
     home = _compound_home_plan(text, owner_id, history)
     if home:
-        return home, True
+        return home, True, None
 
-    sequential = [item for item in _SEQUENTIAL_SPLIT.split(text.strip()) if item]
-    if len(sequential) > 1:
-        decisions = tuple(
-            decision
-            for item in sequential
-            if (decision := route_operational_request(item, owner_id, history))
-        )
-        if len(decisions) == len(sequential):
-            return decisions, True
+    routed: dict[str, RoutingDecision] = {}
 
-    # A plain "and" is decomposed only when every resulting clause is
-    # independently and deterministically routable. Read-only work can run in
-    # parallel. Mutations stay ordered. This protects device lists, prose, and
-    # model-inferred intents from accidental decomposition.
-    parallel = [item for item in _PARALLEL_SPLIT.split(text.strip()) if item]
-    if 1 < len(parallel) <= 4:
-        decisions = tuple(
-            decision
-            for item in parallel
-            if (decision := route_operational_request(item, owner_id, history))
-        )
-        if len(decisions) == len(parallel):
-            read_only = all(item.risk in {"none", "read_only"} for item in decisions)
-            return decisions, not read_only
-    return (), True
+    def meaningful(clause: str) -> bool:
+        decision = route_operational_request(clause, owner_id, history)
+        if decision is not None:
+            routed[clause] = decision
+            return True
+        return False
+
+    decomposition = decompose_request(text, independently_meaningful=meaningful)
+    if decomposition.decomposed:
+        decisions = tuple(routed[item.text] for item in decomposition.clauses)
+        mutations = any(item.risk == "mutating" for item in decisions)
+        return decisions, decomposition.preserve_order or mutations, decomposition
+    return (), True, decomposition
 
 
 def analyze_turn(
@@ -148,11 +149,12 @@ def analyze_turn(
     platform: str,
     history: Sequence[Any] | None = None,
     trace_id: str | None = None,
+    request_key: str | None = None,
     resolved_entities: tuple[EntityReference, ...] = (),
 ) -> TurnAnalysis:
     """Create a bounded goal model before any memory retrieval or model prompt."""
     trace_id = trace_id or uuid.uuid4().hex
-    decisions, preserve_order = _compound_operational_plan(
+    decisions, preserve_order, decomposition = _compound_operational_plan(
         effective_text, owner_id, history
     )
     if not decisions:
@@ -223,5 +225,13 @@ def analyze_turn(
         entities=tuple(entities),
         response_mode=mode,
         memory_policy="operational_minimal" if decisions else "relevant_only",
+        request_key=request_key,
     )
-    return TurnAnalysis(state, effective_text, tuple(decisions), preserve_order)
+    return TurnAnalysis(
+        state,
+        effective_text,
+        tuple(decisions),
+        preserve_order,
+        recognize_deterministic(effective_text),
+        decomposition,
+    )

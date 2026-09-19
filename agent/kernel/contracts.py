@@ -159,6 +159,7 @@ class TurnState:
     owner_scope_hash: str
     platform: str
     message_hash: str
+    request_key_hash: str
     original_length: int
     goal: GoalSpec
     entities: tuple[EntityReference, ...]
@@ -181,6 +182,7 @@ class TurnState:
         entities: tuple[EntityReference, ...] = (),
         response_mode: ResponseMode = ResponseMode.BRIEF,
         memory_policy: str = "relevant_only",
+        request_key: str | None = None,
     ) -> "TurnState":
         return cls(
             id=uuid.uuid4().hex,
@@ -189,6 +191,9 @@ class TurnState:
             platform=str(platform or "unknown"),
             message_hash=hashlib.sha256(
                 original_text.casefold().strip().encode()
+            ).hexdigest(),
+            request_key_hash=hashlib.sha256(
+                str(request_key or trace_id).encode()
             ).hexdigest(),
             original_length=len(original_text),
             goal=goal,
@@ -201,12 +206,13 @@ class TurnState:
         self, *, include_entity_names: bool = True, include_parameters: bool = False
     ) -> dict[str, Any]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "id": self.id,
             "trace_id": self.trace_id,
             "owner_scope_hash": self.owner_scope_hash,
             "platform": self.platform,
             "message_hash": self.message_hash,
+            "request_key_hash": self.request_key_hash,
             "original_length": self.original_length,
             "goal": self.goal.as_dict(include_parameters=include_parameters),
             "entities": [

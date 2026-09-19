@@ -83,6 +83,9 @@ class UnifiedRoutingService:
             explanation=decision.explanation,
             confidence=decision.confidence,
             source=decision.source,
+            classifier_trace=dict(decision.classifier_trace),
+            authorization=dict(decision.authorization),
+            idempotency_key=str(decision.authorization.get("idempotency_key") or ""),
         )
         outcome = {}
         result = await execute_request(

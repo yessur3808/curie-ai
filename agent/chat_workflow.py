@@ -646,6 +646,7 @@ class ChatWorkflow:
         has_device_reference = bool(
             re.search(
                 r"\b(?:it|that(?: one| device)?|this(?: one| device)?|them|"
+                r"both\s+of\s+them|all\s+of\s+them|those\s+two|these\s+two|"
                 r"those(?: devices)?|these(?: devices)?|both(?: devices)?|the device)\b",
                 original_text,
                 re.I,
@@ -654,6 +655,7 @@ class ChatWorkflow:
         has_device_operation = bool(
             re.search(
                 r"\b(?:turn|switch|power|status|still (?:on|off)|"
+                r"(?:stay|remain)\b.{0,50}\b(?:on|off)|"
                 r"(?:is|are)\b.{0,50}\b(?:on|off|online|offline|running))\b",
                 original_text,
                 re.I,
@@ -686,6 +688,7 @@ class ChatWorkflow:
             owner_id=str(internal_id),
             platform=platform,
             history=history,
+            request_key=str(enriched.get("_dedupe_key") or "") or None,
             resolved_entities=resolution.entities,
         )
         enriched["_effective_text"] = resolution.resolved_text
@@ -903,6 +906,7 @@ class ChatWorkflow:
                         turn_analysis.state,
                         turn_analysis.operational_decisions,
                         preserve_order=turn_analysis.preserve_order,
+                        dependency_kinds=turn_analysis.dependency_kinds,
                     )
                 )
 
@@ -915,8 +919,29 @@ class ChatWorkflow:
                         user_profile,
                     )
 
-                with trace.stage("tool"):
-                    execution = await self.plan_executor.execute(plan, execute_decision)
+                from agent.kernel.cancellation import get_cancellation_registry
+
+                cancellation_event = normalized_input.get("_cancellation_event")
+                if not isinstance(cancellation_event, asyncio.Event):
+                    cancellation_event = asyncio.Event()
+                cancellation_registry = get_cancellation_registry()
+                register_active_plan = any(
+                    step.capability != "emergency_stop" for step in plan.steps
+                )
+                if register_active_plan:
+                    cancellation_registry.register(str(internal_id), cancellation_event)
+                try:
+                    with trace.stage("tool"):
+                        execution = await self.plan_executor.execute(
+                            plan,
+                            execute_decision,
+                            cancellation_event=cancellation_event,
+                        )
+                finally:
+                    if register_active_plan:
+                        cancellation_registry.unregister(
+                            str(internal_id), cancellation_event
+                        )
                 response_parts = [
                     self.response_policy.finalize(
                         outcome.text, user_text, profile=user_profile

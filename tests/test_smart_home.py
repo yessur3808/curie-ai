@@ -111,6 +111,11 @@ def test_exact_control_runs_without_bulk_or_ambiguous_target():
     text, data = asyncio.run(hub.control("owner", "Desk Plug", "off"))
     assert text == "Done. Desk Plug is now off."
     assert data["receipt"]["verified_state"] == "off"
+    assert data["pre_state"] == {
+        "target": "fake:desk",
+        "state": "on",
+        "provider": "fake",
+    }
     assert provider.controls == [("owner", "desk", "off")]
 
     with pytest.raises(ValueError, match="ambiguous"):
@@ -119,7 +124,10 @@ def test_exact_control_runs_without_bulk_or_ambiguous_target():
         asyncio.run(hub.control("owner", "everything", "off"))
 
 
-def test_tv_light_alias_prefers_the_only_online_tv_light():
+def test_explicit_tv_light_alias_resolves_only_for_its_owner(tmp_path, monkeypatch):
+    from memory import local_store
+
+    monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
     provider = FakeProvider(
         [
             DeviceSnapshot(
@@ -131,13 +139,15 @@ def test_tv_light_alias_prefers_the_only_online_tv_light():
         ]
     )
 
-    text, _ = asyncio.run(SmartHomeHub([provider]).control("owner", "tv light", "off"))
+    hub = SmartHomeHub([provider])
+    asyncio.run(hub.learn_alias("owner", "AI Sync Box strip", "tv light"))
+    text, _ = asyncio.run(hub.control("owner", "tv light", "off"))
 
     assert text == "Done. AI Sync Box strip is now off."
     assert provider.controls == [("owner", "sync", "off")]
 
 
-def test_dreamview_product_name_resolves_ai_sync_box_when_unique():
+def test_dreamview_does_not_implicitly_resolve_ai_sync_box():
     provider = FakeProvider(
         [
             DeviceSnapshot(
@@ -149,13 +159,10 @@ def test_dreamview_product_name_resolves_ai_sync_box_when_unique():
         ]
     )
 
-    text, data = asyncio.run(
-        SmartHomeHub([provider]).control("owner", "DreamView", "off")
-    )
+    with pytest.raises(LookupError, match="DreamView"):
+        asyncio.run(SmartHomeHub([provider]).control("owner", "DreamView", "off"))
 
-    assert text == "Done. AI Sync Box strip is now off."
-    assert data["receipt"]["verified_state"] == "off"
-    assert provider.controls == [("owner", "sync", "off")]
+    assert provider.controls == []
 
 
 def test_batch_control_resolves_every_target_before_running_once():
@@ -171,7 +178,9 @@ def test_batch_control_resolves_every_target_before_running_once():
     )
 
     text, data = asyncio.run(
-        SmartHomeHub([provider]).control_many("owner", ["floor lamp", "tv light"], "on")
+        SmartHomeHub([provider]).control_many(
+            "owner", ["floor lamp", "AI Sync Box strip"], "on"
+        )
     )
 
     assert text == "Done. Floor Lamp 2 and AI Sync Box strip are now on."
@@ -181,8 +190,14 @@ def test_batch_control_resolves_every_target_before_running_once():
     }
     assert [item["target"] for item in data["correlations"]] == [
         "floor lamp",
-        "tv light",
+        "AI Sync Box strip",
     ]
+    assert data["pre_state"] == {
+        "target": "",
+        "targets": ["fake:floor", "fake:sync"],
+        "state": "off",
+        "provider": "",
+    }
 
 
 def test_all_lights_resolves_the_device_category_and_controls_only_lights():
@@ -226,6 +241,7 @@ def test_all_lights_resolves_the_device_category_and_controls_only_lights():
         "AI Sync Box strip",
         "Floor Lamp 2",
     ]
+    assert data["pre_state"]["state"] == "on"
 
 
 def test_batch_control_does_not_partially_run_when_one_target_is_unknown():

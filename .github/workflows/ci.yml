@@ -167,6 +167,7 @@ jobs:
         run: |
           pytest -q tests/test_evaluation_runner.py
           python -m evaluation.phase2_suite
+          python -m evaluation.phase345_suite
 
   release-contracts:
     name: Contracts, migrations, and release evidence

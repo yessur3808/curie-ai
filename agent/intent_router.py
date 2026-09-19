@@ -9,6 +9,8 @@ import os
 import re
 from typing import Any, Callable, Iterable, Mapping, Optional
 
+from agent.understanding.taxonomy import INTENT_TAXONOMY
+
 
 @dataclass
 class ToolRequest:
@@ -18,6 +20,9 @@ class ToolRequest:
     explanation: str = ""
     confidence: float = 1.0
     source: str = "deterministic"
+    classifier_trace: dict[str, Any] = field(default_factory=dict)
+    authorization: dict[str, Any] = field(default_factory=dict)
+    idempotency_key: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,15 +33,31 @@ class ParameterSpec:
 
 
 _NAME = re.compile(r"^[A-Za-z0-9][\w.-]{1,63}$")
-_NONEMPTY = lambda value: isinstance(value, str) and bool(value.strip())
-_PATH = lambda value: isinstance(value, str) and "\x00" not in value
-_BOOL = lambda value: isinstance(value, bool)
-_POWER_STATE = lambda value: isinstance(value, str) and value in {"on", "off"}
-_TARGETS = (
-    lambda value: isinstance(value, (list, tuple))
-    and 1 < len(value) <= 8
-    and all(isinstance(item, str) and bool(item.strip()) for item in value)
-)
+
+
+def _NONEMPTY(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _PATH(value: Any) -> bool:
+    return isinstance(value, str) and "\x00" not in value
+
+
+def _BOOL(value: Any) -> bool:
+    return isinstance(value, bool)
+
+
+def _POWER_STATE(value: Any) -> bool:
+    return isinstance(value, str) and value in {"on", "off"}
+
+
+def _TARGETS(value: Any) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and 1 < len(value) <= 8
+        and all(isinstance(item, str) and bool(item.strip()) for item in value)
+    )
+
 
 TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
     "ram_usage": ParameterSpec(),
@@ -153,6 +174,10 @@ TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
         required=("device", "alias"),
         validators=(("device", _NONEMPTY), ("alias", _NONEMPTY)),
     ),
+    "home_alias_reject": ParameterSpec(
+        required=("alias",), validators=(("alias", _NONEMPTY),)
+    ),
+    "emergency_stop": ParameterSpec(),
 }
 
 _MUTATING_ACTIONS = {
@@ -167,9 +192,16 @@ _MUTATING_ACTIONS = {
     "browser_fill",
     "home_control",
     "home_alias",
+    "home_alias_reject",
+    "emergency_stop",
 }
 _APPROVE = re.compile(r"^/approve\s+action\s+([a-f0-9]{8})$", re.I)
 _REJECT = re.compile(r"^/reject\s+action\s+([a-f0-9]{8})$", re.I)
+_EMERGENCY_STOP = re.compile(
+    r"^\s*(?:emergency\s+stop|stop\s+everything|abort\s+all(?:\s+tasks)?|"
+    r"kill\s+all\s+tasks)(?:\s+now)?\s*[.!?]*$",
+    re.I,
+)
 _ACTION_HINT = re.compile(
     r"\b(?:files?|folder|directory|project|repo|repository|tests?|weather|forecast|"
     r"rain|ram|memory|hardware|computer|internet|network|speed|latency|ping|email|gmail|twitter|tweet|\bx\b|direct message|research|sources?|investigate|look up|"
@@ -289,6 +321,7 @@ def _home_alias_request(command: str) -> ToolRequest | None:
     patterns = (
         r"^(?P<device>.+?)\s+is\s+(?:the\s+)?(?P<alias>.+?)\s*,?\s*(?:please\s+)?(?:correlate|remember|associate|map)\b.+$",
         r"^(?:please\s+)?(?:remember|correlate|associate|map)\s+(?:that\s+)?(?P<device>.+?)\s+(?:is|means|with|to)\s+(?:the\s+)?(?P<alias>.+?)[.!?]?$",
+        r"^(?:please\s+)?call\s+(?P<device>.+?)\s+(?P<alias>[\w.-]{2,64})[.!?]?$",
     )
     for pattern in patterns:
         match = re.fullmatch(pattern, command.strip(), re.I | re.S)
@@ -316,7 +349,26 @@ def _home_alias_request(command: str) -> ToolRequest | None:
 
 def _home_control_request(command: str) -> ToolRequest | None:
     polite = r"(?:(?:please|could you|can(?: you)?|would you)\s+)?"
+    kill = re.fullmatch(
+        rf"^{polite}kill\s+(?:all\s+|the\s+)?(?P<target>.+?)(?:\s+please)?[.!?]?$",
+        command.strip(),
+        re.I | re.S,
+    )
+    if kill:
+        target = _home_target(kill.group("target"))
+        params, error = validate_tool_request(
+            "home_control", _home_control_params(target, "off")
+        )
+        return (
+            ToolRequest("clarify", {"message": error})
+            if error
+            else ToolRequest(
+                "home_control", params or {}, explanation=f"turn {target} off"
+            )
+        )
     patterns = (
+        rf"^{polite}(?P<target>.+?)\s+(?:can\s+)?(?:stay|remain)\s+"
+        rf"(?P<state>on|off)(?:\s+please)?[.!?]?$",
         rf"^{polite}(?:turn|switch|power)\s+(?P<state>on|off)\s+(?P<target>.+)$",
         rf"^{polite}(?:turn|switch|power)\s+(?P<target>.+?)\s+(?P<state>on|off)(?:\s+please)?[.!?]?$",
     )
@@ -364,6 +416,10 @@ def _pronoun_kind(target: str) -> str | None:
         "these devices",
         "both",
         "both devices",
+        "both of them",
+        "all of them",
+        "those two",
+        "these two",
     }:
         return "plural"
     return None
@@ -486,9 +542,32 @@ def classify_request(
         return ToolRequest("approve", {"token": approve.group(1)})
     if reject:
         return ToolRequest("reject", {"token": reject.group(1)})
+    if _EMERGENCY_STOP.fullmatch(text):
+        return ToolRequest(
+            "emergency_stop",
+            explanation="stop all cancellable work immediately",
+        )
 
     # Explicit account commands keep external writes unambiguous and previewable.
     command = text.strip()
+    correction_match = re.fullmatch(
+        r"(?:there\s+(?:is|are)\s+no|i\s+(?:do\s+not|don't)\s+have\s+(?:a\s+)?)"
+        r"\s*(?:device\s+)?(?:called|named)\s+(.+?)[.!?]?",
+        command,
+        re.I | re.S,
+    )
+    if correction_match:
+        alias = _home_target(correction_match.group(1))
+        params, error = validate_tool_request("home_alias_reject", {"alias": alias})
+        return (
+            ToolRequest("clarify", {"message": error})
+            if error
+            else ToolRequest(
+                "home_alias_reject",
+                params or {},
+                explanation=f"stop treating {alias!r} as a device alias",
+            )
+        )
     correction = _corrective_home_request(command, history)
     if correction:
         return correction
@@ -498,6 +577,24 @@ def classify_request(
     alias_request = _home_alias_request(command)
     if alias_request:
         return alias_request
+    # Tool vocabulary inside quoted, illustrative, or explicitly figurative
+    # prose is not a command. Keep this ahead of natural home-control matching,
+    # while leaving explicit slash commands and corrections above it usable.
+    if not command.lstrip().startswith("/") and (
+        re.search(
+            r"\b(?:phrase|quote|quoted|example|metaphor|hypothetical|"
+            r"discuss(?:ed|ing)?|talk(?:ed|ing)\s+about)\b",
+            command,
+            re.I,
+        )
+        or re.search(
+            r"^\s*(?:in|during)\s+(?:the\s+)?(?:story|novel)\b|"
+            r"\b(?:discussed|talked\s+about)\b.{0,80}\b(?:turn|switch|power|kill)\b",
+            command,
+            re.I | re.S,
+        )
+    ):
+        return None
     match = re.fullmatch(
         r"/home\s+(?:status|summary)(?:\s+(.+))?", command, re.I | re.S
     )
@@ -532,7 +629,8 @@ def classify_request(
             targets = _recent_explicit_home_targets(history)
             state_match = re.search(r"\b(on|off)\b", command, re.I)
             pronoun_match = re.search(
-                r"\b(it|that|that one|this|this one|them|those|these|both)\b",
+                r"\b(both\s+of\s+them|all\s+of\s+them|those\s+two|these\s+two|"
+                r"it|that\s+one|that|this\s+one|this|them|those|these|both)\b",
                 command,
                 re.I,
             )
@@ -691,11 +789,18 @@ def classify_request(
 
     candidates: list[ToolRequest] = []
     if re.search(
-        r"\b(?:what|show|check).*(?:using|uses).*(?:ram|memory)\b|\b(?:ram|memory) usage\b",
+        r"\b(?:what|show|check|inspect)\b.{0,40}\b(?:using|uses)\b.{0,20}\b(?:ram|memory)\b|"
+        r"\b(?:ram|memory) usage\b|"
+        r"^\s*(?:please\s+)?(?:show|check|inspect)\s+(?:my\s+)?(?:ram|memory)\s*[.!?]*$",
         lowered,
     ):
         candidates.append(ToolRequest("ram_usage"))
-    if re.search(r"\b(?:computer|system|hardware) spec", lowered):
+    if re.search(
+        r"\b(?:computer|system|hardware)\s+(?:specs?|specifications?)\b|"
+        r"^\s*(?:please\s+)?(?:show|check|inspect)\s+(?:my\s+)?"
+        r"(?:computer|system|hardware)(?:\s+(?:specs?|specifications?))?\s*[.!?]*$",
+        lowered,
+    ):
         candidates.append(ToolRequest("hardware"))
     if re.search(
         r"\b(?:internet|network|connection|wi-?fi)\b.{0,50}\b(?:speed|latency|ping)\b|"
@@ -838,31 +943,40 @@ async def resolve_request(
     if os.getenv("INTENT_LLM_ENABLED", "true").lower() not in {"1", "true", "yes"}:
         return None
 
+    from agent.tooling import get_runtime_registry
+    from agent.understanding.classifier import classify_schema_constrained
+
     read_only = sorted(set(TOOL_PARAMETER_SPECS) - _MUTATING_ACTIONS)
-    prompt = (
-        "Classify an assistant tool request. Return only JSON with keys action, params, "
-        "confidence, and clarification. action must be one of "
-        + json.dumps(read_only)
-        + " or null. Do not classify ordinary conversation. Do not authorize file creation "
-        "or code modification. confidence must be 0 to 1. params must be an object. If a "
-        "required detail is missing, put one short question in clarification.\nUser: "
-        + text
+    registry = get_runtime_registry()
+    capability_descriptions = {
+        name: registry.get(name).description
+        for name in read_only
+        if name in registry.names()
+    }
+    classification = await classify_schema_constrained(
+        text,
+        model_call=_ask_intent_model,
+        model_name=os.getenv("INTENT_CLASSIFIER_MODEL", "fast"),
+        available_capabilities=capability_descriptions,
+        threshold=float(os.getenv("INTENT_CLASSIFIER_ABSTAIN_THRESHOLD", "0.78")),
     )
-    raw = await _ask_intent_model(prompt)
-    payload = _parse_model_decision(raw)
-    if not payload:
+    if classification.abstained:
         return None
-    action = payload.get("action")
-    try:
-        confidence = float(payload.get("confidence", 0.0))
-    except (TypeError, ValueError):
+    action = classification.candidate_capability
+    if action is None and classification.intent is not None:
+        candidates = [
+            item
+            for item in INTENT_TAXONOMY[classification.intent].candidate_capabilities
+            if item in capability_descriptions
+        ]
+        action = candidates[0] if len(candidates) == 1 else None
+    if action not in read_only:
         return None
-    if action not in read_only or not 0.0 <= confidence <= 1.0:
-        return None
+    confidence = classification.confidence
     normalized, validation_question = validate_tool_request(
-        action, payload.get("params", {})
+        action, dict(classification.entities)
     )
-    clarification = validation_question or payload.get("clarification")
+    clarification = validation_question or classification.clarification
     # A weak tool guess is not a reason to interrupt ordinary conversation with
     # a tool-specific question.  Only ask for a missing parameter after the
     # classifier is already confident that the user intended that tool.
@@ -873,8 +987,14 @@ async def resolve_request(
         return ToolRequest(
             "clarify", {"message": str(question)}, confidence=confidence, source="model"
         )
-    from agent.tooling import get_runtime_registry
-
-    if action not in get_runtime_registry().names():
+    if action not in registry.names():
         return None
-    return ToolRequest(action, normalized or {}, confidence=confidence, source="model")
+    return ToolRequest(
+        action,
+        normalized or {},
+        confidence=confidence,
+        source="model",
+        classifier_trace=(
+            classification.trace.as_dict() if classification.trace else {}
+        ),
+    )

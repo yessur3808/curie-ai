@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.09-phase345-reasoning-execution
+
+- Added a versioned intent taxonomy, deterministic evidence recognizers,
+  schema-constrained fallback classification, confidence-aware clarification,
+  and conservative compound-request decomposition.
+- Added canonical smart-home inventory, explicit alias lifecycle and
+  corrections, capability and room groups, conservative fuzzy matching, and
+  truthful per-device mutation and verification results.
+- Added typed dependency-graph plans, exact plan-bound approvals, persistent
+  mutation idempotency receipts, bounded safe retries, cooperative
+  cancellation, verification policy, and explicit compensation requests.
+- Added offline Phase 3–5 behavioral gates and regression tests for command
+  activation, device-resolution safety, and execution guarantees.
+
 ## 2026.09-phase1-turn-kernel
 
 - Added a feature-flagged fourteen-stage typed turn pipeline with immutable

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "release": "2026.09-phase1-turn-kernel",
+  "release": "2026.09-phase345-reasoning-execution",
   "contract_version": "1.1.0",
   "changelog": "CHANGELOG.md",
-  "migration_notes": "docs/RELEASE_PROCESS.md",
-  "evaluation_delta": "evaluation/deltas/phase1-turn-kernel.json",
+  "migration_notes": "docs/releases/PHASE345_MIGRATION.md",
+  "evaluation_delta": "evaluation/deltas/phase345-reasoning-execution.json",
   "rollback": {
-    "application": "Restart the prior reviewed revision using the normal instance launcher.",
+    "application": "Stop Curie and restart the prior reviewed revision using the normal instance launcher. The additive mutation-attempt table may remain in place.",
     "sqlite_schema_target": 0,
     "postgres_command": "python -m scripts.down_migrations --target 4",
     "data_backup_required": true

@@ -92,3 +92,23 @@ class HomeAliasTool:
                 str(exc), user_message=str(exc), retryable=False
             ) from exc
         return ToolResult(text, data, "Curie local memory")
+
+
+class HomeAliasRejectTool:
+    name, read_only = "home_alias_reject", False
+
+    async def execute(
+        self, params: Mapping[str, Any], context: ToolContext
+    ) -> ToolResult:
+        _require_home_owner(context)
+        from services.smart_home import get_smart_home_hub
+
+        try:
+            text, data = await get_smart_home_hub().reject_alias(
+                context.internal_id, str(params["alias"])
+            )
+        except ValueError as exc:
+            raise ToolExecutionError(
+                str(exc), user_message=str(exc), retryable=False
+            ) from exc
+        return ToolResult(text, data, "Curie local memory")

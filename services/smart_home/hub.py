@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from difflib import SequenceMatcher
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -13,7 +11,18 @@ from .base import SmartHomeProvider, require_power_state
 from .cloud import GoveeProvider, SmartThingsProvider
 from .lg import LGThinQProvider
 from .local import MiHomeProvider, NanoleafProvider, PetlibroProvider, TapoProvider
-from .models import ControlReceipt, DeviceSnapshot, ProviderIssue
+from agent.understanding.entities import DeviceResolver, ResolutionStatus
+
+from .aliases import (
+    DeviceAlias,
+    confirm_device_alias,
+    list_device_aliases,
+    normalize_alias,
+    record_alias_candidate,
+    reject_device_alias,
+)
+from .inventory import DeviceInventoryService
+from .models import CanonicalDevice, ControlReceipt, DeviceSnapshot, ProviderIssue
 
 
 PROVIDER_ALIASES = {
@@ -47,54 +56,11 @@ def _provider_name(value: str | None) -> str | None:
     return PROVIDER_ALIASES.get(normalized, normalized.replace(" ", "_"))
 
 
-def _semantic_aliases(device: DeviceSnapshot) -> str:
-    """Add conservative product-family aliases missing from provider names."""
-    name = _normalize(device.name)
-    aliases: list[str] = []
-    if "sync box" in name:
-        aliases.extend(
-            (
-                "dreamview",
-                "dream view",
-                "dreamview t1",
-                "tv light",
-                "television light",
-                "screen light",
-                "tv backlight",
-                "ambient light",
-            )
-        )
-    return " ".join(aliases)
-
-
-@dataclass(frozen=True, slots=True)
-class _Match:
-    device: DeviceSnapshot
-    score: float
-    reason: str
-
-
-def _owner_aliases(owner_id: str) -> list[dict[str, Any]]:
+def _owner_aliases(owner_id: str) -> list[DeviceAlias]:
     try:
-        from memory.local_store import list_personal_items
-
-        return list_personal_items(str(owner_id), "device_alias")
+        return list_device_aliases(str(owner_id))
     except Exception:
         return []
-
-
-def _device_for_alias(
-    devices: list[DeviceSnapshot], alias: dict[str, Any]
-) -> DeviceSnapshot | None:
-    key = str(alias.get("device_key") or "")
-    provider = str(alias.get("provider") or "")
-    device_id = str(alias.get("device_id") or "")
-    for device in devices:
-        if key and device.key == key:
-            return device
-        if provider == device.provider and device_id == device.device_id:
-            return device
-    return None
 
 
 def _join_names(names: list[str]) -> str:
@@ -117,29 +83,6 @@ def _group_kind(target: str) -> str | None:
     return None
 
 
-def _in_group(device: DeviceSnapshot, group: str) -> bool:
-    if group != "lights":
-        return False
-    identity = _normalize(
-        " ".join(
-            (
-                device.name,
-                device.device_type,
-                str(device.attributes.get("device_class") or ""),
-                str(device.attributes.get("category") or ""),
-                str(device.attributes.get("model") or ""),
-            )
-        )
-    )
-    words = set(identity.split())
-    return bool(
-        words & {"light", "lights", "lamp", "lamps", "bulb", "bulbs", "led", "leds"}
-    ) or any(
-        phrase in identity
-        for phrase in ("sync box", "dreamview", "dream view", "nanoleaf", "backlight")
-    )
-
-
 class SmartHomeHub:
     def __init__(self, providers: Iterable[SmartHomeProvider] | None = None):
         provider_items = (
@@ -156,6 +99,8 @@ class SmartHomeHub:
             ]
         )
         self.providers = {provider.name: provider for provider in provider_items}
+        self.inventory = DeviceInventoryService(provider_items)
+        self.resolver = DeviceResolver()
 
     async def collect(
         self, owner_id: str, provider: str | None = None
@@ -163,146 +108,57 @@ class SmartHomeHub:
         selected = _provider_name(provider)
         if selected and selected not in self.providers:
             raise ValueError(f"Unknown smart-home provider {provider!r}")
-        candidates = (
-            [self.providers[selected]] if selected else list(self.providers.values())
-        )
-        ready: list[SmartHomeProvider] = []
-        issues: list[ProviderIssue] = []
-        for item in candidates:
-            try:
-                configured, reason = item.configured(owner_id)
-            except Exception as exc:
-                configured, reason = False, str(exc)
-            if configured:
-                ready.append(item)
-            else:
-                issues.append(
-                    ProviderIssue(item.name, reason or "Not configured", False)
-                )
-        results = await asyncio.gather(
-            *(item.list_devices(owner_id) for item in ready), return_exceptions=True
-        )
-        devices: list[DeviceSnapshot] = []
-        for item, result in zip(ready, results):
-            if isinstance(result, Exception):
-                issues.append(ProviderIssue(item.name, _safe_error(result)))
-            else:
-                devices.extend(result)
+        snapshot = await self.inventory.refresh(str(owner_id), selected)
         return (
-            sorted(devices, key=lambda item: (item.name.casefold(), item.provider)),
-            issues,
+            [item.to_snapshot() for item in snapshot.devices],
+            list(snapshot.issues),
         )
 
-    @staticmethod
-    def _rank_matches(
-        devices: list[DeviceSnapshot],
-        target: str,
-        aliases: list[dict[str, Any]] | None = None,
-    ) -> list[_Match]:
-        query = _normalize(target)
-        if not query:
-            return [_Match(item, 1.0, "all devices") for item in devices]
-
-        canonical = []
-        for item in devices:
-            if query in {
-                _normalize(item.name),
-                _normalize(item.device_id),
-                _normalize(item.key),
-            }:
-                canonical.append(_Match(item, 1.0, "exact device identity"))
-        if canonical:
-            return canonical
-
-        learned: list[_Match] = []
-        for alias in aliases or ():
-            if _normalize(str(alias.get("alias") or "")) != query:
-                continue
-            device = _device_for_alias(devices, alias)
-            if device and all(item.device.key != device.key for item in learned):
-                learned.append(_Match(device, 0.99, "learned owner alias"))
-        if learned:
-            return learned
-
-        query_tokens = set(query.split()) - {"the", "my", "a", "an", "device"}
-        compact_query = query.replace(" ", "")
-        ranked: list[_Match] = []
-        for item in devices:
-            name = _normalize(item.name)
-            identity = _normalize(" ".join((item.name, item.device_id, item.key)))
-            semantic = _normalize(_semantic_aliases(item))
-            identity_tokens = set(identity.split())
-            semantic_phrases = {
-                phrase.strip()
-                for phrase in re.split(r"\s{2,}|,", _semantic_aliases(item))
-                if phrase.strip()
-            }
-            score, reason = 0.0, ""
-            if query in name or name in query:
-                score, reason = 0.94, "device-name phrase"
-            elif query_tokens and query_tokens <= identity_tokens:
-                score, reason = 0.90, "device-name tokens"
-            elif query in semantic or query in semantic_phrases:
-                score, reason = 0.86, "product-family alias"
-            else:
-                token_overlap = len(query_tokens & identity_tokens) / max(
-                    len(query_tokens), 1
-                )
-                fuzzy = SequenceMatcher(
-                    None, compact_query, name.replace(" ", "")
-                ).ratio()
-                if fuzzy >= 0.76:
-                    score, reason = (
-                        0.72 + min((fuzzy - 0.76) * 0.5, 0.16),
-                        "close device name",
-                    )
-                elif token_overlap >= 0.67:
-                    score, reason = (
-                        0.70 + token_overlap * 0.12,
-                        "partial device-name tokens",
-                    )
-            if score:
-                ranked.append(_Match(item, score, reason))
-        return sorted(
-            ranked,
-            key=lambda item: (
-                item.score,
-                item.device.online is True,
-                item.device.controllable,
-                item.device.name.casefold(),
-            ),
-            reverse=True,
-        )
-
-    @classmethod
-    def _matches(
-        cls,
-        devices: list[DeviceSnapshot],
-        target: str,
-        aliases: list[dict[str, Any]] | None = None,
-    ) -> list[DeviceSnapshot]:
-        ranked = cls._rank_matches(devices, target, aliases)
-        if not ranked or ranked[0].score < 0.72:
-            return []
-        best = ranked[0].score
-        # A meaningful score gap is safe to auto-resolve; close candidates must
-        # remain ambiguous instead of being guessed from incidental ordering.
-        selected = [item.device for item in ranked if best - item.score < 0.08]
-        return selected
+    async def canonical_inventory(
+        self, owner_id: str, provider: str | None = None, *, force: bool = False
+    ) -> tuple[list[CanonicalDevice], list[ProviderIssue]]:
+        selected = _provider_name(provider)
+        if selected and selected not in self.providers:
+            raise ValueError(f"Unknown smart-home provider {provider!r}")
+        snapshot = await self.inventory.refresh(str(owner_id), selected, force=force)
+        return list(snapshot.devices), list(snapshot.issues)
 
     async def status(
         self, owner_id: str, target: str | None = None, provider: str | None = None
     ) -> tuple[str, dict[str, Any]]:
-        devices, issues = await self.collect(owner_id, provider)
-        group = _group_kind(target or "")
-        matches = (
-            [item for item in devices if _in_group(item, group)]
-            if group
-            else self._matches(devices, target or "", _owner_aliases(owner_id))
+        canonical, issues = await self.canonical_inventory(owner_id, provider)
+        devices = [item.to_snapshot() for item in canonical]
+        resolution = (
+            self.resolver.resolve(
+                target,
+                canonical,
+                aliases=_owner_aliases(owner_id),
+                explicit_provider=_provider_name(provider),
+                consequential=False,
+            )
+            if target
+            else None
         )
-        if target and not matches:
+        matches = (
+            [item.to_snapshot() for item in resolution.devices]
+            if resolution and resolution.resolved
+            else []
+        )
+        if target and (not resolution or not resolution.resolved):
             names = ", ".join(item.name for item in devices[:12])
-            text = f"I couldn't find a smart-home device matching {target!r}."
+            if resolution and resolution.status is ResolutionStatus.REJECTED_ALIAS:
+                text = (
+                    f"You previously corrected {target!r} as not being a device, "
+                    "so I did not map it to anything."
+                )
+            elif resolution and resolution.status is ResolutionStatus.AMBIGUOUS:
+                text = (
+                    f"{target!r} could mean more than one device: "
+                    + ", ".join(resolution.candidates)
+                    + "."
+                )
+            else:
+                text = f"I couldn't find a smart-home device matching {target!r}."
             if names:
                 text += f" Available devices: {names}."
             elif issues:
@@ -328,50 +184,53 @@ class SmartHomeHub:
         provider: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         state = require_power_state(state)
-        group = _group_kind(target)
-        if group:
-            return await self.control_group(owner_id, target, state, provider)
         if _normalize(target) in {
             "all",
             "everything",
             "home",
             "house",
             "every device",
-            "all devices",
         }:
             raise ValueError(
                 "Bulk whole-home power changes are not accepted from a simple command; name one device"
             )
-        devices, issues = await self.collect(owner_id, provider)
-        aliases = _owner_aliases(owner_id)
-        matches = self._matches(
-            [item for item in devices if item.controllable], target, aliases
+        canonical, issues = await self.canonical_inventory(
+            owner_id, provider, force=True
         )
-        if not matches:
-            offline = self._matches(devices, target, aliases)
-            if offline:
-                raise ValueError(
-                    f"{offline[0].name} does not expose safe on/off control"
+        aliases = _owner_aliases(owner_id)
+        resolution = self.resolver.resolve(
+            target,
+            canonical,
+            aliases=aliases,
+            explicit_provider=_provider_name(provider),
+            consequential=True,
+        )
+        if resolution.status is ResolutionStatus.GROUP:
+            return await self.control_group(owner_id, target, state, provider)
+        if not resolution.resolved:
+            if resolution.status is ResolutionStatus.REJECTED_ALIAS:
+                raise LookupError(
+                    f"You corrected {target!r} as not being a device, so I did not control anything."
                 )
-            available = ", ".join(item.name for item in devices if item.controllable)
+            if resolution.status is ResolutionStatus.AMBIGUOUS:
+                raise ValueError(
+                    f"That target is ambiguous. Please name one of: {', '.join(resolution.candidates)}."
+                )
+            available = ", ".join(
+                item.display_name for item in canonical if item.controllable
+            )
             message = f"I couldn't find one controllable device matching {target!r}."
             if available:
                 message += f" Controllable devices: {available}."
-            if not devices and issues:
+            if not canonical and issues:
                 message += " No configured provider returned a device."
             raise LookupError(message)
-        if len(matches) > 1:
-            online_matches = [item for item in matches if item.online is True]
-            if len(online_matches) == 1:
-                matches = online_matches
-        if len(matches) > 1:
-            choices = ", ".join(
-                f"{item.name} ({item.provider})" for item in matches[:10]
-            )
+        device_model = resolution.devices[0]
+        if not device_model.controllable:
             raise ValueError(
-                f"That target is ambiguous. Please name one of: {choices}."
+                f"{device_model.display_name} does not expose safe on/off control"
             )
-        device = matches[0]
+        device = device_model.to_snapshot()
         if device.online is False:
             raise ConnectionError(
                 f"I can't reach {device.name} right now. It's offline, so I didn't send the command."
@@ -387,18 +246,51 @@ class SmartHomeHub:
             )
             return (
                 f"The {device.name} is already {state}, monsieur.",
-                {"receipt": receipt.as_dict(), "already_in_state": True},
+                {
+                    "receipt": receipt.as_dict(),
+                    "already_in_state": True,
+                    "verification_status": "already_satisfied",
+                    "resolution": {
+                        "confidence": resolution.confidence,
+                        "reason": resolution.reason,
+                    },
+                },
             )
         receipt = await self.providers[device.provider].set_power(
             owner_id, device.device_id, state
         )
+        self.inventory.observe(owner_id, receipt.snapshot)
         if receipt.verified_state == state:
             text = f"Done. {receipt.name} is now {state}."
+            verification_status = "verified"
         elif receipt.verified_state in {"on", "off"}:
             text = f"Not quite. I asked {receipt.name} to turn {state}, but it still reports {receipt.verified_state}."
+            verification_status = "contradicted"
         else:
             text = f"The command was accepted, but I couldn't verify that {receipt.name} is {state} yet."
-        return text, {"receipt": receipt.as_dict()}
+            verification_status = "unverified"
+        if resolution.reason == "strong_fuzzy_name":
+            record_alias_candidate(
+                owner_id,
+                alias=target,
+                device_key=device.key,
+                device_name=device.name,
+            )
+        data = {
+            "receipt": receipt.as_dict(),
+            "verification_status": verification_status,
+            "resolution": {
+                "confidence": resolution.confidence,
+                "reason": resolution.reason,
+            },
+        }
+        if device.power in {"on", "off"} and device.power != state:
+            data["pre_state"] = {
+                "target": device.key,
+                "state": device.power,
+                "provider": device.provider,
+            }
+        return text, data
 
     async def control_group(
         self,
@@ -409,20 +301,28 @@ class SmartHomeHub:
     ) -> tuple[str, dict[str, Any]]:
         """Resolve and control every device in one bounded semantic category."""
         state = require_power_state(state)
-        group = _group_kind(target)
-        if not group:
+        canonical, issues = await self.canonical_inventory(
+            owner_id, provider, force=True
+        )
+        resolution = self.resolver.resolve(
+            target,
+            canonical,
+            aliases=_owner_aliases(owner_id),
+            explicit_provider=_provider_name(provider),
+            consequential=True,
+        )
+        if resolution.status is not ResolutionStatus.GROUP:
             raise ValueError(f"{target!r} is not a recognized device group")
-        devices, issues = await self.collect(owner_id, provider)
-        grouped = [item for item in devices if _in_group(item, group)]
+        grouped = list(resolution.devices)
         selected = [item for item in grouped if item.controllable]
         if not selected:
             if grouped:
                 raise ValueError(
-                    f"I found {_join_names([item.name for item in grouped])}, but "
+                    f"I found {_join_names([item.display_name for item in grouped])}, but "
                     "none exposes safe on/off control."
                 )
-            available = [item.name for item in devices if item.controllable]
-            message = f"I couldn't find any controllable {group}."
+            available = [item.display_name for item in canonical if item.controllable]
+            message = f"I couldn't find any controllable devices matching {target!r}."
             if available:
                 message += f" Other controllable devices: {_join_names(available)}."
             elif issues:
@@ -430,18 +330,21 @@ class SmartHomeHub:
             raise LookupError(message)
         if len(selected) > 32:
             raise ValueError(
-                f"I found {len(selected)} {group}. Please narrow the room or group before I control them."
+                f"I found {len(selected)} matching devices. Please narrow the room or group before I control them."
             )
         if len(selected) == 1:
-            text, data = await self.control(owner_id, selected[0].key, state, provider)
+            text, data = await self.control(
+                owner_id, selected[0].canonical_id, state, provider
+            )
         else:
             text, data = await self.control_many(
-                owner_id, [item.key for item in selected], state, provider
+                owner_id, [item.canonical_id for item in selected], state, provider
             )
         data["group"] = {
-            "kind": group,
+            "kind": _group_kind(target) or "capability_group",
             "target": target,
-            "device_names": [item.name for item in selected],
+            "device_names": [item.display_name for item in selected],
+            "canonical_ids": [item.canonical_id for item in selected],
         }
         return text, data
 
@@ -463,48 +366,62 @@ class SmartHomeHub:
                 "Bulk whole-home power changes are not accepted; name each device"
             )
 
-        devices, issues = await self.collect(owner_id, provider)
-        controllable = [item for item in devices if item.controllable]
+        canonical, issues = await self.canonical_inventory(
+            owner_id, provider, force=True
+        )
         aliases = _owner_aliases(owner_id)
-        plan: list[tuple[str, DeviceSnapshot, _Match]] = []
+        plan: list[tuple[str, DeviceSnapshot, float, str]] = []
         for target in clean_targets:
-            ranked = self._rank_matches(controllable, target, aliases)
-            matches = self._matches(controllable, target, aliases)
-            if not matches:
-                non_control = self._matches(devices, target, aliases)
-                if non_control:
-                    raise ValueError(
-                        f"{non_control[0].name} does not expose safe on/off control"
+            resolution = self.resolver.resolve(
+                target,
+                canonical,
+                aliases=aliases,
+                explicit_provider=_provider_name(provider),
+                consequential=True,
+            )
+            if not resolution.resolved:
+                if resolution.status is ResolutionStatus.REJECTED_ALIAS:
+                    raise LookupError(
+                        f"You corrected {target!r} as not being a device, so I did not control anything."
                     )
-                available = ", ".join(item.name for item in controllable)
+                if resolution.status is ResolutionStatus.AMBIGUOUS:
+                    raise ValueError(
+                        f"{target!r} could mean more than one device. Which one: "
+                        + ", ".join(resolution.candidates)
+                        + "?"
+                    )
+                available = ", ".join(
+                    item.display_name for item in canonical if item.controllable
+                )
                 message = f"I couldn't match {target!r} to a controllable device."
                 if available:
                     message += f" Controllable devices: {available}."
-                if not devices and issues:
+                if not canonical and issues:
                     message += " No configured provider returned a device."
                 raise LookupError(message)
-            if len(matches) > 1:
-                choices = ", ".join(
-                    f"{item.name} ({item.provider})" for item in matches[:10]
-                )
-                raise ValueError(
-                    f"{target!r} could mean more than one device. Which one: {choices}?"
-                )
-            device = matches[0]
-            detail = next(item for item in ranked if item.device.key == device.key)
-            if all(existing.key != device.key for _, existing, _ in plan):
-                plan.append((target, device, detail))
+            for resolved in resolution.devices:
+                if not resolved.controllable:
+                    raise ValueError(
+                        f"{resolved.display_name} does not expose safe on/off control"
+                    )
+                device = resolved.to_snapshot()
+                if all(existing.key != device.key for _, existing, _, _ in plan):
+                    plan.append(
+                        (target, device, resolution.confidence, resolution.reason)
+                    )
 
-        offline = [device.name for _, device, _ in plan if device.online is False]
+        offline = [device.name for _, device, _, _ in plan if device.online is False]
         if offline:
             raise ConnectionError(
                 f"I can't reach {_join_names(offline)} right now, so I didn't send any of the commands."
             )
 
         receipts: list[ControlReceipt] = []
+        already_keys: set[str] = set()
         pending: list[tuple[DeviceSnapshot, Any]] = []
-        for _, device, _ in plan:
+        for _, device, _, _ in plan:
             if device.online is True and device.power == state:
+                already_keys.add(device.key)
                 receipts.append(
                     ControlReceipt(
                         device.provider,
@@ -534,59 +451,126 @@ class SmartHomeHub:
                 failures.append(f"{device.name}: {_safe_error(outcome)}")
             else:
                 receipts.append(outcome)
+                self.inventory.observe(owner_id, outcome.snapshot)
 
         receipt_by_key = {
             f"{item.provider}:{item.device_id}": item for item in receipts
         }
+        already = [
+            device.name for _, device, _, _ in plan if device.key in already_keys
+        ]
         verified = [
             device.name
-            for _, device, _ in plan
-            if receipt_by_key.get(device.key)
+            for _, device, _, _ in plan
+            if device.key not in already_keys
+            and receipt_by_key.get(device.key)
             and receipt_by_key[device.key].verified_state == state
+        ]
+        contradicted = [
+            device.name
+            for _, device, _, _ in plan
+            if receipt_by_key.get(device.key)
+            and receipt_by_key[device.key].verified_state in {"on", "off"}
+            and receipt_by_key[device.key].verified_state != state
         ]
         unverified = [
             device.name
-            for _, device, _ in plan
+            for _, device, _, _ in plan
             if receipt_by_key.get(device.key)
-            and receipt_by_key[device.key].verified_state != state
+            and receipt_by_key[device.key].verified_state == "unknown"
         ]
-        all_already = not pending and len(verified) == len(plan)
-        if all_already:
-            text = f"{_join_names(verified)} are already {state}, monsieur."
-        elif len(verified) == len(plan):
-            text = f"Done. {_join_names(verified)} are now {state}."
+        if len(already) == len(plan):
+            verb = "is" if len(already) == 1 else "are"
+            text = f"{_join_names(already)} {verb} already {state}, monsieur."
+            aggregate = "all_already_satisfied"
+            verification_status = "already_satisfied"
+        elif len(verified) + len(already) == len(plan):
+            if already:
+                text = (
+                    f"{_join_names(verified)} {'is' if len(verified) == 1 else 'are'} now {state}; "
+                    f"{_join_names(already)} {'was' if len(already) == 1 else 'were'} already {state}."
+                )
+                aggregate = "verified_and_already_satisfied"
+            else:
+                verb = "is" if len(verified) == 1 else "are"
+                text = f"Done. {_join_names(verified)} {verb} now {state}."
+                aggregate = "all_verified"
+            verification_status = "verified"
         else:
             parts = []
             if verified:
                 parts.append(
                     f"{_join_names(verified)} {'is' if len(verified) == 1 else 'are'} {state}"
                 )
+            if already:
+                verb = "was" if len(already) == 1 else "were"
+                parts.append(f"{_join_names(already)} {verb} already {state}")
+            if contradicted:
+                parts.append(f"{_join_names(contradicted)} reported the opposite state")
             if unverified:
                 parts.append(f"I couldn't verify {_join_names(unverified)}")
             if failures:
                 parts.append("failed: " + "; ".join(failures))
             text = "; ".join(parts) + "."
+            aggregate = (
+                "all_failed"
+                if failures and len(failures) == len(plan)
+                else "partial_failure"
+            )
+            verification_status = (
+                "failed"
+                if failures
+                else "contradicted" if contradicted else "unverified"
+            )
 
-        return text, {
+        data = {
             "receipts": [item.as_dict() for item in receipts],
             "correlations": [
                 {
                     "target": target,
                     "device_key": device.key,
                     "device_name": device.name,
-                    "confidence": round(detail.score, 3),
-                    "reason": detail.reason,
+                    "confidence": round(confidence, 3),
+                    "reason": reason,
                 }
-                for target, device, detail in plan
+                for target, device, confidence, reason in plan
             ],
             "failures": failures,
+            "aggregate_status": aggregate,
+            "verification_status": verification_status,
+            "per_device": {
+                "verified": verified,
+                "already_satisfied": already,
+                "contradicted": contradicted,
+                "unverified": unverified,
+                "failed": failures,
+            },
         }
+        changed = [device for device, _ in pending]
+        previous_states = {device.power for device in changed}
+        if changed and len(previous_states) == 1 and previous_states <= {"on", "off"}:
+            previous_state = next(iter(previous_states))
+            data["pre_state"] = (
+                {
+                    "target": changed[0].key,
+                    "state": previous_state,
+                    "provider": changed[0].provider,
+                }
+                if len(changed) == 1
+                else {
+                    "target": "",
+                    "targets": [device.key for device in changed],
+                    "state": previous_state,
+                    "provider": "",
+                }
+            )
+        return text, data
 
     async def learn_alias(
         self, owner_id: str, device_target: str, alias: str
     ) -> tuple[str, dict[str, Any]]:
         """Persist an explicit, owner-scoped mapping after resolving the device."""
-        normalized_alias = _normalize(alias)
+        normalized_alias = normalize_alias(alias)
         if not normalized_alias or normalized_alias in {
             "it",
             "them",
@@ -597,35 +581,67 @@ class SmartHomeHub:
             "everything",
         }:
             raise ValueError("That alias is too vague. Please use a specific nickname.")
-        devices, _ = await self.collect(owner_id)
-        matches = self._matches(devices, device_target, _owner_aliases(owner_id))
-        if not matches:
-            names = ", ".join(item.name for item in devices[:12])
+        devices, _ = await self.canonical_inventory(owner_id, force=True)
+        resolution = self.resolver.resolve(
+            device_target,
+            devices,
+            aliases=_owner_aliases(owner_id),
+            consequential=True,
+        )
+        if not resolution.resolved:
+            names = ", ".join(item.display_name for item in devices[:12])
             message = f"I couldn't match {device_target!r} to a device."
             if names:
                 message += f" Available devices: {names}."
             raise LookupError(message)
-        if len(matches) > 1:
-            choices = ", ".join(item.name for item in matches[:10])
+        if len(resolution.devices) > 1:
+            choices = ", ".join(item.display_name for item in resolution.devices[:10])
             raise ValueError(f"{device_target!r} is ambiguous. Which one: {choices}?")
-        device = matches[0]
-        from memory.local_store import save_personal_item
-
-        document = save_personal_item(
+        device = resolution.devices[0]
+        document = confirm_device_alias(
             str(owner_id),
-            "device_alias",
-            {
-                "id": f"smart-home-alias:{normalized_alias}",
-                "alias": normalized_alias,
-                "device_key": device.key,
-                "provider": device.provider,
-                "device_id": device.device_id,
-                "device_name": device.name,
-            },
+            alias=normalized_alias,
+            device_key=device.canonical_id,
+            provider=device.provider,
+            provider_id=device.provider_id,
+            device_name=device.display_name,
         )
         return (
-            f"Got it — {alias.strip()!r} means {device.name} from now on.",
+            f"Got it — {alias.strip()!r} means {device.display_name} from now on.",
             {"alias": document},
+        )
+
+    async def reject_alias(
+        self, owner_id: str, alias: str
+    ) -> tuple[str, dict[str, Any]]:
+        """Apply an explicit correction as an immediate owner-scoped tombstone."""
+        normalized = normalize_alias(alias)
+        if not normalized:
+            raise ValueError("Which device name should I stop using?")
+        previous = next(
+            (
+                item
+                for item in _owner_aliases(owner_id)
+                if item.normalized_alias == normalized
+                and item.status == "confirmed"
+                and not item.expired
+            ),
+            None,
+        )
+        document = reject_device_alias(str(owner_id), normalized)
+        data: dict[str, Any] = {
+            "alias": document,
+            "verification_status": "verified",
+            "correction_applied": True,
+        }
+        if previous and previous.device_key:
+            data["pre_state"] = {
+                "device": previous.device_key,
+                "alias": previous.alias,
+            }
+        return (
+            f"Understood. I won't treat {alias.strip()!r} as a device name.",
+            data,
         )
 
     @staticmethod

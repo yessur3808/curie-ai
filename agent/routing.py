@@ -44,6 +44,8 @@ class RoutingDecision:
     explanation: str = ""
     alternatives: tuple[str, ...] = ()
     approval_required: bool = False
+    classifier_trace: Mapping[str, Any] = field(default_factory=dict)
+    authorization: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.intent not in _INTENTS:
@@ -71,6 +73,8 @@ def _decision(
     explanation: str = "",
     alternatives: tuple[str, ...] = (),
     approval_required: bool = False,
+    classifier_trace: Mapping[str, Any] | None = None,
+    authorization: Mapping[str, Any] | None = None,
 ) -> RoutingDecision:
     risk, live = "none", False
     if capability:
@@ -89,6 +93,8 @@ def _decision(
         explanation=explanation,
         alternatives=alternatives,
         approval_required=approval_required,
+        classifier_trace=dict(classifier_trace or {}),
+        authorization=dict(authorization or {}),
     )
 
 
@@ -116,6 +122,8 @@ def _from_tool_request(request: ToolRequest) -> RoutingDecision:
         source=request.source,
         explanation=f"Matched the registered {request.action} capability.",
         approval_required=request.needs_approval,
+        classifier_trace=request.classifier_trace,
+        authorization=request.authorization,
     )
 
 

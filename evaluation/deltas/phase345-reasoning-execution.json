@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "release": "2026.09-phase345-reasoning-execution",
+  "baseline_commit": "9c30bb91",
+  "required_suites": [
+    "evaluation.week12_suite",
+    "evaluation.week34_suite",
+    "evaluation.phase2_suite",
+    "evaluation.phase345_suite"
+  ],
+  "required_gates": {
+    "correctness_pass_rate": 1.0,
+    "security_pass_rate": 1.0,
+    "known_regression_pass_rate": 1.0
+  },
+  "minimums": {
+    "macro_f1": 0.95,
+    "critical_recall": 0.97,
+    "maximum_false_tool_activation": 0.005,
+    "maximum_unnecessary_clarification": 0.03,
+    "group_resolution_accuracy": 0.99,
+    "wrong_fuzzy_mutations": 0
+  },
+  "notes": "Adds versioned intent understanding, canonical device resolution, and plan-bound execution safety."
+}

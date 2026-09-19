@@ -31,11 +31,13 @@ if TYPE_CHECKING:
 
 _DEVICE_REFERENCE = re.compile(
     r"\b(?:it|that(?: one| device)?|this(?: one| device)?|them|"
+    r"both\s+of\s+them|all\s+of\s+them|those\s+two|these\s+two|"
     r"those(?: devices)?|these(?: devices)?|both(?: devices)?|the device)\b",
     re.I,
 )
 _DEVICE_OPERATION = re.compile(
     r"\b(?:turn|switch|power|status|still (?:on|off)|"
+    r"(?:stay|remain)\b.{0,50}\b(?:on|off)|"
     r"(?:is|are)\b.{0,50}\b(?:on|off|online|offline|running))\b",
     re.I,
 )
@@ -185,6 +187,7 @@ class LegacyTurnPipelineAdapter:
                 platform=str(enriched["platform"]),
                 history=history,
                 trace_id=state.trace_id,
+                request_key=str(enriched.get("_dedupe_key") or state.trace_id),
                 resolved_entities=resolution.entities,
             )
             enriched["_effective_text"] = resolution.resolved_text
@@ -199,6 +202,14 @@ class LegacyTurnPipelineAdapter:
                 },
                 {
                     "intent": analysis.state.goal.intent,
+                    "taxonomy_intent": (
+                        analysis.recognition.intent.value
+                        if analysis.recognition
+                        else "abstained"
+                    ),
+                    "recognizer_confidence": (
+                        analysis.recognition.confidence if analysis.recognition else 0.0
+                    ),
                     "risk": analysis.state.goal.risk,
                     "entity_count": len(analysis.state.entities),
                     "used_reference_context": resolution.used_context,
@@ -222,6 +233,11 @@ class LegacyTurnPipelineAdapter:
                         for decision in decisions
                         if decision.selected_capability
                     ],
+                    "classifier_traces": [
+                        dict(decision.classifier_trace)
+                        for decision in decisions
+                        if decision.classifier_trace
+                    ],
                 },
             )
 
@@ -236,6 +252,7 @@ class LegacyTurnPipelineAdapter:
                     analysis.state,
                     analysis.operational_decisions,
                     preserve_order=analysis.preserve_order,
+                    dependency_kinds=analysis.dependency_kinds,
                 )
                 enriched = _mapping(routed.get("enriched"))
                 enriched["_execution_plan"] = execution_plan
@@ -247,6 +264,10 @@ class LegacyTurnPipelineAdapter:
                     "planned": execution_plan is not None,
                     "step_count": len(execution_plan.steps) if execution_plan else 0,
                     "risk": execution_plan.risk if execution_plan else "none",
+                    "plan_hash": (execution_plan.plan_hash if execution_plan else None),
+                    "readable_preview": (
+                        execution_plan.readable_preview if execution_plan else None
+                    ),
                 },
             )
 
@@ -264,9 +285,19 @@ class LegacyTurnPipelineAdapter:
                 {
                     "approval_required": requires_approval,
                     "enforcement": (
-                        "delegated_to_capability_policy"
+                        "plan_bound_capability_policy"
                         if requires_approval
                         else "preauthorized_policy"
+                    ),
+                    "plan_hash": (
+                        execution_plan.plan_hash
+                        if isinstance(execution_plan, ExecutionPlan)
+                        else None
+                    ),
+                    "approval_groups": (
+                        [list(item) for item in execution_plan.approval_groups]
+                        if isinstance(execution_plan, ExecutionPlan)
+                        else []
                     ),
                 },
             )

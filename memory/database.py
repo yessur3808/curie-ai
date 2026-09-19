@@ -252,6 +252,15 @@ def init_mongo():
             [("internal_id", 1), ("active", 1), ("expires_at", 1)],
             name="idx_adaptive_internal_active_expiry",
         )
+        mongo_db.mutation_attempts.create_index(
+            [("internal_id", 1), ("idempotency_key", 1)],
+            unique=True,
+            name="idx_mutation_owner_idempotency",
+        )
+        mongo_db.mutation_attempts.create_index(
+            [("internal_id", 1), ("status", 1), ("updated_at", -1)],
+            name="idx_mutation_owner_status",
+        )
         logger.info("MongoDB indexes created successfully.")
     except mongo_errors.PyMongoError as e:
         logger.error(f"Error creating MongoDB indexes: {e}")

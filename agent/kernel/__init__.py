@@ -15,6 +15,7 @@ from .context import (
     ContextEnvelope,
     ContextSection,
 )
+from .cancellation import CancellationRegistry, get_cancellation_registry
 from .dialogue_state import (
     DialogueState,
     DialogueStateStore,
@@ -41,15 +42,33 @@ from .pipeline import (
     StageStatus,
     TurnPipeline,
 )
+from .execution import (
+    CompensationRequest,
+    RetryDecision,
+    decide_retry,
+    stable_idempotency_key,
+)
+from .planning import (
+    ExecutionPlan,
+    PlanDependency,
+    PlanExecutionResult,
+    PlanExecutor,
+    PlannerInput,
+    PlanStep,
+    StepOutcome,
+    build_execution_plan,
+)
 
 __all__ = [
     "EntityReference",
+    "ExecutionPlan",
     "GoalConstraint",
     "GoalSpec",
     "ResponseMode",
     "SubGoal",
     "TurnState",
     "AttachmentDescriptor",
+    "CancellationRegistry",
     "ContextBudgeter",
     "ContextCandidate",
     "ContextDecision",
@@ -69,11 +88,23 @@ __all__ = [
     "PipelineMode",
     "PipelineStage",
     "PipelineState",
+    "PlanDependency",
+    "PlanExecutionResult",
+    "PlanExecutor",
+    "PlannerInput",
+    "PlanStep",
     "SideEffect",
     "StageOutput",
     "StageResult",
     "StageStatus",
     "StateValue",
+    "StepOutcome",
     "TransitionClass",
     "TurnPipeline",
+    "CompensationRequest",
+    "RetryDecision",
+    "build_execution_plan",
+    "decide_retry",
+    "stable_idempotency_key",
+    "get_cancellation_registry",
 ]

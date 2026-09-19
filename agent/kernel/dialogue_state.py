@@ -173,10 +173,13 @@ _SINGULAR_REFERENCE = re.compile(
     r"\b(?:it|that one|this one|that device|this device|the device)\b", re.I
 )
 _PLURAL_REFERENCE = re.compile(
-    r"\b(?:them|those devices|these devices|both devices|both)\b", re.I
+    r"\b(?:both\s+of\s+them|all\s+of\s+them|those\s+two|these\s+two|"
+    r"them|those\s+devices|these\s+devices|both\s+devices|both)\b",
+    re.I,
 )
 _REFERENCE_CONTEXT = re.compile(
     r"(?:\b(?:turn|switch|power)\b.*\b(?:on|off)\b)|"
+    r"(?:\b(?:stay|remain)\b.*\b(?:on|off)\b)|"
     r"(?:\b(?:is|are)\b.*\b(?:on|off|online|offline|running)\b)|"
     r"(?:\b(?:status|check|retry|try again|still on|still off)\b)",
     re.I,
