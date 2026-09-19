@@ -810,7 +810,11 @@ def _store_pending_attachment(chat_id: int, attachment: PendingAttachment) -> No
 
 
 async def _process_and_reply(
-    update: Update, user_message: str, internal_id: str
+    update: Update,
+    user_message: str,
+    internal_id: str,
+    *,
+    attachments: Optional[list[dict]] = None,
 ) -> None:
     normalized_input = {
         "platform": "telegram",
@@ -820,6 +824,8 @@ async def _process_and_reply(
         "text": user_message,
         "timestamp": datetime.datetime.utcnow(),
         "internal_id": internal_id,
+        "connector_account_id": os.getenv("TELEGRAM_BOT_USERNAME", "default"),
+        "attachments": attachments or [],
     }
     typing_task = asyncio.create_task(_typing_heartbeat(update.message))
     try:
@@ -881,7 +887,6 @@ async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         telegram_file = await media.get_file()
         await telegram_file.download_to_drive(path)
-        attachment = PendingAttachment(path, kind, filename, time.time())
         caption = (message.caption or "").strip()
         internal_id = get_internal_id(
             message.from_user.id,
@@ -896,7 +901,21 @@ async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYP
             content_type=content_type,
             persona=_runtime.workflow.persona,
         )
-        await _process_and_reply(update, user_message, internal_id)
+        await _process_and_reply(
+            update,
+            user_message,
+            internal_id,
+            attachments=[
+                {
+                    "id": str(getattr(media, "file_unique_id", media.file_id)),
+                    "kind": kind,
+                    "filename": filename,
+                    "content_type": content_type,
+                    "file_size": file_size,
+                    "source": "telegram",
+                }
+            ],
+        )
     except Exception as exc:
         logger.warning("Attachment processing failed: %s", exc)
         await message.reply_text(str(exc))
@@ -914,6 +933,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
 
     internal_id = get_internal_id(tg_user_id, telegram_username)
+    attachment_descriptors: list[dict] = []
 
     if update.message.voice:
         user_message = await handle_voice_message(update, _runtime.workflow.persona)
@@ -923,6 +943,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         await update.message.reply_text(f"🎤 I heard: {user_message}")
+        attachment_descriptors.append(
+            {
+                "id": str(
+                    getattr(
+                        update.message.voice,
+                        "file_unique_id",
+                        update.message.message_id,
+                    )
+                ),
+                "kind": "audio",
+                "content_type": "audio/ogg",
+                "file_size": int(getattr(update.message.voice, "file_size", 0) or 0),
+                "source": "telegram_voice",
+            }
+        )
     else:
         user_message = update.message.text
 
@@ -972,6 +1007,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 content_type=content_type,
                 persona=_runtime.workflow.persona,
             )
+            attachment_descriptors.append(
+                {
+                    "id": str(
+                        getattr(
+                            replied_media,
+                            "file_unique_id",
+                            replied_media.file_id,
+                        )
+                    ),
+                    "kind": "image" if replied_is_photo else "file",
+                    "filename": filename,
+                    "content_type": content_type,
+                    "file_size": file_size,
+                    "source": "telegram_reply",
+                }
+            )
         except Exception as exc:
             logger.warning("Referenced attachment processing failed: %s", exc)
             await update.message.reply_text(str(exc))
@@ -990,6 +1041,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_message,
                 persona=_runtime.workflow.persona,
             )
+            attachment_descriptors.append(
+                {
+                    "id": f"pending-{update.message.message_id}",
+                    "kind": pending.kind,
+                    "filename": pending.filename,
+                    "source": "telegram_pending",
+                }
+            )
         except Exception as exc:
             logger.warning("Pending attachment processing failed: %s", exc)
             await update.message.reply_text(str(exc))
@@ -997,7 +1056,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             Path(pending.path).unlink(missing_ok=True)
 
-    await _process_and_reply(update, user_message, internal_id)
+    await _process_and_reply(
+        update,
+        user_message,
+        internal_id,
+        attachments=attachment_descriptors,
+    )
 
 
 async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):

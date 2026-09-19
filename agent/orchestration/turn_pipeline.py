@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 from memory import UserManager
 from memory.session_store import get_session_manager
 
-from agent.kernel.dialogue_state import ReferenceResolution
+from agent.kernel.dialogue_state import DialogueTransition, ReferenceResolution
 from agent.kernel.feature_flags import PipelineMode
+from agent.kernel.inbound import InboundEvent
 from agent.kernel.pipeline import (
     PipelineStage,
     PipelineState,
@@ -73,8 +74,12 @@ class LegacyTurnPipelineAdapter:
 
         async def normalize(state: PipelineState) -> StageOutput:
             enriched = _mapping(state.seed)
-            enriched["platform"] = str(enriched.get("platform") or "unknown")
-            enriched["text"] = str(enriched.get("text") or "").strip()
+            event = enriched.get("_inbound_event")
+            if not isinstance(event, InboundEvent):
+                event = InboundEvent.from_mapping(enriched)
+                enriched = event.as_workflow_input()
+            enriched["platform"] = event.connector
+            enriched["text"] = event.normalized_text
             missing = [
                 key
                 for key in ("external_user_id", "external_chat_id", "text")
@@ -87,6 +92,8 @@ class LegacyTurnPipelineAdapter:
                 {
                     "platform": enriched["platform"],
                     "message_chars": len(enriched["text"]),
+                    "attachment_count": len(event.attachments),
+                    "event_kind": event.kind.value,
                     "required_fields_present": True,
                 },
             )
@@ -129,11 +136,21 @@ class LegacyTurnPipelineAdapter:
                     str(enriched["platform"]), str(enriched["internal_id"])
                 )[-8:]
                 effects = frozenset({SideEffect.STORAGE_READ})
+            transition = self.workflow.dialogue_state.transition_for(
+                original_text,
+                platform=str(enriched["platform"]),
+                owner_id=str(enriched["internal_id"]),
+            )
             return StageOutput(
-                {"enriched": enriched, "history": history},
+                {
+                    "enriched": enriched,
+                    "history": history,
+                    "transition": transition,
+                },
                 {
                     "reference_history_loaded": bool(history),
                     "history_items": len(history),
+                    "transition": transition.kind.value,
                 },
                 effects,
             )
@@ -145,12 +162,20 @@ class LegacyTurnPipelineAdapter:
             )
             history = list(context.get("history") or ())
             original_text = str(enriched.get("text") or "")
+            transition = context.get("transition")
+            if not isinstance(transition, DialogueTransition):
+                transition = self.workflow.dialogue_state.transition_for(
+                    original_text,
+                    platform=str(enriched["platform"]),
+                    owner_id=str(enriched["internal_id"]),
+                )
             resolution: ReferenceResolution = (
                 self.workflow.dialogue_state.resolve_references(
                     original_text,
                     platform=str(enriched["platform"]),
                     owner_id=str(enriched["internal_id"]),
                     history=history,
+                    transition=transition,
                 )
             )
             analysis = analyze_turn(
@@ -164,13 +189,20 @@ class LegacyTurnPipelineAdapter:
             )
             enriched["_effective_text"] = resolution.resolved_text
             enriched["_turn_analysis"] = analysis
+            enriched["_dialogue_transition"] = transition
             return StageOutput(
-                {"enriched": enriched, "history": history, "analysis": analysis},
+                {
+                    "enriched": enriched,
+                    "history": history,
+                    "analysis": analysis,
+                    "transition": transition,
+                },
                 {
                     "intent": analysis.state.goal.intent,
                     "risk": analysis.state.goal.risk,
                     "entity_count": len(analysis.state.entities),
                     "used_reference_context": resolution.used_context,
+                    "transition": transition.kind.value,
                 },
             )
 
@@ -428,9 +460,26 @@ class LegacyTurnPipelineAdapter:
             result["trace_id"] = analysis.state.trace_id
             result["turn_state"] = analysis.state.as_dict()
             result["response_mode"] = analysis.state.response_mode.value
-            self.workflow.dialogue_state.observe_for_owner(
-                str(internal_id), analysis.state, result
-            )
+            transition = understood.get("transition")
+            original_text = str(identity.get("text") or "")
+            if original_text.casefold() in {"/reset", "/new"}:
+                self.workflow.dialogue_state.clear(
+                    platform=analysis.state.platform, owner_id=str(internal_id)
+                )
+            else:
+                self.workflow.dialogue_state.observe_for_owner(
+                    str(internal_id),
+                    analysis.state,
+                    result,
+                    text=original_text,
+                    transition=(
+                        transition
+                        if isinstance(transition, DialogueTransition)
+                        else None
+                    ),
+                )
+            if isinstance(transition, DialogueTransition):
+                result["dialogue_transition"] = transition.as_dict()
             result.pop("_dialogue_entities", None)
             turn_event_writer.record(analysis.state, result)
         return result

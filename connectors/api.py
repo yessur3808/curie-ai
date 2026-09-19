@@ -180,6 +180,8 @@ async def chat_api(req: MessageRequest):
         "text": req.message,
         "timestamp": datetime.datetime.utcnow(),
         "internal_id": internal_id,
+        "connector_account_id": os.getenv("CURIE_API_INSTANCE_ID", "default"),
+        "attachments": [],
     }
 
     # Process through workflow
@@ -262,7 +264,9 @@ async def google_oauth_start(
     _require_master_owner(owner_id)
     from connectors.google_oauth import authorization_url
 
-    return {"authorization_url": authorization_url(owner_id, product=product, write=write)}
+    return {
+        "authorization_url": authorization_url(owner_id, product=product, write=write)
+    }
 
 
 @app.get("/oauth/google/callback")
@@ -273,7 +277,10 @@ async def google_oauth_callback(state: str, code: str):
         _, product = await exchange_authorization_code(state, code)
     except Exception:
         logger.exception("Google OAuth callback failed")
-        return HTMLResponse("Google connection failed. Return to Curie and retry setup.", status_code=400)
+        return HTMLResponse(
+            "Google connection failed. Return to Curie and retry setup.",
+            status_code=400,
+        )
     return HTMLResponse(f"Google {product} connected. You can close this window.")
 
 
@@ -297,7 +304,9 @@ async def x_oauth_callback(state: str, code: str):
         await exchange_authorization_code(state, code)
     except Exception:
         logger.exception("X OAuth callback failed")
-        return HTMLResponse("X connection failed. Return to Curie and retry setup.", status_code=400)
+        return HTMLResponse(
+            "X connection failed. Return to Curie and retry setup.", status_code=400
+        )
     return HTMLResponse("X connected. You can close this window.")
 
 
@@ -565,6 +574,21 @@ async def analyze_attachment_api(
                 "text": text,
                 "timestamp": datetime.datetime.utcnow(),
                 "internal_id": internal_id,
+                "connector_account_id": os.getenv("CURIE_API_INSTANCE_ID", "default"),
+                "attachments": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "kind": (
+                            "image"
+                            if (file.content_type or "").startswith("image/")
+                            else "file"
+                        ),
+                        "filename": file.filename or "attachment",
+                        "content_type": file.content_type or "",
+                        "file_size": total_size,
+                        "source": "api_upload",
+                    }
+                ],
             }
         )
         return result

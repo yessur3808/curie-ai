@@ -173,6 +173,8 @@ def _build_slack_app(workflow: ChatWorkflow) -> "App":
             "text": text,
             "timestamp": datetime.datetime.utcnow(),
             "internal_id": internal_id,
+            "connector_account_id": str(message.get("team") or "default"),
+            "attachments": [],
         }
 
         try:
@@ -227,6 +229,8 @@ def _build_slack_app(workflow: ChatWorkflow) -> "App":
             "text": text,
             "timestamp": datetime.datetime.utcnow(),
             "internal_id": internal_id,
+            "connector_account_id": str(body.get("team_id") or "default"),
+            "attachments": [],
         }
 
         try:

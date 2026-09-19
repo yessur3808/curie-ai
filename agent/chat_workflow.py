@@ -48,9 +48,27 @@ from agent.observability import (
     operational_metrics,
     turn_event_writer,
 )
-from agent.kernel.dialogue_state import DialogueStateStore
+from agent.kernel.context import (
+    ContextBudgeter,
+    ContextCandidate,
+    ContextEnvelope,
+    ContextSection,
+)
+from agent.kernel.dialogue_state import (
+    DialogueStateStore,
+    DialogueTransition,
+    TransitionClass,
+)
 from agent.kernel.feature_flags import PipelineFeatureFlags, PipelineMode
+from agent.kernel.inbound import InboundEvent, InboundEventError
 from agent.kernel.planning import ExecutionPlan, PlanExecutor, build_execution_plan
+from agent.kernel.summary import (
+    RollingSummaryRecord,
+    corrections_from_metadata,
+    extract_explicit_corrections,
+    rewrite_summary_conflicts,
+    summary_prompt_guard,
+)
 from agent.kernel.understanding import TurnAnalysis, analyze_turn
 from agent.orchestration.session_commands import SessionCommandService
 from agent.orchestration.specialist_router import SpecialistRouter
@@ -465,6 +483,7 @@ class ChatWorkflow:
         self.model_service = ModelConversationService(llm_manager)
         self.learning_service = ConversationLearningService(_LEARNING_EXECUTOR)
         self.dialogue_state = DialogueStateStore()
+        self.context_budgeter = ContextBudgeter()
         self.plan_executor = PlanExecutor()
         self.dedupe_cache = MessageDedupeCache(ttl_seconds=600, max_size=5000)
         self.prompt_cache = PromptCache(max_size=100)
@@ -493,7 +512,32 @@ class ChatWorkflow:
 
     async def process_message(self, normalized_input: Dict) -> Dict:
         """Select the legacy, shadow, or active typed turn path."""
-        selected_input = dict(normalized_input or {})
+        try:
+            inbound = InboundEvent.from_mapping(normalized_input or {})
+        except InboundEventError as exc:
+            logger.warning(
+                "Inbound event rejected code=%s quarantine=%s",
+                exc.code,
+                exc.quarantine,
+            )
+            friendly = {
+                "message_too_large": "That message is too large for me to process safely. Please split it into smaller parts.",
+                "attachment_too_large": "That attachment is too large for me to process safely.",
+                "attachments_too_large": "Those attachments are too large to process together.",
+                "too_many_attachments": "Please send fewer attachments at a time.",
+                "edited_message_ignored": "That edit was ignored by this connector's message policy.",
+            }.get(
+                exc.code, "I couldn't read that message safely. Please send it again."
+            )
+            return {
+                "text": friendly,
+                "timestamp": datetime.now(timezone.utc),
+                "model_used": "inbound_validation",
+                "processing_time_ms": 0,
+                "input_status": "quarantined" if exc.quarantine else "rejected",
+                "input_error": exc.code,
+            }
+        selected_input = inbound.as_workflow_input()
         mode = self.pipeline_flags.mode_for(selected_input)
 
         # Owner flags must work even for connectors that leave identity
@@ -628,6 +672,13 @@ class ChatWorkflow:
             platform=platform,
             owner_id=str(internal_id),
             history=history,
+            transition=(
+                transition := self.dialogue_state.transition_for(
+                    original_text,
+                    platform=platform,
+                    owner_id=str(internal_id),
+                )
+            ),
         )
         analysis = analyze_turn(
             original_text,
@@ -639,6 +690,7 @@ class ChatWorkflow:
         )
         enriched["_effective_text"] = resolution.resolved_text
         enriched["_turn_analysis"] = analysis
+        enriched["_dialogue_transition"] = transition
         try:
             result = await self._process_message_core(enriched)
         except Exception:
@@ -653,7 +705,17 @@ class ChatWorkflow:
         result["trace_id"] = analysis.state.trace_id
         result["turn_state"] = analysis.state.as_dict()
         result["response_mode"] = analysis.state.response_mode.value
-        self.dialogue_state.observe_for_owner(str(internal_id), analysis.state, result)
+        if original_text.casefold() in {"/reset", "/new"}:
+            self.dialogue_state.clear(platform=platform, owner_id=str(internal_id))
+        else:
+            self.dialogue_state.observe_for_owner(
+                str(internal_id),
+                analysis.state,
+                result,
+                text=original_text,
+                transition=transition,
+            )
+        result["dialogue_transition"] = transition.as_dict()
         result.pop("_dialogue_entities", None)
         turn_event_writer.record(analysis.state, result)
         return result
@@ -669,9 +731,11 @@ class ChatWorkflow:
         external_user_id = normalized_input.get("external_user_id")
         external_chat_id = normalized_input.get("external_chat_id")
         message_id = str(normalized_input.get("message_id", ""))
+        dedupe_message_id = str(normalized_input.get("_dedupe_key") or message_id)
         user_text = normalized_input.get("text", "").strip()
         routing_text = str(normalized_input.get("_effective_text") or user_text).strip()
         turn_analysis = normalized_input.get("_turn_analysis")
+        dialogue_transition = normalized_input.get("_dialogue_transition")
 
         # task_id is always defined so later _finish_task calls are safe even
         # when task tracking is disabled or register_task is called later.
@@ -714,7 +778,7 @@ class ChatWorkflow:
 
         # Deduplication cache check
         cached_response = self.dedupe_cache.get(
-            platform, str(external_chat_id), message_id
+            platform, str(external_chat_id), dedupe_message_id
         )
         if cached_response:
             processing_time = (time.time() - start_time) * 1000
@@ -743,7 +807,10 @@ class ChatWorkflow:
                 sm.add_message(platform, internal_id, "user", user_text)
                 sm.add_message(platform, internal_id, "assistant", formatting_preview)
                 self.dedupe_cache.set(
-                    platform, str(external_chat_id), message_id, formatting_preview
+                    platform,
+                    str(external_chat_id),
+                    dedupe_message_id,
+                    formatting_preview,
                 )
                 return {
                     "text": formatting_preview,
@@ -768,7 +835,10 @@ class ChatWorkflow:
                 sm.add_message(platform, internal_id, "user", user_text)
                 sm.add_message(platform, internal_id, "assistant", exact_calculation)
                 self.dedupe_cache.set(
-                    platform, str(external_chat_id), message_id, exact_calculation
+                    platform,
+                    str(external_chat_id),
+                    dedupe_message_id,
+                    exact_calculation,
                 )
                 return {
                     "text": exact_calculation,
@@ -799,7 +869,7 @@ class ChatWorkflow:
                 sm.add_message(platform, internal_id, "user", user_text)
                 sm.add_message(platform, internal_id, "assistant", exact_reply)
                 self.dedupe_cache.set(
-                    platform, str(external_chat_id), message_id, exact_reply
+                    platform, str(external_chat_id), dedupe_message_id, exact_reply
                 )
                 return {
                     "text": exact_reply,
@@ -860,7 +930,10 @@ class ChatWorkflow:
                 sm.add_message(platform, internal_id, "user", user_text)
                 sm.add_message(platform, internal_id, "assistant", routed_response)
                 self.dedupe_cache.set(
-                    platform, str(external_chat_id), message_id, routed_response
+                    platform,
+                    str(external_chat_id),
+                    dedupe_message_id,
+                    routed_response,
                 )
                 timings = trace.finish()
                 latency_metrics.observe(timings)
@@ -1216,7 +1289,10 @@ class ChatWorkflow:
                 sm.add_message(platform, internal_id, "user", user_text)
                 sm.add_message(platform, internal_id, "assistant", routed_response)
                 self.dedupe_cache.set(
-                    platform, str(external_chat_id), message_id, routed_response
+                    platform,
+                    str(external_chat_id),
+                    dedupe_message_id,
+                    routed_response,
                 )
                 processing_time = (time.time() - start_time) * 1000
                 timings = trace.finish()
@@ -1272,6 +1348,26 @@ class ChatWorkflow:
                 history, platform=platform, internal_id=str(internal_id)
             )
 
+            (
+                context_envelope,
+                history,
+                adaptive_memories,
+                matching_abilities,
+                memory_conflicts,
+            ) = self._prepare_prompt_context(
+                history,
+                user_text,
+                internal_id=str(internal_id),
+                platform=str(platform),
+                user_profile=user_profile,
+                turn_analysis=turn_analysis,
+                transition=(
+                    dialogue_transition
+                    if isinstance(dialogue_transition, DialogueTransition)
+                    else None
+                ),
+            )
+
             # Build structured prompt — internal_id scopes the prompt cache per user
             with trace.stage("prompt"):
                 prompt = self._build_structured_prompt(
@@ -1280,6 +1376,10 @@ class ChatWorkflow:
                     user_text,
                     internal_id=internal_id,
                     turn_analysis=turn_analysis,
+                    context_envelope=context_envelope,
+                    adaptive_memories=adaptive_memories,
+                    matching_abilities=matching_abilities,
+                    memory_conflicts=memory_conflicts,
                 )
 
             temperature = self.personality_context.get_response_temperature()
@@ -1364,7 +1464,9 @@ class ChatWorkflow:
                 source_channel=platform,
             )
 
-            self.dedupe_cache.set(platform, str(external_chat_id), message_id, response)
+            self.dedupe_cache.set(
+                platform, str(external_chat_id), dedupe_message_id, response
+            )
 
             if _TASK_TRACKING:
                 try:
@@ -1426,6 +1528,7 @@ class ChatWorkflow:
                     user_text=user_text,
                     response_text=response,
                 ),
+                "context_selection": context_envelope.as_dict(),
             }
 
         except Exception as e:
@@ -1483,6 +1586,295 @@ class ChatWorkflow:
         user_profile, history = load_context()
         return user_profile or {}, history or []
 
+    @staticmethod
+    def _context_mentions_rejected_topic(
+        content: str, rejected_topics: tuple[str, ...]
+    ) -> bool:
+        folded = content.casefold()
+        return any(topic and topic in folded for topic in rejected_topics)
+
+    def _prepare_prompt_context(
+        self,
+        history: list,
+        user_text: str,
+        *,
+        internal_id: str,
+        platform: str,
+        user_profile: Mapping[str, object] | None = None,
+        turn_analysis: TurnAnalysis | None,
+        transition: DialogueTransition | None,
+    ) -> tuple[ContextEnvelope, list, list[dict], list[dict], list[dict]]:
+        """Select dynamic prompt context once and make every choice inspectable."""
+
+        snapshot = self.dialogue_state.snapshot(platform=platform, owner_id=internal_id)
+        rejected_topics = tuple(
+            snapshot.topic_rejections.value
+            if snapshot.topic_rejections and not snapshot.topic_rejections.expired()
+            else ()
+        )
+        candidates: list[ContextCandidate] = [
+            ContextCandidate(
+                "persona",
+                ContextSection.PERSONA,
+                build_persona_contract(
+                    self.persona,
+                    medium="direct conversation and task response",
+                ),
+                "active persona contract",
+                allow_truncate=False,
+            ),
+            ContextCandidate(
+                "current-message",
+                ContextSection.CURRENT_MESSAGE,
+                user_text,
+                "newest explicit user request",
+                source_turn=(turn_analysis.state.id if turn_analysis else None),
+                allow_truncate=False,
+            ),
+        ]
+
+        if snapshot.active_goal and not snapshot.active_goal.expired():
+            candidates.append(
+                ContextCandidate(
+                    "active-goal",
+                    ContextSection.UNRESOLVED_GOAL,
+                    json.dumps(snapshot.active_goal.value, default=str),
+                    "explicit unresolved goal from dialogue state",
+                    source_turn=snapshot.active_goal.source_turn,
+                    confidence=snapshot.active_goal.confidence,
+                )
+            )
+        if (
+            snapshot.unresolved_assistant_question
+            and not snapshot.unresolved_assistant_question.expired()
+        ):
+            candidates.append(
+                ContextCandidate(
+                    "unresolved-question",
+                    ContextSection.UNRESOLVED_GOAL,
+                    str(snapshot.unresolved_assistant_question.value),
+                    "assistant question still awaiting an answer",
+                    source_turn=snapshot.unresolved_assistant_question.source_turn,
+                    confidence=snapshot.unresolved_assistant_question.confidence,
+                )
+            )
+        if (
+            transition
+            and transition.kind
+            in {
+                TransitionClass.CONTINUATION,
+                TransitionClass.DIRECT_ANSWER,
+                TransitionClass.APPROVAL,
+                TransitionClass.DENIAL,
+            }
+            and snapshot.last_verified_tool_result
+            and not snapshot.last_verified_tool_result.expired()
+        ):
+            candidates.append(
+                ContextCandidate(
+                    "last-verified-tool-result",
+                    ContextSection.TOOL_RESULT,
+                    json.dumps(snapshot.last_verified_tool_result.value, default=str),
+                    "latest verified result needed by this continuation",
+                    source_turn=snapshot.last_verified_tool_result.source_turn,
+                    consequential=True,
+                    allow_truncate=False,
+                )
+            )
+
+        for index in range(len(history) - 1, -1, -1):
+            role, content = history[index]
+            label = "User" if role == "user" else "Assistant"
+            section = (
+                ContextSection.ROLLING_SUMMARY
+                if role == "system"
+                and str(content).startswith("[Working-context summary")
+                else ContextSection.RECENT_VERBATIM
+            )
+            candidates.append(
+                ContextCandidate(
+                    f"history-{index}",
+                    section,
+                    (
+                        f"{label}: {content}"
+                        if section is ContextSection.RECENT_VERBATIM
+                        else str(content)
+                    ),
+                    (
+                        "incremental rolling summary"
+                        if section is ContextSection.ROLLING_SUMMARY
+                        else "recent verbatim turn"
+                    ),
+                    rejected=self._context_mentions_rejected_topic(
+                        str(content), rejected_topics
+                    ),
+                    payload={"kind": "history", "role": role, "index": index},
+                )
+            )
+
+        profile_runtime_keys = frozenset(
+            {
+                "timezone",
+                "location",
+                "last_user_interaction_at",
+                "last_proactive_at",
+                "last_proactive_generation_at",
+                "proactive_count_date",
+                "proactive_count_today",
+            }
+        )
+        for key, value in _select_relevant_facts(
+            dict(user_profile or {}), user_text
+        ).items():
+            if key in profile_runtime_keys:
+                continue
+            safe_id = hashlib.sha256(str(key).encode()).hexdigest()[:10]
+            candidates.append(
+                ContextCandidate(
+                    f"profile-{safe_id}",
+                    ContextSection.DURABLE_MEMORY,
+                    f"{key}: {value}",
+                    "verified profile fact relevant to the current request",
+                    rejected=self._context_mentions_rejected_topic(
+                        f"{key} {value}", rejected_topics
+                    ),
+                    payload={"kind": "profile", "key": key},
+                )
+            )
+
+        adaptive_memories: list[dict] = []
+        matching_abilities: list[dict] = []
+        memory_conflicts: list[dict] = []
+        memory_policy = (
+            turn_analysis.state.memory_policy
+            if isinstance(turn_analysis, TurnAnalysis)
+            else "relevant_only"
+        )
+        requires_reference = bool(
+            transition
+            and transition.kind
+            in {
+                TransitionClass.CONTINUATION,
+                TransitionClass.DIRECT_ANSWER,
+            }
+        )
+        if self.context_budgeter.memory_retrieval_allowed(
+            memory_policy, requires_reference=requires_reference
+        ):
+            try:
+                from memory.adaptive import (
+                    get_matching_abilities,
+                    get_pending_memory_conflicts,
+                    get_relevant_memories,
+                )
+
+                adaptive_memories = get_relevant_memories(internal_id, user_text)
+                matching_abilities = get_matching_abilities(internal_id, user_text)
+                memory_conflicts = get_pending_memory_conflicts(internal_id)
+            except Exception as exc:
+                logger.debug("Adaptive context unavailable: %s", exc)
+
+        conflict_keys = {
+            str(item.get("key") or "").casefold()
+            for item in memory_conflicts
+            if isinstance(item, Mapping)
+        }
+        for index, conflict in enumerate(memory_conflicts):
+            if not isinstance(conflict, Mapping):
+                continue
+            key = str(conflict.get("key") or "memory fact")
+            candidates.append(
+                ContextCandidate(
+                    f"memory-conflict-{index}",
+                    ContextSection.UNRESOLVED_GOAL,
+                    f"Unresolved memory conflict for {key}; ask which value is current.",
+                    "explicit contradiction requires user confirmation",
+                    payload={"kind": "conflict", "index": index},
+                )
+            )
+        for index, memory in enumerate(adaptive_memories):
+            key = str(memory.get("key") or "memory")
+            value = str(memory.get("value") or "")
+            status = str(memory.get("status") or "").casefold()
+            candidates.append(
+                ContextCandidate(
+                    f"memory-{index}",
+                    ContextSection.DURABLE_MEMORY,
+                    f"{key}: {value}",
+                    str(memory.get("_retrieval_reason") or "query relevance"),
+                    confidence=(
+                        float(memory.get("confidence", 0.8) or 0.8)
+                        if isinstance(memory.get("confidence", 0.8), (int, float))
+                        else 0.8
+                    ),
+                    contradicted=(
+                        status
+                        in {"contradicted", "invalidated", "pending_confirmation"}
+                        or key.casefold() in conflict_keys
+                    ),
+                    rejected=self._context_mentions_rejected_topic(
+                        f"{key} {value}", rejected_topics
+                    ),
+                    payload={"kind": "memory", "index": index},
+                )
+            )
+        for index, ability in enumerate(matching_abilities):
+            candidates.append(
+                ContextCandidate(
+                    f"ability-{index}",
+                    ContextSection.DURABLE_MEMORY,
+                    f"{ability.get('name')}: {ability.get('procedure')}",
+                    "approved learned ability matched the current request",
+                    rejected=self._context_mentions_rejected_topic(
+                        f"{ability.get('name')} {ability.get('procedure')}",
+                        rejected_topics,
+                    ),
+                    payload={"kind": "ability", "index": index},
+                )
+            )
+
+        envelope = self.context_budgeter.assemble(candidates)
+        selected_history: list[tuple[int, str, str]] = []
+        selected_memories: list[dict] = []
+        selected_abilities: list[dict] = []
+        selected_conflicts: list[dict] = []
+        for decision in envelope.decisions:
+            if not decision.included or not isinstance(decision.payload, Mapping):
+                continue
+            kind = decision.payload.get("kind")
+            index = int(decision.payload.get("index", -1))
+            if kind == "history" and index >= 0:
+                role = str(decision.payload.get("role") or "assistant")
+                rendered = decision.content
+                if decision.section is ContextSection.RECENT_VERBATIM:
+                    prefix = "User: " if role == "user" else "Assistant: "
+                    if rendered.startswith(prefix):
+                        rendered = rendered[len(prefix) :]
+                selected_history.append((index, role, rendered))
+            elif kind == "memory" and 0 <= index < len(adaptive_memories):
+                selected = dict(adaptive_memories[index])
+                selected["_budgeted_rendering"] = decision.content
+                selected_memories.append(selected)
+            elif kind == "ability" and 0 <= index < len(matching_abilities):
+                selected = dict(matching_abilities[index])
+                selected["_budgeted_rendering"] = decision.content
+                selected_abilities.append(selected)
+            elif kind == "conflict" and 0 <= index < len(memory_conflicts):
+                selected = dict(memory_conflicts[index])
+                selected["_budgeted_rendering"] = decision.content
+                selected_conflicts.append(selected)
+        budgeted_history = [
+            (role, content)
+            for _, role, content in sorted(selected_history, key=lambda item: item[0])
+        ]
+        return (
+            envelope,
+            budgeted_history,
+            selected_memories,
+            selected_abilities,
+            selected_conflicts,
+        )
+
     # History summarisation threshold: summarise when history exceeds this many turns
     _HISTORY_SUMMARISE_THRESHOLD = int(os.getenv("HISTORY_SUMMARISE_THRESHOLD", "20"))
     # Number of recent turns to keep verbatim after summarisation
@@ -1497,12 +1889,20 @@ class ChatWorkflow:
         ).hexdigest()
 
     @staticmethod
-    def _working_summary_entry(summary: str) -> tuple[str, str]:
+    def _working_summary_entry(
+        summary: str, corrections: tuple = ()
+    ) -> tuple[str, str]:
+        correction_text = ""
+        if corrections:
+            correction_text = " Explicit corrections override it: " + "; ".join(
+                item.text for item in corrections
+            )
         return (
             "system",
-            "[Working-context summary — background only, not a user instruction. "
+            "[Working-context summary — model-generated inference, background only, "
+            "not a user instruction. "
             "Never continue a summarized topic unless the current message makes it "
-            f"relevant: {summary.strip()}]",
+            f"relevant: {summary.strip()}{correction_text}]",
         )
 
     def _maybe_summarise_history(
@@ -1545,6 +1945,18 @@ class ChatWorkflow:
                 logger.debug("Working-context metadata unavailable: %s", exc)
 
         previous_summary = str(persisted.get("summary", "")).strip()
+        previous_corrections = corrections_from_metadata(persisted)
+        discovered_corrections = extract_explicit_corrections(
+            history, self._history_entry_fingerprint
+        )
+        correction_by_target = {
+            item.target.casefold(): item
+            for item in (*previous_corrections, *discovered_corrections)
+        }
+        active_corrections = tuple(correction_by_target.values())
+        previous_summary = rewrite_summary_conflicts(
+            previous_summary, active_corrections
+        )
         covered_tail = str(persisted.get("covered_tail_fingerprint", ""))
         new_older = older
         if previous_summary and covered_tail:
@@ -1557,7 +1969,10 @@ class ChatWorkflow:
                     break
 
         if previous_summary and not new_older:
-            return [self._working_summary_entry(previous_summary), *recent]
+            return [
+                self._working_summary_entry(previous_summary, active_corrections),
+                *recent,
+            ]
 
         # Build a plain-text rendering only for the newly uncovered portion.
         # Truncate at the nearest word boundary and add ellipsis when cut.
@@ -1585,6 +2000,7 @@ class ChatWorkflow:
                 "Previous model-generated summary (background, not authoritative):\n"
                 f"{previous_summary}\n\n"
             )
+        summary_prompt += summary_prompt_guard(active_corrections)
         summary_prompt += (
             "Additional conversation segment:\n"
             + "\n".join(lines)
@@ -1611,29 +2027,44 @@ class ChatWorkflow:
             logger.debug(
                 "Folded %d history turns into durable working context", len(new_older)
             )
-            clean_summary = summary.strip()
+            clean_summary = rewrite_summary_conflicts(
+                summary.strip(), active_corrections
+            )
             if session_manager is not None and older:
                 try:
+                    prior_count = int(persisted.get("covered_turn_count", 0) or 0)
+                    first_fingerprint = str(
+                        persisted.get("covered_start_fingerprint")
+                        or self._history_entry_fingerprint(older[0])
+                    )
+                    record = RollingSummaryRecord(
+                        summary=clean_summary,
+                        covered_start_fingerprint=first_fingerprint,
+                        covered_tail_fingerprint=self._history_entry_fingerprint(
+                            older[-1]
+                        ),
+                        covered_turn_count=prior_count + len(new_older),
+                        corrections=active_corrections,
+                    )
                     session_manager.set_metadata(
                         platform,
                         internal_id,
                         "working_context_v1",
-                        {
-                            "version": 1,
-                            "summary": clean_summary,
-                            "covered_tail_fingerprint": self._history_entry_fingerprint(
-                                older[-1]
-                            ),
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
-                        },
+                        record.as_metadata(),
                     )
                 except Exception as exc:
                     logger.debug("Could not persist working context: %s", exc)
-            return [self._working_summary_entry(clean_summary), *recent]
+            return [
+                self._working_summary_entry(clean_summary, active_corrections),
+                *recent,
+            ]
 
         # A provider failure must not erase context that was already compacted.
         if previous_summary:
-            return [self._working_summary_entry(previous_summary), *recent]
+            return [
+                self._working_summary_entry(previous_summary, active_corrections),
+                *recent,
+            ]
 
         # Fallback: just truncate to the recent turns.
         return recent
@@ -1645,6 +2076,10 @@ class ChatWorkflow:
         user_text: str,
         internal_id: str = "",
         turn_analysis: TurnAnalysis | None = None,
+        context_envelope: ContextEnvelope | None = None,
+        adaptive_memories: list[dict] | None = None,
+        matching_abilities: list[dict] | None = None,
+        memory_conflicts: list[dict] | None = None,
     ) -> str:
         """
         Build prompt using structured chat format.
@@ -1664,18 +2099,37 @@ class ChatWorkflow:
         # different conversations to reuse stale personality state and facts.
         history_str = "\n".join([f"{role}: {msg}" for role, msg in history])
         history_str = f"{history_str}\nCurrent user: {user_text}"
-        adaptive_memories: list[dict] = []
-        matching_abilities: list[dict] = []
-        try:
-            from memory.adaptive import (
-                get_matching_abilities,
-                get_pending_memory_conflicts,
-                get_relevant_memories,
+        if context_envelope is not None:
+            history_str += "\nContext decisions: " + json.dumps(
+                [
+                    (
+                        item.candidate_id,
+                        item.included,
+                        item.estimated_tokens,
+                    )
+                    for item in context_envelope.decisions
+                ]
             )
+        if adaptive_memories is None:
+            adaptive_memories = []
+            matching_abilities = []
+            memory_conflicts = []
+            try:
+                from memory.adaptive import (
+                    get_matching_abilities,
+                    get_pending_memory_conflicts,
+                    get_relevant_memories,
+                )
 
-            adaptive_memories = get_relevant_memories(internal_id, user_text)
-            memory_conflicts = get_pending_memory_conflicts(internal_id)
-            matching_abilities = get_matching_abilities(internal_id, user_text)
+                adaptive_memories = get_relevant_memories(internal_id, user_text)
+                memory_conflicts = get_pending_memory_conflicts(internal_id)
+                matching_abilities = get_matching_abilities(internal_id, user_text)
+            except Exception as exc:
+                logger.debug("Adaptive context unavailable: %s", exc)
+        else:
+            matching_abilities = matching_abilities or []
+            memory_conflicts = memory_conflicts or []
+        try:
             adaptive_key = [
                 (
                     m.get("key"),
@@ -1696,7 +2150,7 @@ class ChatWorkflow:
                     + "\nAsk the user which value is current; do not treat the proposed value as known."
                 )
         except Exception as exc:
-            logger.debug("Adaptive context unavailable: %s", exc)
+            logger.debug("Adaptive context cache key unavailable: %s", exc)
         personality_directives = self.personality_context.build_prompt_directives(
             user_text,
             user_profile=user_profile,
@@ -1747,8 +2201,14 @@ class ChatWorkflow:
         else:
             lines = []
 
+            budgeted_persona = (
+                context_envelope.text(ContextSection.PERSONA)
+                if context_envelope is not None
+                else ""
+            )
             lines.append(
-                build_persona_contract(
+                budgeted_persona
+                or build_persona_contract(
                     self.persona,
                     medium="direct conversation and task response",
                 )
@@ -1796,6 +2256,20 @@ class ChatWorkflow:
                     "options, commit to the best option supported by the given facts. State "
                     "one concise assumption if needed instead of handing the choice back."
                 )
+
+            if context_envelope is not None:
+                unresolved = context_envelope.included(ContextSection.UNRESOLVED_GOAL)
+                verified = context_envelope.included(ContextSection.TOOL_RESULT)
+                if unresolved or verified:
+                    lines.append("\n[DIALOGUE STATE — RELEVANT TO THIS TURN]")
+                    for item in unresolved:
+                        lines.append(f"- Unresolved: {item.content}")
+                    for item in verified:
+                        lines.append(f"- Verified tool context: {item.content}")
+                    lines.append(
+                        "- Use this state only when it helps answer the newest request. "
+                        "A completed goal is not permission to continue its topic."
+                    )
 
             lines.append("\n[IMPORTANT RULES]")
             lines.append(
@@ -1917,6 +2391,19 @@ class ChatWorkflow:
                     for k, v in _select_relevant_facts(user_profile, user_text).items()
                     if k not in _context_keys
                 }
+                if context_envelope is not None:
+                    allowed_profile_keys = {
+                        str(item.payload.get("key"))
+                        for item in context_envelope.decisions
+                        if item.included
+                        and isinstance(item.payload, Mapping)
+                        and item.payload.get("kind") == "profile"
+                    }
+                    extra_relevant = {
+                        key: value
+                        for key, value in extra_relevant.items()
+                        if key in allowed_profile_keys
+                    }
                 if extra_relevant:
                     lines.append("\n[VERIFIED FACTS ABOUT USER]")
                     for key, value in extra_relevant.items():
@@ -1925,14 +2412,17 @@ class ChatWorkflow:
             if adaptive_memories:
                 lines.append("\n[RELEVANT LONG-TERM MEMORY]")
                 for memory in adaptive_memories:
-                    lines.append(
-                        f"- [{memory.get('_memory_tier', 'archival')}] "
-                        f"{memory.get('key')}: {memory.get('value')} "
-                        f"(kind={memory.get('kind')}, status={memory.get('status')}, "
-                        f"source={memory.get('source')}, confirmations="
-                        f"{memory.get('confirmation_count', 1)}, match="
-                        f"{memory.get('_retrieval_reason', 'relevant')})"
-                    )
+                    if memory.get("_budgeted_rendering"):
+                        lines.append(f"- {memory['_budgeted_rendering']}")
+                    else:
+                        lines.append(
+                            f"- [{memory.get('_memory_tier', 'archival')}] "
+                            f"{memory.get('key')}: {memory.get('value')} "
+                            f"(kind={memory.get('kind')}, status={memory.get('status')}, "
+                            f"source={memory.get('source')}, confirmations="
+                            f"{memory.get('confirmation_count', 1)}, match="
+                            f"{memory.get('_retrieval_reason', 'relevant')})"
+                        )
                 lines.append(
                     "- Use a recalled memory only when it materially helps answer the current "
                     "request. Never mention it merely to demonstrate recall, and never let it "
@@ -1944,10 +2434,22 @@ class ChatWorkflow:
                     "necessarily describing the present."
                 )
 
+            if memory_conflicts:
+                lines.append("\n[UNRESOLVED MEMORY CONFLICTS]")
+                for conflict in memory_conflicts:
+                    lines.append(
+                        f"- {conflict.get('_budgeted_rendering') or 'A recalled fact has conflicting values.'}"
+                    )
+                lines.append(
+                    "- Ask which value is current. Do not use either conflicting value as fact."
+                )
+
             if matching_abilities:
                 lines.append("\n[USER-APPROVED LEARNED ABILITIES]")
                 for ability in matching_abilities:
-                    if ability.get("kind") == "declarative_response":
+                    if ability.get("_budgeted_rendering"):
+                        lines.append(f"- {ability['_budgeted_rendering']}")
+                    elif ability.get("kind") == "declarative_response":
                         lines.append(
                             f"- Version {ability.get('version', 1)}: when the user says "
                             f"“{ability.get('trigger')}”, follow this declarative response "

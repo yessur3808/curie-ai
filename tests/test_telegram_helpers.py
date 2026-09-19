@@ -172,8 +172,8 @@ def test_text_reply_to_photo_reprocesses_referenced_attachment(monkeypatch):
         prepared.append((filename, request))
         return "attachment context"
 
-    async def process(update, text, internal_id):
-        processed.append((text, internal_id))
+    async def process(update, text, internal_id, **kwargs):
+        processed.append((text, internal_id, kwargs.get("attachments")))
 
     monkeypatch.setattr(telegram, "get_internal_id", lambda *_args: "u1")
     monkeypatch.setattr("services.media_ingestion.prepare_attachment_message", prepare)
@@ -195,7 +195,22 @@ def test_text_reply_to_photo_reprocesses_referenced_attachment(monkeypatch):
     finally:
         telegram._runtime.workflow = previous
     assert prepared == [("telegram_reply_unique1.jpg", "Explain it to me in text")]
-    assert processed == [("attachment context", "u1")]
+    assert processed == [
+        (
+            "attachment context",
+            "u1",
+            [
+                {
+                    "id": "unique1",
+                    "kind": "image",
+                    "filename": "telegram_reply_unique1.jpg",
+                    "content_type": "image/jpeg",
+                    "file_size": 5,
+                    "source": "telegram_reply",
+                }
+            ],
+        )
+    ]
 
 
 async def _async_value(value):

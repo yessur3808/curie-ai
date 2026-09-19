@@ -131,6 +131,20 @@ async def teams_messages(request: Request) -> Response:
         "text": text,
         "timestamp": datetime.datetime.utcnow(),
         "internal_id": internal_id,
+        "connector_account_id": str(
+            (body.get("recipient") or {}).get("id") or "default"
+        ),
+        "attachments": [
+            {
+                "id": str(item.get("id") or f"teams-{index + 1}"),
+                "kind": "file",
+                "filename": str(item.get("name") or "attachment"),
+                "content_type": str(item.get("contentType") or ""),
+                "source": "teams",
+            }
+            for index, item in enumerate(body.get("attachments") or [])
+            if isinstance(item, dict)
+        ],
     }
 
     result = await _workflow.process_message(normalized_input)

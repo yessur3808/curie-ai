@@ -164,7 +164,9 @@ jobs:
       - name: Install evaluation dependencies
         run: pip install pytest pytest-asyncio python-dotenv fastapi pydantic httpx
       - name: Run deterministic quality gates
-        run: pytest -q tests/test_evaluation_runner.py
+        run: |
+          pytest -q tests/test_evaluation_runner.py
+          python -m evaluation.phase2_suite
 
   release-contracts:
     name: Contracts, migrations, and release evidence

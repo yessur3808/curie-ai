@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "baseline": "2026.09-phase1-turn-kernel",
+  "candidate": "2026.09-phase2-context-dialogue",
+  "expected_regressions": [],
+  "required_gates": {
+    "correctness_pass_rate": 1.0,
+    "security_pass_rate": 1.0,
+    "connector_conformance_pass_rate": 1.0,
+    "known_regression_pass_rate": 1.0
+  },
+  "new_coverage": [
+    "canonical connector-neutral inbound events",
+    "typed and bounded attachment descriptors",
+    "connector-account chat and message revision deduplication",
+    "explicit edited-message policy",
+    "owner-scoped dialogue state with provenance confidence and expiry",
+    "deterministic correction rejection interruption and approval transitions",
+    "grounded singular and plural device reference resolution",
+    "stale-history tombstones after explicit device corrections",
+    "explainable per-section context budgets",
+    "rejected and contradicted memory suppression",
+    "incremental rolling-summary source ranges and correction invalidation",
+    "seven-scenario multi-turn context-isolation release gate"
+  ]
+}

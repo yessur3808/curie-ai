@@ -154,6 +154,7 @@ async def handle_message(message):
 
         # Get internal ID (respects /identify if used)
         internal_id = get_internal_id(wa_user_id, wa_username)
+        attachment_descriptors = []
 
         # Handle voice messages
         if message.voice or message.audio:
@@ -164,6 +165,20 @@ async def handle_message(message):
                 )
                 return
             await message.reply(f"🎤 I heard: {user_message}")
+            attachment_descriptors.append(
+                {
+                    "id": str(getattr(message, "media_id", message_id)),
+                    "kind": "audio",
+                    "filename": str(
+                        getattr(message, "filename", None) or "voice-note.ogg"
+                    ),
+                    "content_type": str(
+                        getattr(message, "mimetype", None) or "audio/ogg"
+                    ),
+                    "file_size": int(getattr(message, "file_size", 0) or 0),
+                    "source": "whatsapp_voice",
+                }
+            )
         elif any(
             bool(getattr(message, field, False))
             for field in ("image", "photo", "document")
@@ -175,6 +190,31 @@ async def handle_message(message):
                     "I couldn't read that attachment, mon ami. Please try sending it again as an image, PDF, DOCX, or text file."
                 )
                 return
+            attachment_descriptors.append(
+                {
+                    "id": str(getattr(message, "media_id", message_id)),
+                    "kind": (
+                        "image"
+                        if bool(
+                            getattr(message, "image", False)
+                            or getattr(message, "photo", False)
+                        )
+                        else "file"
+                    ),
+                    "filename": str(
+                        getattr(message, "filename", None)
+                        or getattr(message, "file_name", None)
+                        or "attachment"
+                    ),
+                    "content_type": str(
+                        getattr(message, "mimetype", None)
+                        or getattr(message, "mime_type", None)
+                        or ""
+                    ),
+                    "file_size": int(getattr(message, "file_size", 0) or 0),
+                    "source": "whatsapp",
+                }
+            )
         else:
             user_message = message.text or ""
 
@@ -225,6 +265,8 @@ async def handle_message(message):
             "text": user_message,
             "timestamp": datetime.datetime.utcnow(),
             "internal_id": internal_id,
+            "connector_account_id": os.getenv("WHATSAPP_PHONE_NUMBER_ID", "default"),
+            "attachments": attachment_descriptors,
         }
 
         # Process through workflow
@@ -236,7 +278,9 @@ async def handle_message(message):
             from services.voice_delivery import synthesize_reply, voice_replies_enabled
 
             if voice_replies_enabled(internal_id, "whatsapp"):
-                voice_path = await synthesize_reply(response_text, _workflow.persona, internal_id)
+                voice_path = await synthesize_reply(
+                    response_text, _workflow.persona, internal_id
+                )
                 if voice_path:
                     try:
                         sender = getattr(message, "reply_audio", None) or getattr(

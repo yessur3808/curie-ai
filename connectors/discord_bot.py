@@ -188,11 +188,30 @@ if commands is not None:
 
                 # Handle images, readable documents, and voice/audio attachments.
                 user_message = message.content
+                attachment_descriptors = []
                 if message.attachments:
                     await message.channel.send(
                         "I’m checking the attachment now, mon ami."
                     )
                     for attachment in message.attachments:
+                        content_type = attachment.content_type or ""
+                        kind = (
+                            "image"
+                            if content_type.startswith("image/")
+                            else (
+                                "audio" if content_type.startswith("audio/") else "file"
+                            )
+                        )
+                        attachment_descriptors.append(
+                            {
+                                "id": str(attachment.id),
+                                "kind": kind,
+                                "filename": attachment.filename,
+                                "content_type": content_type,
+                                "file_size": int(getattr(attachment, "size", 0) or 0),
+                                "source": "discord",
+                            }
+                        )
                         suffix = os.path.splitext(attachment.filename)[1]
                         fd, media_path = tempfile.mkstemp(
                             prefix="curie_discord_", suffix=suffix
@@ -208,7 +227,7 @@ if commands is not None:
                                 media_path,
                                 attachment.filename,
                                 user_message,
-                                content_type=attachment.content_type or "",
+                                content_type=content_type,
                                 persona=self.workflow.persona,
                             )
                         finally:
@@ -227,6 +246,8 @@ if commands is not None:
                     "text": user_message,
                     "timestamp": datetime.datetime.utcnow(),
                     "internal_id": internal_id,
+                    "connector_account_id": str(getattr(self.user, "id", "default")),
+                    "attachments": attachment_descriptors,
                 }
 
                 # Process through workflow
