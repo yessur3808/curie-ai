@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 import re
@@ -142,9 +143,30 @@ def _events(owner_id: str, signal: str) -> list[dict]:
     )
 
 
-def get_preferences(owner_id: str) -> dict:
+def get_preferences(owner_id: str, channel: str | None = None) -> dict:
     profile = _load(str(owner_id))
-    return dict(profile["preferences"]) if profile["enabled"] else dict(_DEFAULTS)
+    preferences = (
+        dict(profile["preferences"]) if profile["enabled"] else dict(_DEFAULTS)
+    )
+    if not profile["enabled"]:
+        return preferences
+    try:
+        from memory.self_learning import get_active_configurations
+
+        active_configurations = get_active_configurations(str(owner_id))
+        for setting in _DEFAULTS:
+            promoted = active_configurations.get(f"preference.{setting}")
+            if promoted is not None:
+                preferences[setting] = promoted
+        if channel:
+            from memory.self_learning import get_session_adaptation
+
+            session = get_session_adaptation(str(owner_id), str(channel))
+            if session.get("response_length"):
+                preferences["verbosity"] = session["response_length"]
+    except Exception as exc:
+        logger.debug("Controlled adaptation overlay unavailable: %s", exc)
+    return preferences
 
 
 def get_adaptation_state(owner_id: str) -> dict:
@@ -164,11 +186,36 @@ def apply_voice_modality_preference(
     return False
 
 
-def _set(owner_id: str, setting: str, value: Any, source: str) -> dict:
+def _set(
+    owner_id: str,
+    setting: str,
+    value: Any,
+    source: str,
+    *,
+    evidence_event_ids: list[str] | None = None,
+) -> dict:
     profile = _load(owner_id)
     before = profile["preferences"].get(setting)
     if before == value:
         return profile
+    event_ids = list(evidence_event_ids or [])
+    if not event_ids:
+        try:
+            from memory.self_learning import record_learning_event
+
+            event = record_learning_event(
+                str(owner_id),
+                "explicit_preference",
+                metadata={
+                    "setting": setting,
+                    "source": source,
+                    "before": before,
+                    "after": value,
+                },
+            )
+            event_ids.append(event["id"])
+        except Exception as exc:
+            logger.debug("Preference provenance event unavailable: %s", exc)
     profile["version"] += 1
     profile["preferences"][setting] = value
     profile["history"].append(
@@ -178,6 +225,8 @@ def _set(owner_id: str, setting: str, value: Any, source: str) -> dict:
             "before": before,
             "after": value,
             "source": source,
+            "level": 1,
+            "evidence_event_ids": event_ids,
             "created_at": _now(),
         }
     )
@@ -246,9 +295,33 @@ def record_explicit_feedback(owner_id: str, text: str) -> dict | None:
             signal = "correction"
     if not signal:
         return None
-    _event(owner_id, signal, {"explicit": True, "text": text[:300]})
+    text_hash = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+    _event(
+        owner_id,
+        signal,
+        {"explicit": True, "text_hash": text_hash, "character_count": len(text)},
+    )
+    event_ids: list[str] = []
+    try:
+        from memory.self_learning import record_learning_event
+
+        event = record_learning_event(
+            str(owner_id),
+            "explicit_correction",
+            text=text,
+            metadata={"signal": signal, "setting": setting, "value": value},
+        )
+        event_ids.append(event["id"])
+    except Exception as exc:
+        logger.debug("Explicit learning event unavailable: %s", exc)
     if setting:
-        profile = _set(owner_id, setting, value, f"explicit:{signal}")
+        profile = _set(
+            owner_id,
+            setting,
+            value,
+            f"explicit:{signal}",
+            evidence_event_ids=event_ids,
+        )
         return dict(profile["preferences"])
     return get_preferences(owner_id)
 
@@ -258,7 +331,31 @@ def record_explicit_event(owner_id: str, signal: str, text: str = "") -> bool:
     allowed = {"correction", "wrong", "proactive_rejection", "accepted_action"}
     if signal not in allowed or _PROTECTED.search(text):
         return False
-    _event(owner_id, signal, {"explicit": True, "text": text[:300]})
+    _event(
+        owner_id,
+        signal,
+        {
+            "explicit": True,
+            "text_hash": hashlib.sha256(
+                text.encode("utf-8", errors="ignore")
+            ).hexdigest(),
+            "character_count": len(text),
+        },
+    )
+    try:
+        from memory.self_learning import record_learning_event
+
+        source = {
+            "correction": "explicit_correction",
+            "wrong": "negative_feedback",
+            "proactive_rejection": "topic_rejected",
+            "accepted_action": "positive_feedback",
+        }[signal]
+        record_learning_event(
+            str(owner_id), source, text=text, metadata={"signal": signal}
+        )
+    except Exception as exc:
+        logger.debug("Explicit outcome provenance unavailable: %s", exc)
     return True
 
 
@@ -283,23 +380,65 @@ def record_operational_signal(
     if latency_ms is not None:
         details["latency_ms"] = max(0.0, min(float(latency_ms), 300_000.0))
     _event(owner_id, signal, details)
+    if signal != "response_time":
+        try:
+            from memory.self_learning import record_learning_event
+
+            record_learning_event(
+                str(owner_id),
+                "operational_signal",
+                metadata={"signal": signal, **details},
+            )
+        except Exception as exc:
+            logger.debug("Operational learning event unavailable: %s", exc)
     samples = _events(owner_id, signal)
     profile = _load(owner_id)
     if not profile["enabled"] or len(samples) < _MIN_IMPLICIT_SAMPLES:
         return dict(profile["preferences"])
-    if signal == "abandonment":
-        profile = _set(owner_id, "verbosity", "concise", "implicit:abandonment")
-    elif signal == "regeneration":
-        profile = _set(owner_id, "research_depth", "deep", "implicit:regeneration")
-    elif signal in {"tool_failure", "accepted_action"} and tool:
-        tools = list(profile["preferences"].get("preferred_tools", []))
-        matching = [item for item in samples if item.get("tool") == tool]
-        if len(matching) >= _MIN_IMPLICIT_SAMPLES:
-            if signal == "accepted_action" and tool not in tools:
-                tools = [*tools, tool][-10:]
-            elif signal == "tool_failure":
-                tools = [item for item in tools if item != tool]
-            profile = _set(owner_id, "preferred_tools", tools, f"implicit:{signal}")
+    try:
+        from memory.self_learning import (
+            list_learning_events,
+            propose_low_risk_candidate,
+        )
+
+        evidence = [
+            item["id"]
+            for item in list_learning_events(str(owner_id), "operational_signal")
+            if item.get("metadata", {}).get("signal") == signal
+            and (not tool or item.get("metadata", {}).get("tool") == tool)
+        ][-_MIN_IMPLICIT_SAMPLES:]
+        setting, value, behavior, metric = None, None, "", ""
+        if signal == "abandonment":
+            setting, value = "verbosity", "concise"
+            behavior = "Prefer concise responses for this owner"
+            metric = "conversation_abandonment_rate"
+        elif signal == "regeneration":
+            setting, value = "research_depth", "deep"
+            behavior = "Use deeper research when this owner requests analysis"
+            metric = "response_regeneration_rate"
+        elif signal in {"tool_failure", "accepted_action"} and tool:
+            matching = [item for item in samples if item.get("tool") == tool]
+            if len(matching) >= _MIN_IMPLICIT_SAMPLES:
+                tools = list(profile["preferences"].get("preferred_tools", []))
+                if signal == "accepted_action" and tool not in tools:
+                    value = [*tools, tool][-10:]
+                else:
+                    value = [item for item in tools if item != tool]
+                setting = "preferred_tools"
+                behavior = f"Adjust presentation preference for the {tool} tool"
+                metric = "tool_outcome_rate"
+        if setting and len(evidence) >= _MIN_IMPLICIT_SAMPLES:
+            propose_low_risk_candidate(
+                str(owner_id),
+                behavior=behavior,
+                problem=f"Repeated {signal} signals suggest a low-risk preference",
+                event_ids=evidence,
+                config_key=f"preference.{setting}",
+                value=value,
+                metric=metric,
+            )
+    except Exception as exc:
+        logger.debug("Low-risk learning candidate unavailable: %s", exc)
     return dict(profile["preferences"])
 
 
@@ -336,6 +475,21 @@ def handle_adaptation_command(
         setting = reset.group(1)
         if setting and setting not in _DEFAULTS:
             return f"Unknown adaptation setting `{setting}`."
+        try:
+            from memory.self_learning import disable_configuration
+
+            reset_settings = [setting] if setting else list(_DEFAULTS)
+            for reset_setting in reset_settings:
+                disable_configuration(
+                    str(owner_id),
+                    f"preference.{reset_setting}",
+                    reason="explicit preference reset",
+                )
+        except Exception as exc:
+            logger.warning("Promoted preference reset failed: %s", exc)
+            return (
+                "I couldn't safely reset the promoted preference. Nothing was changed."
+            )
         if setting:
             _set(owner_id, setting, _DEFAULTS[setting], "explicit:reset")
         else:
@@ -355,8 +509,37 @@ def handle_adaptation_command(
     ).strip()
     profile = _load(owner_id)
     if action in {"pause", "resume"}:
+        before = bool(profile["enabled"])
+        event_ids: list[str] = []
+        try:
+            from memory.self_learning import record_learning_event
+
+            event = record_learning_event(
+                str(owner_id),
+                "explicit_preference",
+                metadata={
+                    "setting": "adaptation_enabled",
+                    "before": before,
+                    "after": action == "resume",
+                },
+            )
+            event_ids.append(event["id"])
+        except Exception as exc:
+            logger.debug("Adaptation-state provenance unavailable: %s", exc)
         profile["enabled"] = action == "resume"
         profile["version"] += 1
+        profile["history"].append(
+            {
+                "version": profile["version"],
+                "setting": "adaptation_enabled",
+                "before": before,
+                "after": profile["enabled"],
+                "source": f"explicit:{action}",
+                "level": 1,
+                "evidence_event_ids": event_ids,
+                "created_at": _now(),
+            }
+        )
         profile["updated_at"] = _now()
         _save(profile)
         return f"Adaptation {'resumed' if profile['enabled'] else 'paused'}."

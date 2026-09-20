@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.09-phase8-controlled-learning
+
+- Added five explicit learning levels from expiring session adaptation through
+  non-deploying code and skill proposals.
+- Replaced automatic implicit preference changes with provenance-backed,
+  deduplicated candidates that require offline evaluation and shadow evidence.
+- Added opted-in Level 3 canaries, automatic safety and metric rollback,
+  versioned adaptive configuration, and owner-commanded rollback.
+- Added redacted learning events, authority-expansion rejection, temporary
+  natural-language device aliases, user inspection controls, and SQLite
+  migration 5.
+
 ## 2026.09-phase345-reasoning-execution
 
 - Added a versioned intent taxonomy, deterministic evidence recognizers,

@@ -88,6 +88,38 @@ MIGRATIONS = (
             "DROP TABLE IF EXISTS memory_records",
         ),
     ),
+    Migration(
+        5,
+        "controlled_self_learning",
+        (
+            "CREATE TABLE IF NOT EXISTS learning_events ("
+            "id TEXT PRIMARY KEY, internal_id TEXT NOT NULL, source TEXT NOT NULL, "
+            "document_json TEXT NOT NULL, created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS idx_learning_events_owner_source "
+            "ON learning_events(internal_id, source, created_at)",
+            "CREATE TABLE IF NOT EXISTS learning_candidates ("
+            "id TEXT PRIMARY KEY, internal_id TEXT NOT NULL, level INTEGER NOT NULL, "
+            "status TEXT NOT NULL, fingerprint TEXT NOT NULL, "
+            "document_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "UNIQUE(internal_id, fingerprint))",
+            "CREATE INDEX IF NOT EXISTS idx_learning_candidates_owner_status "
+            "ON learning_candidates(internal_id, status, updated_at)",
+            "CREATE TABLE IF NOT EXISTS adaptive_config_versions ("
+            "id TEXT PRIMARY KEY, internal_id TEXT NOT NULL, config_key TEXT NOT NULL, "
+            "version INTEGER NOT NULL, status TEXT NOT NULL, document_json TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, UNIQUE(internal_id, config_key, version))",
+            "CREATE INDEX IF NOT EXISTS idx_adaptive_config_owner_key "
+            "ON adaptive_config_versions(internal_id, config_key, status, version)",
+        ),
+        (
+            "DROP INDEX IF EXISTS idx_adaptive_config_owner_key",
+            "DROP TABLE IF EXISTS adaptive_config_versions",
+            "DROP INDEX IF EXISTS idx_learning_candidates_owner_status",
+            "DROP TABLE IF EXISTS learning_candidates",
+            "DROP INDEX IF EXISTS idx_learning_events_owner_source",
+            "DROP TABLE IF EXISTS learning_events",
+        ),
+    ),
 )
 
 

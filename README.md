@@ -788,6 +788,10 @@ Missing specialist files fall back to the next available local model. At most
 | `PROACTIVE_CHECK_INTERVAL` | `3600` | Background check frequency in seconds |
 | `ENABLE_LEARNING` | `true` | Auto-extract user preferences from conversations |
 | `LEARNING_MAX_FACTS` | `50` | Max stored facts per user |
+| `LEARNING_SESSION_TTL_MINUTES` | `180` | Expiry for session-only response and reference adaptation |
+| `LEARNING_LEVEL2_MIN_EVIDENCE` | `3` | Independent signals required for an inferred candidate |
+| `LEARNING_SHADOW_MIN_OBSERVATIONS` | `20` | Safe shadow comparisons required before promotion |
+| `LEARNING_CANARY_MIN_OBSERVATIONS` | `20` | Canary outcomes required before Level 3 promotion |
 | `CURIE_LOCAL_MEMORY_DB` | `.curie_memory.sqlite3` | Durable fallback when Mongo/Postgres are unset |
 | `MEMORY_RELEVANCE_MIN_SCORE` | `0.28` | Minimum hybrid relevance required before a memory enters the prompt |
 | `MEMORY_CONTEXT_CHAR_BUDGET` | `1600` | Maximum long-term-memory characters injected into one request |
@@ -807,6 +811,13 @@ floor and prompt-size budget. A cheap relevance gate runs before vector
 reranking, and unchanged memory features are reused from a bounded LRU cache.
 Routine operational commands bypass long-term recall so unrelated memories
 cannot pull a reply back to an old topic.
+
+Inferred adaptations do not change live behavior directly. They become
+owner-scoped candidates, pass offline and adversarial evaluation, run in shadow
+mode, and require the relevant owner approval or canary gate. Every promoted
+configuration is versioned and can be reversed with `/learning rollback
+<config_key>`. `/learning inspect` shows candidates, provenance, evaluation,
+and configuration history without storing raw private conversation text.
 
 Run `python scripts/benchmark_memory.py` for a deterministic synthetic recall
 quality and latency check. The benchmark never reads stored conversations.

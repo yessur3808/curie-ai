@@ -18,6 +18,7 @@ from .service import (
     MemoryTier,
     get_memory_service,
 )
+from .self_learning import LearningLevel, handle_learning_command
 
 
 def init_memory():
@@ -42,4 +43,6 @@ __all__ = [
     "MemoryTier",
     "ConfirmationState",
     "get_memory_service",
+    "LearningLevel",
+    "handle_learning_command",
 ]

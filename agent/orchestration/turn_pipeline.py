@@ -132,10 +132,37 @@ class LegacyTurnPipelineAdapter:
         async def build_context(state: PipelineState) -> StageOutput:
             enriched = _artifact(state, PipelineStage.RESOLVE_IDENTITY)
             original_text = str(enriched.get("text") or "")
+            session_text = original_text
+            session_alias_used = False
+            try:
+                from memory.self_learning import get_session_adaptation
+
+                session_adaptation = get_session_adaptation(
+                    str(enriched["internal_id"]), str(enriched["platform"])
+                )
+                reference = session_adaptation.get("device_reference") or {}
+                alias = str(reference.get("alias") or "").strip()
+                target = str(reference.get("target") or "").strip()
+                if (
+                    alias
+                    and target
+                    and re.search(
+                        rf"(?<!\w){re.escape(alias)}(?!\w)", session_text, re.I
+                    )
+                ):
+                    session_text = re.sub(
+                        rf"(?<!\w){re.escape(alias)}(?!\w)",
+                        target,
+                        session_text,
+                        flags=re.I,
+                    )
+                    session_alias_used = True
+            except Exception:
+                session_alias_used = False
             needs_history = bool(
-                _DEVICE_REFERENCE.search(original_text)
-                and _DEVICE_OPERATION.search(original_text)
-            ) or bool(re.search(r"\btry again\b", original_text, re.I))
+                _DEVICE_REFERENCE.search(session_text)
+                and _DEVICE_OPERATION.search(session_text)
+            ) or bool(re.search(r"\btry again\b", session_text, re.I))
             history = []
             effects: frozenset[SideEffect] = frozenset()
             if needs_history:
@@ -153,11 +180,13 @@ class LegacyTurnPipelineAdapter:
                     "enriched": enriched,
                     "history": history,
                     "transition": transition,
+                    "session_text": session_text,
                 },
                 {
                     "reference_history_loaded": bool(history),
                     "history_items": len(history),
                     "transition": transition.kind.value,
+                    "session_alias_used": session_alias_used,
                 },
                 effects,
             )
@@ -169,6 +198,7 @@ class LegacyTurnPipelineAdapter:
             )
             history = list(context.get("history") or ())
             original_text = str(enriched.get("text") or "")
+            session_text = str(context.get("session_text") or original_text)
             transition = context.get("transition")
             if not isinstance(transition, DialogueTransition):
                 transition = self.workflow.dialogue_state.transition_for(
@@ -178,7 +208,7 @@ class LegacyTurnPipelineAdapter:
                 )
             resolution: ReferenceResolution = (
                 self.workflow.dialogue_state.resolve_references(
-                    original_text,
+                    session_text,
                     platform=str(enriched["platform"]),
                     owner_id=str(enriched["internal_id"]),
                     history=history,
@@ -428,9 +458,62 @@ class LegacyTurnPipelineAdapter:
 
         async def record_learning(state: PipelineState) -> StageOutput:
             result = _artifact(state, PipelineStage.PERSIST)
+            recorded_sources: list[str] = []
+            effects: frozenset[SideEffect] = frozenset()
+            if not shadow:
+                identity = _artifact(state, PipelineStage.RESOLVE_IDENTITY)
+                understood = _artifact(state, PipelineStage.UNDERSTAND)
+                owner_id = str(identity.get("internal_id") or "")
+                user_text = str(identity.get("text") or "")
+                transition = understood.get("transition")
+                sources: list[str] = []
+                if re.search(
+                    r"\b(?:try|do) (?:that )?again\b|\bretry\b", user_text, re.I
+                ):
+                    sources.append("retry_requested")
+                if (
+                    isinstance(transition, DialogueTransition)
+                    and transition.kind.value == "cancellation"
+                ):
+                    sources.append("request_cancelled")
+                inbound = identity.get("_inbound_event")
+                if getattr(getattr(inbound, "kind", None), "value", "") == "edited":
+                    sources.append("request_edited")
+                verification = str(result.get("verification_status") or "")
+                if verification in {
+                    "failed",
+                    "mismatch",
+                    "completed_unverified",
+                    "uncertain",
+                }:
+                    sources.append("tool_verification_mismatch")
+                if owner_id:
+                    try:
+                        from memory.self_learning import record_learning_event
+
+                        for source in dict.fromkeys(sources):
+                            record_learning_event(
+                                owner_id,
+                                source,
+                                text=user_text,
+                                metadata={
+                                    "connector": identity.get("platform"),
+                                    "verification_status": verification,
+                                },
+                            )
+                            recorded_sources.append(source)
+                    except Exception:
+                        recorded_sources = []
+                if recorded_sources:
+                    effects = frozenset({SideEffect.LEARNING})
             return StageOutput(
                 result,
-                {"learning": "handled_by_guarded_legacy_service"},
+                {
+                    "learning": "controlled",
+                    "event_count": len(recorded_sources),
+                    "event_sources": recorded_sources,
+                },
+                effects,
             )
 
         return {

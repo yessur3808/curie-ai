@@ -388,6 +388,53 @@ async def test_active_deterministic_device_command_bypasses_model_generation():
 
 
 @pytest.mark.asyncio
+async def test_session_device_alias_is_resolved_before_routing():
+    from memory.self_learning import set_session_adaptation
+
+    set_session_adaptation(
+        "owner",
+        "telegram",
+        "device_reference",
+        {"alias": "dreamview", "target": "AI Sync Box strip"},
+    )
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
+    workflow.routing_service.execute = AsyncMock(
+        return_value=ResponseCandidate(
+            "Done. AI Sync Box strip is off.",
+            "action_router:home_control",
+            {
+                "status": "completed",
+                "verification_status": "verified",
+                "data": {"receipts": [{"name": "AI Sync Box strip"}]},
+            },
+        )
+    )
+    normalized = {
+        "platform": "telegram",
+        "external_user_id": "55",
+        "external_chat_id": "300",
+        "message_id": "phase8-session-alias",
+        "text": "Turn off dreamview",
+        "internal_id": "owner",
+        "_pipeline_mode": "active",
+    }
+
+    with (
+        patch("agent.chat_workflow.UserManager.update_user_profile"),
+        patch("agent.chat_workflow.UserManager.get_user_profile", return_value={}),
+        patch("agent.orchestration.turn_pipeline.turn_event_writer.record"),
+        patch("agent.orchestration.turn_pipeline.turn_event_writer.record_pipeline"),
+    ):
+        result = await workflow.process_message(normalized)
+
+    assert result["text"] == "Done. AI Sync Box strip is off."
+    assert any(
+        call.args[1] == "Turn off AI Sync Box strip"
+        for call in workflow.routing_service.execute.await_args_list
+    )
+
+
+@pytest.mark.asyncio
 async def test_shadow_mode_keeps_legacy_response_authoritative_and_compares_routes():
     workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
     legacy = {

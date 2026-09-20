@@ -26,6 +26,8 @@ def test_explicit_feedback_versions_bounded_preferences(tmp_path, monkeypatch):
     profile = local_store.get_adaptation_profile("u1")
     assert profile["version"] == 1
     assert profile["history"][0]["source"] == "explicit:too_long"
+    assert profile["history"][0]["level"] == 1
+    assert profile["history"][0]["evidence_event_ids"]
     assert (
         record_explicit_feedback("u1", "Use a professional tone")["tone"]
         == "professional"
@@ -56,18 +58,25 @@ def test_protected_trait_feedback_is_not_recorded(tmp_path, monkeypatch):
     assert local_store.list_adaptation_events("u1") == []
 
 
-def test_implicit_changes_require_three_samples_and_are_bounded(tmp_path, monkeypatch):
+def test_implicit_changes_require_three_samples_and_stay_in_shadow_candidates(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
     for _ in range(2):
         result = record_operational_signal("u1", "abandonment")
         assert result["verbosity"] == "balanced"
-    assert record_operational_signal("u1", "abandonment")["verbosity"] == "concise"
+    assert record_operational_signal("u1", "abandonment")["verbosity"] == "balanced"
     for _ in range(3):
         tools = record_operational_signal("u1", "accepted_action", tool="weather")
-    assert tools["preferred_tools"] == ["weather"]
+    assert tools["preferred_tools"] == []
     for _ in range(3):
         tools = record_operational_signal("u1", "tool_failure", tool="weather")
     assert tools["preferred_tools"] == []
+    from memory.self_learning import list_learning_candidates
+
+    candidates = list_learning_candidates("u1")
+    assert len(candidates) == 3
+    assert {item["status"] for item in candidates} == {"pending_evaluation"}
 
 
 def test_response_time_is_clamped_and_never_changes_authority(tmp_path, monkeypatch):

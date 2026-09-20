@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "release": "2026.09-phase345-reasoning-execution",
+  "release": "2026.09-phase8-controlled-learning",
   "contract_version": "1.1.0",
   "changelog": "CHANGELOG.md",
-  "migration_notes": "docs/releases/PHASE345_MIGRATION.md",
-  "evaluation_delta": "evaluation/deltas/phase345-reasoning-execution.json",
+  "migration_notes": "docs/releases/PHASE8_MIGRATION.md",
+  "evaluation_delta": "evaluation/deltas/phase8-controlled-learning.json",
   "rollback": {
-    "application": "Stop Curie and restart the prior reviewed revision using the normal instance launcher. The additive mutation-attempt table may remain in place.",
-    "sqlite_schema_target": 0,
+    "application": "Stop Curie and restore commit 6ba0c1c9 or the prior reviewed release. The additive Phase 8 tables may remain in place.",
+    "sqlite_schema_target": 4,
     "postgres_command": "python -m scripts.down_migrations --target 4",
     "data_backup_required": true
   }

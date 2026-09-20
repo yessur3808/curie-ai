@@ -206,7 +206,11 @@ def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> di
             "language",
         }
     )
-    critical = {k: v for k, v in user_profile.items() if k in _CRITICAL_KEYS}
+    critical = {
+        k: v
+        for k, v in user_profile.items()
+        if k in _CRITICAL_KEYS and not str(k).startswith("_")
+    }
 
     # Score remaining facts by keyword overlap with the query
     query_words = {
@@ -216,7 +220,7 @@ def _select_relevant_facts(user_profile: dict, query: str, top_n: int = 8) -> di
     }
     scored = []
     for k, v in user_profile.items():
-        if k in _CRITICAL_KEYS:
+        if k in _CRITICAL_KEYS or str(k).startswith("_"):
             continue
         fact_words = set(re.findall(r"[a-z0-9]+", f"{k} {v}".casefold()))
         score = len(query_words & fact_words)
@@ -1118,7 +1122,22 @@ class ChatWorkflow:
                 handle_adaptation_command,
                 record_explicit_feedback,
             )
+            from memory.self_learning import (
+                capture_session_adaptation,
+                handle_learning_command,
+            )
 
+            capture_session_adaptation(
+                str(internal_id), str(platform or "unknown"), user_text
+            )
+            learning_response = handle_learning_command(str(internal_id), user_text)
+            if learning_response is not None:
+                return {
+                    "text": learning_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "controlled_learning",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                }
             apply_voice_modality_preference(
                 str(internal_id), user_text, str(platform) if platform else None
             )
@@ -1585,7 +1604,14 @@ class ChatWorkflow:
             try:
                 from memory.adaptation import get_preferences
 
-                user_profile["_adaptation"] = get_preferences(str(internal_id))
+                user_profile["_adaptation"] = get_preferences(
+                    str(internal_id), str(platform)
+                )
+                from memory.self_learning import get_session_adaptation
+
+                user_profile["_session_adaptation"] = get_session_adaptation(
+                    str(internal_id), str(platform)
+                )
             except Exception:
                 pass
             messages = get_session_manager().get_history(platform, internal_id)

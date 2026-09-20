@@ -22,7 +22,8 @@ def _connect() -> sqlite3.Connection:
     except OSError:
         pass
     conn.row_factory = sqlite3.Row
-    conn.executescript("""
+    conn.executescript(
+        """
         PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS users (
             channel TEXT NOT NULL, external_id TEXT NOT NULL, internal_id TEXT NOT NULL,
@@ -60,6 +61,28 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_adaptation_events_owner_signal
             ON adaptation_events(internal_id, signal, created_at);
+        CREATE TABLE IF NOT EXISTS learning_events (
+            id TEXT PRIMARY KEY, internal_id TEXT NOT NULL, source TEXT NOT NULL,
+            document_json TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_learning_events_owner_source
+            ON learning_events(internal_id, source, created_at);
+        CREATE TABLE IF NOT EXISTS learning_candidates (
+            id TEXT PRIMARY KEY, internal_id TEXT NOT NULL, level INTEGER NOT NULL,
+            status TEXT NOT NULL, fingerprint TEXT NOT NULL,
+            document_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(internal_id, fingerprint)
+        );
+        CREATE INDEX IF NOT EXISTS idx_learning_candidates_owner_status
+            ON learning_candidates(internal_id, status, updated_at);
+        CREATE TABLE IF NOT EXISTS adaptive_config_versions (
+            id TEXT PRIMARY KEY, internal_id TEXT NOT NULL, config_key TEXT NOT NULL,
+            version INTEGER NOT NULL, status TEXT NOT NULL,
+            document_json TEXT NOT NULL, created_at TEXT NOT NULL,
+            UNIQUE(internal_id, config_key, version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_adaptive_config_owner_key
+            ON adaptive_config_versions(internal_id, config_key, status, version);
         CREATE TABLE IF NOT EXISTS routing_outcomes (
             id INTEGER PRIMARY KEY AUTOINCREMENT, internal_id TEXT NOT NULL,
             decision_id TEXT NOT NULL, request_hash TEXT NOT NULL,
@@ -115,7 +138,8 @@ def _connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL
         );
-        """)
+        """
+    )
     from memory.schema_migrations import apply_migrations
 
     apply_migrations(conn)
@@ -345,8 +369,8 @@ def reset_history(platform: str, internal_id: str) -> None:
         # A reset starts a genuinely fresh conversation. Keep unrelated session
         # preferences, but never carry a model-generated working summary into it.
         conn.execute(
-            "DELETE FROM session_metadata "
-            "WHERE platform=? AND internal_id=? AND key='working_context_v1'",
+            "DELETE FROM session_metadata WHERE platform=? AND internal_id=? "
+            "AND key IN ('working_context_v1','controlled_session_adaptation_v1')",
             (platform, str(internal_id)),
         )
 
@@ -680,6 +704,129 @@ def reset_adaptation(internal_id: str) -> None:
         conn.execute(
             "DELETE FROM adaptation_events WHERE internal_id=?", (str(internal_id),)
         )
+
+
+def save_learning_event(document: dict) -> None:
+    """Persist a redacted learning signal with an immutable event identifier."""
+    now = str(document.get("created_at") or datetime.now(timezone.utc).isoformat())
+    with _LOCK, _managed_connection() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO learning_events"
+            "(id,internal_id,source,document_json,created_at) VALUES(?,?,?,?,?)",
+            (
+                str(document["id"]),
+                str(document["owner_id"]),
+                str(document["source"]),
+                json.dumps(document, default=str),
+                now,
+            ),
+        )
+
+
+def list_learning_events(internal_id: str, source: str | None = None) -> list[dict]:
+    with _LOCK, _managed_connection() as conn:
+        if source:
+            rows = conn.execute(
+                "SELECT document_json FROM learning_events "
+                "WHERE internal_id=? AND source=? ORDER BY created_at",
+                (str(internal_id), str(source)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT document_json FROM learning_events "
+                "WHERE internal_id=? ORDER BY created_at",
+                (str(internal_id),),
+            ).fetchall()
+    return [json.loads(row["document_json"]) for row in rows]
+
+
+def save_learning_candidate(document: dict) -> dict:
+    """Insert or update an owner-scoped candidate without deleting old outcomes."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _LOCK, _managed_connection() as conn:
+        existing = conn.execute(
+            "SELECT document_json FROM learning_candidates "
+            "WHERE internal_id=? AND fingerprint=?",
+            (str(document["owner_id"]), str(document["fingerprint"])),
+        ).fetchone()
+        if existing and str(document.get("id")) != str(
+            json.loads(existing["document_json"]).get("id")
+        ):
+            return json.loads(existing["document_json"])
+        conn.execute(
+            "INSERT INTO learning_candidates"
+            "(id,internal_id,level,status,fingerprint,document_json,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "status=excluded.status,document_json=excluded.document_json,"
+            "updated_at=excluded.updated_at",
+            (
+                str(document["id"]),
+                str(document["owner_id"]),
+                int(document["level"]),
+                str(document["status"]),
+                str(document["fingerprint"]),
+                json.dumps(document, default=str),
+                str(document.get("created_at") or now),
+                now,
+            ),
+        )
+    return dict(document)
+
+
+def list_learning_candidates(internal_id: str, status: str | None = None) -> list[dict]:
+    with _LOCK, _managed_connection() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT document_json FROM learning_candidates "
+                "WHERE internal_id=? AND status=? ORDER BY updated_at",
+                (str(internal_id), str(status)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT document_json FROM learning_candidates "
+                "WHERE internal_id=? ORDER BY updated_at",
+                (str(internal_id),),
+            ).fetchall()
+    return [json.loads(row["document_json"]) for row in rows]
+
+
+def save_adaptive_config(document: dict) -> None:
+    now = str(document.get("created_at") or datetime.now(timezone.utc).isoformat())
+    with _LOCK, _managed_connection() as conn:
+        conn.execute(
+            "INSERT INTO adaptive_config_versions"
+            "(id,internal_id,config_key,version,status,document_json,created_at) "
+            "VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "status=excluded.status,document_json=excluded.document_json",
+            (
+                str(document["id"]),
+                str(document["owner_id"]),
+                str(document["config_key"]),
+                int(document["version"]),
+                str(document["status"]),
+                json.dumps(document, default=str),
+                now,
+            ),
+        )
+
+
+def list_adaptive_configs(
+    internal_id: str, config_key: str | None = None
+) -> list[dict]:
+    with _LOCK, _managed_connection() as conn:
+        if config_key:
+            rows = conn.execute(
+                "SELECT document_json FROM adaptive_config_versions "
+                "WHERE internal_id=? AND config_key=? ORDER BY version",
+                (str(internal_id), str(config_key)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT document_json FROM adaptive_config_versions "
+                "WHERE internal_id=? ORDER BY config_key,version",
+                (str(internal_id),),
+            ).fetchall()
+    return [json.loads(row["document_json"]) for row in rows]
 
 
 def append_routing_outcome(internal_id: str, request_hash: str, decision: dict) -> None:

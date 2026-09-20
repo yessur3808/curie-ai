@@ -266,7 +266,10 @@ class SessionManager:
             {"_id": key},
             {
                 "$set": {"messages": [], "updated_at": self._now()},
-                "$unset": {"metadata.working_context_v1": ""},
+                "$unset": {
+                    "metadata.working_context_v1": "",
+                    "metadata.controlled_session_adaptation_v1": "",
+                },
             },
         )
         logger.info("Session reset  key=%s", key)
@@ -332,7 +335,13 @@ class SessionManager:
         uid = str(user_id)
         result = self._col.update_many(
             {"user_id": uid},
-            {"$set": {"messages": [], "updated_at": self._now()}},
+            {
+                "$set": {"messages": [], "updated_at": self._now()},
+                "$unset": {
+                    "metadata.working_context_v1": "",
+                    "metadata.controlled_session_adaptation_v1": "",
+                },
+            },
         )
         logger.info(
             "Reset all sessions for user_id=%s  count=%d", uid, result.modified_count
@@ -341,7 +350,14 @@ class SessionManager:
     def clear_all_sessions(self) -> None:
         """Wipe all conversation history across every session (admin use)."""
         result = self._col.update_many(
-            {}, {"$set": {"messages": [], "updated_at": self._now()}}
+            {},
+            {
+                "$set": {"messages": [], "updated_at": self._now()},
+                "$unset": {
+                    "metadata.working_context_v1": "",
+                    "metadata.controlled_session_adaptation_v1": "",
+                },
+            },
         )
         logger.info("All sessions cleared  count=%d", result.modified_count)
 

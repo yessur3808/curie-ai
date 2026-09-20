@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "6ba0c1c9",
+  "candidate": "2026.09-phase8-controlled-learning",
+  "expected_regressions": [],
+  "required_suites": [
+    "evaluation.phase67_suite",
+    "evaluation.phase8_suite"
+  ],
+  "required_gates": {
+    "correctness_pass_rate": 1.0,
+    "security_pass_rate": 1.0,
+    "known_regression_pass_rate": 1.0
+  },
+  "new_coverage": [
+    "expiring owner-and-channel-scoped Level 0 adaptation",
+    "provenance-backed explicit durable preferences",
+    "redacted outcome events without raw conversation copies",
+    "deduplicated Level 2 through Level 4 candidates",
+    "mandatory unit targeted held-out adversarial and full evaluation",
+    "shadow disagreement traces and opted-in owner canaries",
+    "authority-expansion rejection",
+    "non-deploying Level 4 staging",
+    "automatic regression rollback and one-command manual rollback"
+  ]
+}

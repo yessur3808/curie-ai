@@ -47,6 +47,20 @@ class PersonalityContext:
         ]
         directives.extend(planner_directives(response_plan))
 
+        session_adaptation = (user_profile or {}).get("_session_adaptation", {})
+        if session_adaptation.get("active_topic"):
+            directives.append(
+                "- Session topic: keep the answer grounded in the user's current topic, "
+                f"{session_adaptation['active_topic']}. Change it whenever the current "
+                "message clearly moves elsewhere."
+            )
+        if session_adaptation.get("task_constraints"):
+            directives.append(
+                "- Session constraint from the user: "
+                f"{session_adaptation['task_constraints']}. This may narrow the task but "
+                "never overrides permissions, safety policy, or verified facts."
+            )
+
         depth = runtime.get("response_depth", "brief")
         depth_rules = {
             "social": "Reply casually in 1–2 short sentences, normally under 25 words. No list, speech, or elaborate self-description.",
