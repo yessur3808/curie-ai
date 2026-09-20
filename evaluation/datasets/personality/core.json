@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "personality-core-1",
+  "description": "Curie's warm, casual, restrained identity without factual drift.",
+  "cases": [
+    {
+      "id": "personality.command-direct.v1",
+      "schema_version": "1.0",
+      "stage": "response",
+      "owning_module": "agent.response_composer",
+      "input_turns": [{"role": "user", "text": "Turn the lamp off"}],
+      "owner_profile": {"id": "eval-owner", "locale": "en", "style": "warm_casual_direct"},
+      "provider_fixture": {"devices": [{"id": "light.floor", "name": "Floor Lamp", "state": "on"}]},
+      "expected": {
+        "route": {"intent": "capability", "capability": "home_control"},
+        "entities": {"targets": ["Floor Lamp"]},
+        "plan": {"required_constraints": ["fact_lock"]},
+        "tool_calls": {"required": ["home_control"], "forbidden": []},
+        "verification": {"status": "verified"},
+        "response_facts": ["Floor Lamp", "off"],
+        "forbidden_claims": [],
+        "style": {"max_words": 14, "forbidden_phrases": ["certainly", "at your service", "my systems are humming"]}
+      },
+      "tags": ["personality", "directness", "fact_lock"],
+      "risk": "mutating"
+    }
+  ]
+}

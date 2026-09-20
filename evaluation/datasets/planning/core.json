@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "planning-core-1",
+  "description": "Plan ordering, dependencies, idempotency, and partial failure.",
+  "cases": [
+    {
+      "id": "planning.compound.read-order.v1",
+      "schema_version": "1.0",
+      "stage": "planning",
+      "owning_module": "agent.kernel.planning",
+      "input_turns": [{"role": "user", "text": "Check RAM and then check hardware specs"}],
+      "owner_profile": {"id": "eval-owner", "locale": "en"},
+      "provider_fixture": {},
+      "expected": {
+        "route": {"intent": "compound_operation"},
+        "entities": {"targets": []},
+        "plan": {"required_constraints": ["preserve_order", "stable_idempotency_key"]},
+        "tool_calls": {"required": ["system_diagnostics", "system_hardware"], "forbidden": []},
+        "verification": {"status": "not_required"},
+        "response_facts": ["RAM", "hardware"],
+        "forbidden_claims": [],
+        "style": {"max_words": 80, "forbidden_phrases": []}
+      },
+      "tags": ["planning", "compound", "ordering"],
+      "risk": "read_only"
+    }
+  ]
+}

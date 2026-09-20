@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "stages": [
+    "normalization",
+    "understanding",
+    "routing",
+    "planning",
+    "policy",
+    "tool_execution",
+    "verification",
+    "memory",
+    "response",
+    "delivery"
+  ],
+  "taxonomies": {
+    "understanding": ["intent", "negative", "ambiguity", "correction", "compound", "followup", "multilingual", "injection"],
+    "conversation": ["naturalness", "brevity", "warmth", "topic_change", "repetition", "directness"],
+    "devices": ["exact", "alias", "fuzzy", "group", "ambiguous", "already_satisfied", "verification"],
+    "planning": ["shape", "ordering", "dependency", "parallelism", "idempotency", "cancellation"],
+    "memory": ["precision", "contradiction", "staleness", "deletion", "export", "owner_isolation", "summary_drift"],
+    "personality": ["identity", "casual", "french_flair", "restraint", "fact_lock"],
+    "security": ["prompt_injection", "secret_leak", "permission", "authority", "unsafe_tool"],
+    "connectors": ["identity", "format", "chunking", "delivery", "replay"],
+    "proactive": ["evidence", "usefulness", "frequency", "consent", "unsupported_claim"],
+    "production_regressions": ["telegram", "device_control", "context", "topic_loop", "formatting"]
+  },
+  "critical_intents": [
+    "device_state_mutation",
+    "approval",
+    "emergency_stop",
+    "memory_correct"
+  ]
+}

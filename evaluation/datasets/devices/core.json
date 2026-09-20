@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "devices-core-1",
+  "description": "Exact, alias, fuzzy, group, ambiguous, and verified device behavior.",
+  "cases": [
+    {
+      "id": "devices.group.all-lights.v1",
+      "schema_version": "1.0",
+      "stage": "tool_execution",
+      "owning_module": "services.smart_home",
+      "input_turns": [{"role": "user", "text": "Turn off all lights"}],
+      "owner_profile": {"id": "eval-owner", "locale": "en"},
+      "provider_fixture": {"devices": [
+        {"id": "light.sync", "name": "AI Sync Box strip", "domain": "light", "state": "on"},
+        {"id": "light.floor", "name": "Floor Lamp 2", "domain": "light", "state": "on"}
+      ]},
+      "expected": {
+        "route": {"intent": "capability", "capability": "home_control"},
+        "entities": {"targets": ["AI Sync Box strip", "Floor Lamp 2"]},
+        "plan": {"required_constraints": ["verify_after_write"]},
+        "tool_calls": {"required": ["home_control"], "forbidden": []},
+        "verification": {"status": "verified"},
+        "response_facts": ["AI Sync Box strip", "Floor Lamp 2", "off"],
+        "forbidden_claims": ["couldn't find one controllable device"],
+        "style": {"max_words": 24, "forbidden_phrases": []}
+      },
+      "tags": ["devices", "group", "verification"],
+      "risk": "mutating"
+    }
+  ]
+}

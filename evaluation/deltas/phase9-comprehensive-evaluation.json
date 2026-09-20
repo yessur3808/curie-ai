@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "98a13672",
+  "candidate": "2026.09-phase9-comprehensive-evaluation",
+  "expected_regressions": [],
+  "required_suites": [
+    "evaluation.release",
+    "evaluation.phase9_suite"
+  ],
+  "required_gates": {
+    "correctness_pass_rate": 1.0,
+    "security_pass_rate": 1.0,
+    "connector_conformance_pass_rate": 1.0,
+    "known_regression_pass_rate": 1.0,
+    "device_mutation_safety": 1.0,
+    "verification_coverage": 1.0
+  },
+  "new_coverage": [
+    "versioned taxonomy-aware dataset contracts",
+    "stable sanitized production regressions",
+    "deterministic structured graders",
+    "human-calibrated subjective grading only",
+    "identical-condition model comparison",
+    "provider failure and verification simulation",
+    "per-stage and per-taxonomy reports",
+    "fail-closed blocking release gates",
+    "one-command complete offline evaluation"
+  ]
+}

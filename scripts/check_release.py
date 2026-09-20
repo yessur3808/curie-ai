@@ -37,11 +37,15 @@ def validate_release(root: str | Path = ".") -> dict:
     delta = json.loads(
         (root / manifest["evaluation_delta"]).read_text(encoding="utf-8")
     )
-    gates = json.loads(
+    gate_config = json.loads(
         (root / "evaluation/release_gates.json").read_text(encoding="utf-8")
     )
+    gates = gate_config.get("gates", gate_config)
     for name, threshold in delta.get("required_gates", {}).items():
-        if name not in gates or float(gates[name]) < float(threshold):
+        configured = gates.get(name)
+        if isinstance(configured, dict):
+            configured = configured.get("threshold")
+        if configured is None or float(configured) < float(threshold):
             raise ValueError(f"Release gate {name} is below the required delta")
     rollback = manifest["rollback"]
     if not rollback.get("application") or "data_backup_required" not in rollback:

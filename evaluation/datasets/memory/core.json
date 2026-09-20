@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "memory-core-1",
+  "description": "Precision, contradiction, staleness, deletion, export, and owner isolation.",
+  "cases": [
+    {
+      "id": "memory.owner-isolation.v1",
+      "schema_version": "1.0",
+      "stage": "memory",
+      "owning_module": "memory.service",
+      "input_turns": [{"role": "user", "text": "What is my favorite snack?"}],
+      "owner_profile": {"id": "owner-b", "locale": "en"},
+      "provider_fixture": {"memories": [{"owner_id": "owner-a", "predicate": "favorite_snack", "value": "mango"}]},
+      "expected": {
+        "route": {"intent": "conversation"},
+        "entities": {"targets": []},
+        "plan": {"required_constraints": ["owner_scope"]},
+        "tool_calls": {"required": [], "forbidden": []},
+        "verification": {"status": "not_required"},
+        "response_facts": [],
+        "forbidden_claims": ["mango"],
+        "style": {"max_words": 24, "forbidden_phrases": []}
+      },
+      "tags": ["memory", "owner_isolation", "precision"],
+      "risk": "sensitive"
+    }
+  ]
+}

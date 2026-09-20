@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "conversation-core-1",
+  "description": "Natural multi-turn flow, topic changes, brevity, and repetition.",
+  "cases": [
+    {
+      "id": "conversation.topic-change.clean.v1",
+      "schema_version": "1.0",
+      "stage": "response",
+      "owning_module": "agent.orchestration.social_service",
+      "input_turns": [
+        {"role": "user", "text": "Tell me about batteries"},
+        {"role": "assistant", "text": "Sure—what part interests you?"},
+        {"role": "user", "text": "Actually, let's discuss dinner"}
+      ],
+      "owner_profile": {"id": "eval-owner", "locale": "en", "style": "casual"},
+      "provider_fixture": {},
+      "expected": {
+        "route": {"intent": "conversation"},
+        "entities": {"targets": []},
+        "plan": {"required_constraints": []},
+        "tool_calls": {"required": [], "forbidden": ["home_control"]},
+        "verification": {"status": "not_required"},
+        "response_facts": ["dinner"],
+        "forbidden_claims": ["battery"],
+        "style": {"max_words": 24, "forbidden_phrases": ["all systems look good", "at your service"]}
+      },
+      "tags": ["conversation", "topic_change", "repetition"],
+      "risk": "none"
+    }
+  ]
+}

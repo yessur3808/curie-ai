@@ -154,9 +154,7 @@ jobs:
       - name: Run deterministic quality gates
         run: |
           pytest -q tests/test_evaluation_runner.py
-          python -m evaluation.phase2_suite
-          python -m evaluation.phase345_suite
-          python -m evaluation.phase67_suite
+          python -m evaluation.release --report evaluation/reports/ci.json
 
   release-contracts:
     name: Contracts, migrations, and release evidence

@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "release": "2026.09-phase8-controlled-learning",
+  "release": "2026.09-phase9-comprehensive-evaluation",
   "contract_version": "1.1.0",
   "changelog": "CHANGELOG.md",
-  "migration_notes": "docs/releases/PHASE8_MIGRATION.md",
-  "evaluation_delta": "evaluation/deltas/phase8-controlled-learning.json",
+  "migration_notes": "docs/releases/PHASE9_MIGRATION.md",
+  "evaluation_delta": "evaluation/deltas/phase9-comprehensive-evaluation.json",
   "rollback": {
-    "application": "Stop Curie and restore commit 6ba0c1c9 or the prior reviewed release. The additive Phase 8 tables may remain in place.",
-    "sqlite_schema_target": 4,
-    "postgres_command": "python -m scripts.down_migrations --target 4",
-    "data_backup_required": true
+    "application": "Keep Curie stopped and restore commit 98a13672 or the prior reviewed release. Generated Phase 9 reports may be deleted.",
+    "sqlite_schema_target": 5,
+    "postgres_command": "No database rollback is required for Phase 9.",
+    "data_backup_required": false
   }
 }

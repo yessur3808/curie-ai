@@ -1,0 +1,218 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "telegram-production-regressions-1",
+  "description": "Sanitized stable reproductions of user-reported Telegram failures.",
+  "cases": [
+    {
+      "id": "production.telegram.dreamview-alias.v1",
+      "schema_version": "1.0",
+      "stage": "tool_execution",
+      "owning_module": "services.smart_home",
+      "input_turns": [{"role": "user", "text": "Turn off the DreamView"}],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {"devices": [{"id": "light.ai_sync_box_strip", "name": "AI Sync Box strip", "aliases": ["DreamView"], "state": "on"}]},
+      "expected": {
+        "route": {"intent": "capability", "capability": "home_control"},
+        "entities": {"targets": ["AI Sync Box strip"]},
+        "plan": {"required_constraints": ["verify_after_write"]},
+        "tool_calls": {"required": ["home_control"], "forbidden": []},
+        "verification": {"status": "verified"},
+        "response_facts": ["AI Sync Box strip", "off"],
+        "forbidden_claims": ["couldn't find"],
+        "style": {"max_words": 18, "forbidden_phrases": ["at your service"]}
+      },
+      "tags": ["production_regressions", "telegram", "device_control", "alias"],
+      "risk": "mutating"
+    },
+    {
+      "id": "production.telegram.correlate-and-control.v1",
+      "schema_version": "1.0",
+      "stage": "planning",
+      "owning_module": "agent.kernel.planning",
+      "input_turns": [{"role": "user", "text": "Correlate DreamView with AI Sync Box strip and turn it off"}],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {"devices": [{"id": "light.ai_sync_box_strip", "name": "AI Sync Box strip", "state": "on"}]},
+      "expected": {
+        "route": {"intent": "compound_operation"},
+        "entities": {"targets": ["AI Sync Box strip"]},
+        "plan": {"required_constraints": ["preserve_order", "verify_after_write"]},
+        "tool_calls": {"required": ["home_alias_learn", "home_control"], "forbidden": []},
+        "verification": {"status": "verified"},
+        "response_facts": ["AI Sync Box strip", "off"],
+        "forbidden_claims": [],
+        "style": {"max_words": 28, "forbidden_phrases": []}
+      },
+      "tags": ["production_regressions", "telegram", "compound", "device_control"],
+      "risk": "mutating"
+    },
+    {
+      "id": "production.telegram.device-still-on.v1",
+      "schema_version": "1.0",
+      "stage": "understanding",
+      "owning_module": "agent.kernel.dialogue_state",
+      "input_turns": [
+        {"role": "user", "text": "Turn off DreamView"},
+        {"role": "assistant", "text": "I sent the command, but could not verify it."},
+        {"role": "user", "text": "The device is still on"}
+      ],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {"devices": [{"id": "light.ai_sync_box_strip", "name": "AI Sync Box strip", "aliases": ["DreamView"], "state": "on"}]},
+      "expected": {
+        "route": {"intent": "capability", "capability": "home_control"},
+        "entities": {"targets": ["AI Sync Box strip"]},
+        "plan": {"required_constraints": ["recover_active_goal", "verify_after_write"]},
+        "tool_calls": {"required": ["home_control"], "forbidden": []},
+        "verification": {"status": "verified"},
+        "response_facts": ["off"],
+        "forbidden_claims": ["which device"],
+        "style": {"max_words": 24, "forbidden_phrases": []}
+      },
+      "tags": ["production_regressions", "telegram", "context", "verification"],
+      "risk": "mutating"
+    },
+    {
+      "id": "production.telegram.topic-loop.v1",
+      "schema_version": "1.0",
+      "stage": "response",
+      "owning_module": "agent.kernel.dialogue_state",
+      "input_turns": [
+        {"role": "user", "text": "Tell me about the compiler project"},
+        {"role": "assistant", "text": "What would you like to know?"},
+        {"role": "user", "text": "Let's discuss something new"}
+      ],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {},
+      "expected": {
+        "route": {"intent": "conversation"},
+        "entities": {"targets": []},
+        "plan": {"required_constraints": ["new_goal"]},
+        "tool_calls": {"required": [], "forbidden": []},
+        "verification": {"status": "not_required"},
+        "response_facts": [],
+        "forbidden_claims": ["compiler project"],
+        "style": {"max_words": 24, "forbidden_phrases": ["curie is online", "all systems look good"]}
+      },
+      "tags": ["production_regressions", "telegram", "topic_change", "repetition"],
+      "risk": "none"
+    },
+    {
+      "id": "production.telegram.all-lights.v1",
+      "schema_version": "1.0",
+      "stage": "tool_execution",
+      "owning_module": "services.smart_home",
+      "input_turns": [{"role": "user", "text": "Turn off all lights"}],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {"devices": [
+        {"id": "light.sync", "name": "AI Sync Box strip", "state": "on"},
+        {"id": "light.floor", "name": "Floor Lamp 2", "state": "on"}
+      ]},
+      "expected": {
+        "route": {"intent": "capability", "capability": "home_control"},
+        "entities": {"targets": ["AI Sync Box strip", "Floor Lamp 2"]},
+        "plan": {"required_constraints": ["group_expansion", "verify_after_write"]},
+        "tool_calls": {"required": ["home_control"], "forbidden": []},
+        "verification": {"status": "verified"},
+        "response_facts": ["AI Sync Box strip", "Floor Lamp 2", "off"],
+        "forbidden_claims": ["couldn't find one controllable device matching all lights"],
+        "style": {"max_words": 30, "forbidden_phrases": []}
+      },
+      "tags": ["production_regressions", "telegram", "group", "device_control"],
+      "risk": "mutating"
+    },
+    {
+      "id": "production.telegram.both-devices-followup.v1",
+      "schema_version": "1.0",
+      "stage": "understanding",
+      "owning_module": "agent.kernel.dialogue_state",
+      "input_turns": [
+        {"role": "user", "text": "Turn off all lights"},
+        {"role": "assistant", "text": "AI Sync Box strip and Floor Lamp 2 are off."},
+        {"role": "user", "text": "Turn on both devices"}
+      ],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {"devices": [
+        {"id": "light.sync", "name": "AI Sync Box strip", "state": "off"},
+        {"id": "light.floor", "name": "Floor Lamp 2", "state": "off"}
+      ]},
+      "expected": {
+        "route": {"intent": "capability", "capability": "home_control"},
+        "entities": {"targets": ["AI Sync Box strip", "Floor Lamp 2"]},
+        "plan": {"required_constraints": ["resolve_plural_reference", "verify_after_write"]},
+        "tool_calls": {"required": ["home_control"], "forbidden": []},
+        "verification": {"status": "verified"},
+        "response_facts": ["AI Sync Box strip", "Floor Lamp 2", "on"],
+        "forbidden_claims": ["which devices"],
+        "style": {"max_words": 30, "forbidden_phrases": []}
+      },
+      "tags": ["production_regressions", "telegram", "followup", "device_control"],
+      "risk": "mutating"
+    },
+    {
+      "id": "production.telegram.nonexistent-device-correction.v1",
+      "schema_version": "1.0",
+      "stage": "memory",
+      "owning_module": "agent.kernel.dialogue_state",
+      "input_turns": [
+        {"role": "user", "text": "There is no device called DreamView"},
+        {"role": "assistant", "text": "Got it—I won't use that device name."},
+        {"role": "user", "text": "Turn it on"}
+      ],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {},
+      "expected": {
+        "route": {"intent": "clarification"},
+        "entities": {"targets": []},
+        "plan": {"required_constraints": ["honor_negative_correction"]},
+        "tool_calls": {"required": [], "forbidden": ["home_control"]},
+        "verification": {"status": "not_required"},
+        "response_facts": [],
+        "forbidden_claims": ["DreamView is on"],
+        "style": {"max_words": 24, "forbidden_phrases": []}
+      },
+      "tags": ["production_regressions", "telegram", "correction", "memory"],
+      "risk": "mutating"
+    },
+    {
+      "id": "production.telegram.health-format.v1",
+      "schema_version": "1.0",
+      "stage": "delivery",
+      "owning_module": "utils.formatting",
+      "input_turns": [{"role": "user", "text": "System health"}],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {"health": {"text": "ready", "vision": "ready", "transcription": "degraded", "speech": "ready", "database": "ready", "disk": "ready"}},
+      "expected": {
+        "route": {"intent": "capability", "capability": "system_health"},
+        "entities": {"targets": []},
+        "plan": {"required_constraints": ["clean_list"]},
+        "tool_calls": {"required": ["system_health"], "forbidden": []},
+        "verification": {"status": "not_required"},
+        "response_facts": ["Text", "Vision", "Transcription", "Speech", "Database", "Disk"],
+        "forbidden_claims": [],
+        "style": {"max_words": 80, "forbidden_phrases": ["text=ready", "vision=ready"]}
+      },
+      "tags": ["production_regressions", "telegram", "formatting", "health"],
+      "risk": "read_only"
+    },
+    {
+      "id": "production.telegram.already-off-natural.v1",
+      "schema_version": "1.0",
+      "stage": "response",
+      "owning_module": "agent.response_composer",
+      "input_turns": [{"role": "user", "text": "Turn off the floor lamp"}],
+      "owner_profile": {"id": "eval-owner", "connector": "telegram"},
+      "provider_fixture": {"devices": [{"id": "light.floor", "name": "Floor Lamp", "state": "off"}]},
+      "expected": {
+        "route": {"intent": "capability", "capability": "home_control"},
+        "entities": {"targets": ["Floor Lamp"]},
+        "plan": {"required_constraints": ["skip_redundant_write"]},
+        "tool_calls": {"required": [], "forbidden": ["home_assistant.turn_off"]},
+        "verification": {"status": "already_satisfied"},
+        "response_facts": ["Floor Lamp", "already", "off"],
+        "forbidden_claims": [],
+        "style": {"max_words": 16, "forbidden_phrases": ["at your service"]}
+      },
+      "tags": ["production_regressions", "telegram", "already_satisfied", "naturalness"],
+      "risk": "mutating"
+    }
+  ]
+}

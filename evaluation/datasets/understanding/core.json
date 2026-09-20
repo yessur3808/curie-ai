@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "understanding-core-1",
+  "description": "Routing, negatives, ambiguity, corrections, compounds, and follow-ups.",
+  "cases": [
+    {
+      "id": "understanding.device.turn-off.v1",
+      "schema_version": "1.0",
+      "stage": "understanding",
+      "owning_module": "agent.kernel.understanding",
+      "input_turns": [{"role": "user", "text": "Turn the floor lamp off"}],
+      "owner_profile": {"id": "eval-owner", "locale": "en"},
+      "provider_fixture": {"devices": [{"id": "light.floor", "name": "Floor Lamp", "state": "on"}]},
+      "expected": {
+        "route": {"intent": "capability", "capability": "home_control"},
+        "entities": {"targets": ["Floor Lamp"]},
+        "plan": {"required_constraints": ["verify_after_write"]},
+        "tool_calls": {"required": ["home_control"], "forbidden": []},
+        "verification": {"status": "verified"},
+        "response_facts": ["Floor Lamp", "off"],
+        "forbidden_claims": ["could not find a device"],
+        "style": {"max_words": 16, "forbidden_phrases": ["at your service"]}
+      },
+      "tags": ["understanding", "intent", "device_control"],
+      "risk": "mutating"
+    }
+  ]
+}

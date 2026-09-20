@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.09-phase9-comprehensive-evaluation
+
+- Added a versioned evaluation taxonomy and portable case contract spanning
+  understanding, conversation, devices, planning, memory, personality,
+  security, connectors, proactive behavior, and production regressions.
+- Added deterministic structured graders, human-calibrated subjective grading,
+  identical-condition model comparisons, provider simulations, latency
+  measurement, and privacy-safe actionable failure records.
+- Added nineteen fail-closed release gates with explicit metrics, datasets,
+  thresholds, component ownership, and controlled waiver requirements.
+- Added one complete offline command that runs tests, reports per-stage and
+  per-taxonomy metrics, and blocks a release when any required gate regresses.
+
 ## 2026.09-phase8-controlled-learning
 
 - Added five explicit learning levels from expiring session adaptation through

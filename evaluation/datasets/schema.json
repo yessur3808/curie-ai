@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curie://evaluation/dataset/1.0",
+  "title": "Curie evaluation dataset",
+  "type": "object",
+  "required": ["schema_version", "dataset_id", "cases"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "schema_version", "input_turns", "owner_profile", "provider_fixture", "expected", "tags", "risk"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)+\\.v[1-9][0-9]*$"},
+          "schema_version": {"const": "1.0"},
+          "input_turns": {"type": "array", "minItems": 1},
+          "owner_profile": {"type": "object"},
+          "provider_fixture": {"type": "object"},
+          "expected": {"type": "object"},
+          "tags": {"type": "array", "minItems": 1},
+          "risk": {"enum": ["none", "read_only", "mutating", "sensitive", "critical"]}
+        }
+      }
+    }
+  }
+}
