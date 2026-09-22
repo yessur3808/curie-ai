@@ -795,7 +795,7 @@ Missing specialist files fall back to the next available local model. At most
 | `LEARNING_CANARY_MIN_OBSERVATIONS` | `20` | Canary outcomes required before Level 3 promotion |
 | `CURIE_LOCAL_MEMORY_DB` | `.curie_memory.sqlite3` | Durable fallback when Mongo/Postgres are unset |
 | `CURIE_MEMORY_KERNEL` | `auto` | `auto` prefers the native Rust ranker, `rust` requires it, and `python` is the audited rollback |
-| `CURIE_MEDIA_TRANSPORT` | `auto` | `auto` prefers native bounded media transport, `rust` requires it, and `python` is the audited rollback |
+| `CURIE_MEDIA_TRANSPORT` | `rust` | `rust` requires native bounded media transport; `auto` is compatibility mode and `python` is the audited emergency rollback |
 | `CURIE_MEDIA_MAX_OUTPUT_BYTES` | `268435456` | Maximum combined or encoded media output size |
 | `MEMORY_RELEVANCE_MIN_SCORE` | `0.28` | Minimum hybrid relevance required before a memory enters the prompt |
 | `MEMORY_CONTEXT_CHAR_BUDGET` | `1600` | Maximum long-term-memory characters injected into one request |
