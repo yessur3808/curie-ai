@@ -800,6 +800,9 @@ Missing specialist files fall back to the next available local model. At most
 | `CURIE_CONNECTOR_GATEWAY` | `rust` | Require native connector queue admission, ordering, deadlines, cancellation, and retry policy |
 | `CONNECTOR_DELIVERY_CONCURRENCY` | `4` | Maximum simultaneous outbound sends per connector within the bounded queue |
 | `CURIE_DEVICE_RESOLVER` | `rust` | Require native device/entity normalization, grouping, ambiguity detection, and ranking |
+| `CURIE_TASK_ENGINE` | `rust` | Require native atomic task/idempotency transactions, leases, fencing, retries, and recovery |
+| `CURIE_TASK_LEASE_MS` | `30000` | Durable step lease duration; heartbeats renew long-running claims |
+| `CURIE_TASK_RETRY_BASE_MS` | `100` | Base persisted backoff for safe read-only task retries |
 | `MEMORY_RELEVANCE_MIN_SCORE` | `0.28` | Minimum hybrid relevance required before a memory enters the prompt |
 | `MEMORY_CONTEXT_CHAR_BUDGET` | `1600` | Maximum long-term-memory characters injected into one request |
 | `MEMORY_MAX_CANDIDATES` | `500` | Maximum owner-filtered records ranked during one recall |
@@ -840,6 +843,13 @@ over a credential-free inventory projection. Python still owns provider SDKs,
 authorization, persistence, actual delivery/control, and Curie's wording. See
 [Rust connector gateway](docs/RUST_CONNECTOR_GATEWAY.md) and
 [Rust device resolver](docs/RUST_DEVICE_RESOLVER.md).
+
+Durable multi-step work uses a fifth ABI3 Rust engine for atomic
+create-or-replay, dependency transitions, leases, fencing tokens, retries,
+cancellation, deadlines, and crash recovery. Python retains planning,
+permissions, approvals, tool execution, verification, compensation, and
+Curie's response style. Build it with `make task-engine`; see
+[Rust durable task engine](docs/RUST_TASK_ENGINE.md).
 
 Inferred adaptations do not change live behavior directly. They become
 owner-scoped candidates, pass offline and adversarial evaluation, run in shadow

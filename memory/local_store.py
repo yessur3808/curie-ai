@@ -155,6 +155,12 @@ def _managed_connection():
         connection.close()
 
 
+def initialize_durable_task_store() -> None:
+    """Apply task-store migrations before a native engine opens SQLite."""
+    with _LOCK, _managed_connection():
+        pass
+
+
 def save_personal_item(internal_id: str, kind: str, document: dict) -> dict:
     item = dict(document)
     source_id = str(item.get("id") or uuid.uuid4().hex)

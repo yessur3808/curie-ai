@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
-import json
 from typing import Any, Mapping
+
+from agent import task_engine
 
 
 def stable_idempotency_key(
@@ -23,9 +23,7 @@ def stable_idempotency_key(
         "target": target,
         "desired_state": desired_state,
     }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
-    ).hexdigest()
+    return task_engine.stable_key(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,28 +42,34 @@ def decide_retry(
     idempotency_mode: str,
     cancellation_requested: bool = False,
 ) -> RetryDecision:
-    if cancellation_requested:
-        return RetryDecision(False, "user_cancelled")
-    if attempt >= max_attempts:
-        return RetryDecision(False, "attempt_limit")
-    if isinstance(error, (ValueError, PermissionError, LookupError)):
-        return RetryDecision(False, "non_retryable_input_or_policy")
-    retryable = bool(getattr(error, "retryable", False)) or isinstance(
-        error, (TimeoutError, ConnectionError)
-    )
-    if not retryable:
-        return RetryDecision(False, "error_not_transient")
-    if not read_only and idempotency_mode not in {
-        "state_reconciled",
-        "provider_key",
-    }:
-        return RetryDecision(False, "mutation_not_safely_idempotent")
+    if isinstance(error, ValueError):
+        error_kind = "value"
+    elif isinstance(error, PermissionError):
+        error_kind = "permission"
+    elif isinstance(error, LookupError):
+        error_kind = "lookup"
+    elif isinstance(error, TimeoutError):
+        error_kind = "timeout"
+    elif isinstance(error, ConnectionError):
+        error_kind = "connection"
+    else:
+        error_kind = "other"
     retry_after = getattr(error, "retry_after", 0.0)
     try:
-        delay = min(max(float(retry_after), 0.0), 5.0)
+        retry_after_ms = round(float(retry_after) * 1000)
     except (TypeError, ValueError):
-        delay = 0.0
-    return RetryDecision(True, "transient_safe_retry", delay)
+        retry_after_ms = 0
+    retry, reason, delay_ms = task_engine.retry_decision(
+        attempt=attempt,
+        max_attempts=max_attempts,
+        read_only=read_only,
+        idempotency_mode=idempotency_mode,
+        error_kind=error_kind,
+        explicit_retryable=bool(getattr(error, "retryable", False)),
+        retry_after_ms=retry_after_ms,
+        cancellation_requested=cancellation_requested,
+    )
+    return RetryDecision(retry, reason, delay_ms / 1000)
 
 
 @dataclass(frozen=True, slots=True)

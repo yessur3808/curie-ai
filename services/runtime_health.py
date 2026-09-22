@@ -41,6 +41,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
     from llm.inference_service import get_inference_service
     from agent.kernel.feature_flags import PipelineFeatureFlags
     from agent.slo import slo_metrics
+    from agent.task_engine import task_engine_status
     from agent.understanding.entities import device_resolver_status
     from connectors.delivery_gateway import connector_gateway_status
     from memory import memory_kernel_status
@@ -79,6 +80,10 @@ def capability_health(workflow_ready: bool = True) -> dict:
     device_resolver = device_resolver_status()
     device_resolver["ready"] = not (
         device_resolver["mode"] == "rust" and device_resolver["active"] != "rust"
+    )
+    task_engine = task_engine_status()
+    task_engine["ready"] = not (
+        task_engine["mode"] == "rust" and task_engine["active"] != "rust"
     )
     database = _database_health()
     disk = shutil.disk_usage(Path.cwd())
@@ -123,6 +128,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         "memory_kernel": memory_kernel,
         "connector_gateway": connector_gateway,
         "device_resolver": device_resolver,
+        "task_engine": task_engine,
         "database": database,
         "disk": disk_health,
         "security": security_status(),
@@ -139,6 +145,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         memory_kernel["ready"],
         connector_gateway["ready"],
         device_resolver["ready"],
+        task_engine["ready"],
         not backpressure["saturated"],
     )
     return {
@@ -162,6 +169,7 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         "memory_kernel",
         "connector_gateway",
         "device_resolver",
+        "task_engine",
         "database",
         "disk",
     ):

@@ -187,9 +187,15 @@ fuzz safety than for server cost and should not displace the first three items.
 
 ## Priority 5: durable task and idempotency engine
 
+**Implemented in September 2026.** The ABI3 engine now owns atomic
+create-or-replay, dependency reconciliation, expiring claims, fencing tokens,
+heartbeats, retry schedules, cancellation, deadlines, and per-step result
+commits while preserving the existing task document format. See
+[Rust durable task and idempotency engine](RUST_TASK_ENGINE.md).
+
 ### Scope
 
-Consider a Rust service for persistent schedules, dependency transitions,
+Use the Rust extension for persistent schedules, dependency transitions,
 leases, retries, cancellation, idempotency receipts, and crash recovery. Keep
 natural-language planning and capability selection in Python.
 

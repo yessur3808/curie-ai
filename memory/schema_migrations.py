@@ -120,6 +120,24 @@ MIGRATIONS = (
             "DROP TABLE IF EXISTS learning_events",
         ),
     ),
+    Migration(
+        6,
+        "durable_task_leases",
+        (
+            "CREATE TABLE IF NOT EXISTS durable_task_leases ("
+            "task_id TEXT NOT NULL, step_id TEXT NOT NULL, "
+            "lease_token INTEGER NOT NULL, worker_id TEXT NOT NULL, "
+            "lease_expires_at_ms INTEGER NOT NULL, "
+            "active INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL, "
+            "PRIMARY KEY(task_id, step_id))",
+            "CREATE INDEX IF NOT EXISTS idx_durable_task_leases_active "
+            "ON durable_task_leases(active, lease_expires_at_ms)",
+        ),
+        (
+            "DROP INDEX IF EXISTS idx_durable_task_leases_active",
+            "DROP TABLE IF EXISTS durable_task_leases",
+        ),
+    ),
 )
 
 

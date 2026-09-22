@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-import hashlib
 import json
+import os
 import re
 from typing import Any, Awaitable, Callable
 import uuid
 
+from agent import task_engine
 from agent.tooling import ToolContext, ToolResult, get_runtime_registry
 
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
@@ -46,6 +48,8 @@ def _store(document: dict) -> None:
 
 
 def _load(owner_id: str, task_id: str) -> dict:
+    if task_engine.use_native():
+        return task_engine.load(owner_id, task_id)
     from memory.local_store import get_durable_task
 
     task = get_durable_task(owner_id, task_id)
@@ -55,12 +59,7 @@ def _load(owner_id: str, task_id: str) -> dict:
 
 
 def _validate_graph(steps: list[dict]) -> None:
-    if not steps:
-        raise ValueError("A durable task requires at least one step")
-    ids = [str(step.get("id", "")) for step in steps]
-    if any(not item for item in ids) or len(ids) != len(set(ids)):
-        raise ValueError("Task step IDs must be non-empty and unique")
-    known = set(ids)
+    task_engine.validate_task_graph(steps)
     registry = get_runtime_registry()
     for step in steps:
         if set(step) - {
@@ -74,9 +73,6 @@ def _validate_graph(steps: list[dict]) -> None:
         }:
             raise ValueError(f"Task step {step['id']} has unsupported fields")
         capability = registry.get(str(step.get("capability", "")))
-        dependencies = set(step.get("depends_on", []))
-        if not dependencies <= known or step["id"] in dependencies:
-            raise ValueError(f"Task step {step['id']} has invalid dependencies")
         attempts = int(step.get("max_attempts", 1))
         if not 1 <= attempts <= 5:
             raise ValueError("Step max_attempts must be between 1 and 5")
@@ -88,22 +84,6 @@ def _validate_graph(steps: list[dict]) -> None:
             verifier = registry.get(str(verification.get("capability", "")))
             if verifier.risk != "read_only":
                 raise ValueError("Verification capabilities must be read-only")
-    visiting, visited = set(), set()
-    graph = {step["id"]: set(step.get("depends_on", [])) for step in steps}
-
-    def visit(node: str) -> None:
-        if node in visiting:
-            raise ValueError("Task dependency graph contains a cycle")
-        if node in visited:
-            return
-        visiting.add(node)
-        for dependency in graph[node]:
-            visit(dependency)
-        visiting.remove(node)
-        visited.add(node)
-
-    for step_id in ids:
-        visit(step_id)
 
 
 def create_task(
@@ -118,24 +98,17 @@ def create_task(
     """Persist an immutable task graph or return the existing idempotent task."""
     if not owner_id or not idempotency_key.strip():
         raise ValueError("Owner and idempotency_key are required")
-    from memory.local_store import get_durable_task_by_key
-
     granted_permissions = sorted(str(item) for item in permissions)
     task_spec = {
         "steps": steps,
         "completion_criteria": list(completion_criteria or []),
         "permissions": granted_permissions,
     }
-    graph_hash = hashlib.sha256(
-        json.dumps(task_spec, sort_keys=True, default=str).encode()
-    ).hexdigest()
-    existing = get_durable_task_by_key(str(owner_id), idempotency_key)
-    if existing:
-        if existing.get("graph_hash") != graph_hash:
-            raise ValueError(
-                "Idempotency key is already bound to a different task graph"
-            )
-        return existing
+    # Preserve the original serialized form so existing task keys remain
+    # compatible across the engine migration.
+    graph_hash = task_engine.hash_text(
+        json.dumps(task_spec, sort_keys=True, default=str)
+    )
     _validate_graph(steps)
     for step in steps:
         definition = get_runtime_registry().get(str(step["capability"]))
@@ -151,6 +124,7 @@ def create_task(
         raise ValueError("Task deadline must be in the future")
     normalized = []
     for source in steps:
+        definition = get_runtime_registry().get(str(source["capability"]))
         step = {
             "id": str(source["id"]),
             "capability": str(source["capability"]),
@@ -159,6 +133,7 @@ def create_task(
             "max_attempts": int(source.get("max_attempts", 1)),
             "completion_criteria": list(source.get("completion_criteria", [])),
             "verification_steps": list(source.get("verification_steps", [])),
+            "risk": definition.risk,
             "status": "pending",
             "attempts": 0,
             "result": None,
@@ -179,13 +154,14 @@ def create_task(
         "created_at": now,
         "updated_at": now,
         "deadline": deadline,
+        "deadline_epoch_ms": int(deadline.timestamp() * 1000),
         "cancel_requested": False,
         "waiting_step_id": None,
         "approval_token": None,
         "audit": [],
+        "revision": 1,
     }
-    _store(document)
-    return document
+    return task_engine.create_or_get(document)[0]
 
 
 class DurableTaskRuntime:
@@ -193,6 +169,10 @@ class DurableTaskRuntime:
         self._global = asyncio.Semaphore(max(1, global_read_limit))
         self._per_user_limit = max(1, per_user_read_limit)
         self._users: dict[str, asyncio.Semaphore] = {}
+        self._worker_id = uuid.uuid4().hex
+        self._lease_ms = max(
+            1_000, min(300_000, int(os.getenv("CURIE_TASK_LEASE_MS", "30000")))
+        )
 
     @staticmethod
     def interrupted_step_action(risk: str) -> str:
@@ -421,6 +401,243 @@ class DurableTaskRuntime:
             "data": dict(result.data),
         }
 
+    async def _lease_heartbeat(
+        self,
+        owner_id: str,
+        task_id: str,
+        step_id: str,
+        lease_token: int,
+    ) -> None:
+        interval = max(0.5, self._lease_ms / 3000)
+        while True:
+            await asyncio.sleep(interval)
+            await asyncio.to_thread(
+                task_engine.heartbeat,
+                owner_id,
+                task_id,
+                step_id,
+                worker_id=self._worker_id,
+                lease_token=lease_token,
+                lease_ms=self._lease_ms,
+            )
+
+    async def _run_native_step(
+        self,
+        owner_id: str,
+        task_id: str,
+        step_id: str,
+        profile: dict,
+        *,
+        approved: bool = False,
+    ) -> dict:
+        task = task_engine.load(owner_id, task_id)
+        source = next(item for item in task["steps"] if item["id"] == step_id)
+        definition = get_runtime_registry().get(source["capability"])
+        claim = task_engine.claim(
+            owner_id,
+            task_id,
+            step_id,
+            worker_id=self._worker_id,
+            risk=definition.risk,
+            approved=approved,
+            lease_ms=self._lease_ms,
+        )
+        if claim["outcome"] not in {"claimed_execute", "claimed_reconcile"}:
+            return claim["task"]
+        lease_token = int(claim["lease_token"])
+        step = claim["step"]
+        heartbeat = asyncio.create_task(
+            self._lease_heartbeat(owner_id, task_id, step_id, lease_token)
+        )
+        try:
+            if claim["outcome"] == "claimed_reconcile":
+                evidence = []
+                for check in step["verification_steps"]:
+                    checked = await self._execute_capability(
+                        owner_id,
+                        check["capability"],
+                        dict(check.get("params", {})),
+                        profile,
+                        frozenset(task.get("permissions", ())),
+                        approved=False,
+                    )
+                    self._verify_text(
+                        check.get("completion_criteria", []), checked.text
+                    )
+                    evidence.append(self._evidence(checked))
+                return task_engine.complete(
+                    owner_id,
+                    task_id,
+                    step_id,
+                    worker_id=self._worker_id,
+                    lease_token=lease_token,
+                    result_text="Interrupted mutation reconciled by verification.",
+                    evidence=evidence,
+                    recovered=True,
+                )
+
+            async def execute():
+                return await self._execute_capability(
+                    owner_id,
+                    step["capability"],
+                    step["params"],
+                    profile,
+                    frozenset(task.get("permissions", ())),
+                    approved=definition.risk == "mutating",
+                )
+
+            if definition.risk == "read_only":
+                user_slot = self._users.setdefault(
+                    owner_id, asyncio.Semaphore(self._per_user_limit)
+                )
+                async with self._global, user_slot:
+                    result = await execute()
+            else:
+                result = await execute()
+            self._verify_result(step, result)
+            verification = []
+            for check in step["verification_steps"]:
+                checked = await self._execute_capability(
+                    owner_id,
+                    check["capability"],
+                    dict(check.get("params", {})),
+                    profile,
+                    frozenset(task.get("permissions", ())),
+                    approved=False,
+                )
+                self._verify_text(check.get("completion_criteria", []), checked.text)
+                verification.append(self._evidence(checked))
+            return task_engine.complete(
+                owner_id,
+                task_id,
+                step_id,
+                worker_id=self._worker_id,
+                lease_token=lease_token,
+                result_text=result.text,
+                evidence=[self._evidence(result), *verification],
+            )
+        except Exception as exc:
+            attempt = int(step.get("attempts", 1))
+            base_delay = max(
+                0, min(30_000, int(os.getenv("CURIE_TASK_RETRY_BASE_MS", "100")))
+            )
+            delay = min(300_000, base_delay * (2 ** max(0, attempt - 1)))
+            try:
+                return task_engine.fail(
+                    owner_id,
+                    task_id,
+                    step_id,
+                    worker_id=self._worker_id,
+                    lease_token=lease_token,
+                    error=str(exc),
+                    retry_allowed=definition.risk == "read_only",
+                    retry_delay_ms=delay,
+                )
+            except PermissionError:
+                return task_engine.load(owner_id, task_id)
+        finally:
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await heartbeat
+
+    async def _run_native(
+        self,
+        owner_id: str,
+        task_id: str,
+        *,
+        profile: dict,
+        progress: ProgressCallback | None,
+    ) -> dict:
+        initial = task_engine.load(owner_id, task_id)
+        if initial["status"] in _TERMINAL or initial["status"] == "waiting_approval":
+            return initial
+        await self._progress(progress, initial, "Task resumed.")
+        while True:
+            state = task_engine.reconcile(owner_id, task_id)
+            task = state["task"]
+            if state["outcome"] in {"terminal", "waiting_approval"}:
+                return task
+            if state["outcome"] == "ready_to_finalize":
+                combined = "\n".join(
+                    str(step.get("result") or "") for step in task["steps"]
+                )
+                try:
+                    self._verify_text(task["completion_criteria"], combined)
+                except ValueError as exc:
+                    return task_engine.finalize(
+                        owner_id, task_id, success=False, error=str(exc)
+                    )
+                task = task_engine.finalize(owner_id, task_id, success=True, error=None)
+                await self._progress(progress, task, "Task completed and verified.")
+                return task
+            ready_ids = list(state.get("ready_step_ids", []))
+            if not ready_ids:
+                running_ids = [
+                    step["id"]
+                    for step in task["steps"]
+                    if step.get("status") == "running"
+                ]
+                if running_ids:
+                    await asyncio.gather(
+                        *(
+                            self._run_native_step(
+                                owner_id, task_id, step_id, profile, approved=False
+                            )
+                            for step_id in running_ids
+                        )
+                    )
+                    refreshed = task_engine.load(owner_id, task_id)
+                    if all(
+                        step.get("status") == "running"
+                        for step in refreshed["steps"]
+                        if step["id"] in running_ids
+                    ):
+                        return refreshed
+                    continue
+                deferred_ms = state.get("deferred_ms")
+                if deferred_ms is not None:
+                    await asyncio.sleep(min(max(int(deferred_ms), 1) / 1000, 1.0))
+                    continue
+                return task
+            pending = [
+                next(step for step in task["steps"] if step["id"] == step_id)
+                for step_id in ready_ids
+            ]
+            mutating = next(
+                (
+                    step
+                    for step in pending
+                    if get_runtime_registry().get(step["capability"]).risk == "mutating"
+                ),
+                None,
+            )
+            if mutating:
+                from memory.repositories import get_repositories
+
+                token = get_repositories().approvals.create(
+                    owner_id,
+                    {
+                        "action": "durable_task_step",
+                        "task_id": task_id,
+                        "step_id": mutating["id"],
+                    },
+                )
+                task = task_engine.wait_for_approval(
+                    owner_id, task_id, mutating["id"], token
+                )
+                await self._progress(
+                    progress, task, f"Approval required for step {mutating['id']}."
+                )
+                return task
+            await asyncio.gather(
+                *(
+                    self._run_native_step(
+                        owner_id, task_id, step_id, profile, approved=False
+                    )
+                    for step_id in ready_ids
+                )
+            )
+
     async def run(
         self,
         owner_id: str,
@@ -429,6 +646,13 @@ class DurableTaskRuntime:
         profile: dict | None = None,
         progress: ProgressCallback | None = None,
     ) -> dict:
+        if task_engine.use_native():
+            return await self._run_native(
+                str(owner_id),
+                task_id,
+                profile=profile or {},
+                progress=progress,
+            )
         task = _load(str(owner_id), task_id)
         if task["status"] in _TERMINAL:
             return task
@@ -538,6 +762,41 @@ class DurableTaskRuntime:
         profile: dict | None = None,
         progress: ProgressCallback | None = None,
     ) -> dict:
+        if task_engine.use_native():
+            try:
+                task = task_engine.load(owner_id, task_id)
+            except KeyError as exc:
+                raise PermissionError(
+                    "Task approval is invalid or belongs to another user"
+                ) from exc
+            if task["status"] != "waiting_approval" or token != task.get(
+                "approval_token"
+            ):
+                raise PermissionError("Task is not waiting for this approval token")
+            from memory.repositories import get_repositories
+
+            approval = get_repositories().approvals.consume(owner_id, token, True)
+            if (
+                not approval
+                or approval.get("task_id") != task_id
+                or approval.get("step_id") != task["waiting_step_id"]
+            ):
+                raise PermissionError(
+                    "Approval is invalid, expired, consumed, or belongs to another user"
+                )
+            await self._run_native_step(
+                owner_id,
+                task_id,
+                task["waiting_step_id"],
+                profile or {},
+                approved=True,
+            )
+            return await self._run_native(
+                owner_id,
+                task_id,
+                profile=profile or {},
+                progress=progress,
+            )
         try:
             task = _load(owner_id, task_id)
         except KeyError as exc:
@@ -567,6 +826,8 @@ class DurableTaskRuntime:
         return await self.run(owner_id, task_id, profile=profile, progress=progress)
 
     def cancel(self, owner_id: str, task_id: str) -> dict:
+        if task_engine.use_native():
+            return task_engine.cancel(owner_id, task_id)
         task = _load(owner_id, task_id)
         if task["status"] not in _TERMINAL:
             task["cancel_requested"] = True
@@ -575,7 +836,7 @@ class DurableTaskRuntime:
         return task
 
     def inspect(self, owner_id: str, task_id: str) -> dict:
-        return _load(owner_id, task_id)
+        return task_engine.load(owner_id, task_id)
 
 
 _runtime: DurableTaskRuntime | None = None
@@ -598,9 +859,7 @@ async def handle_task_command(
 ) -> str | None:
     """Inspect, cancel, resume, or approve an owner-scoped durable task."""
     if _LIST_COMMAND.fullmatch(text.strip()):
-        from memory.local_store import list_durable_tasks
-
-        tasks = list_durable_tasks(str(owner_id))[-10:]
+        tasks = task_engine.list_owned(str(owner_id), limit=10)
         if not tasks:
             return "You have no retained tasks."
         return "Recent tasks:\n" + "\n".join(

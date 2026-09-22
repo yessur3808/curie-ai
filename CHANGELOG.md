@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.09-rust-durable-task-engine
+
+- Replaced Curie's durable task coordination and deterministic idempotency hot
+  path with a PyO3 ABI3 Rust engine using atomic SQLite transactions.
+- Added owner-scoped atomic create-or-replay, graph validation, dependency
+  reconciliation, expiring leases, heartbeats, monotonic fencing tokens,
+  persisted retry timing, cancellation, deadline handling, and finalization.
+- Prevented lost parallel-step updates and rejected stale worker results while
+  ensuring interrupted mutations are verified rather than replayed.
+- Preserved Python ownership of planning, permissions, approvals, capability
+  execution, verification policy, compensation, audit presentation, and Curie's
+  responses; retained the compatible Python rollback path.
+- Added strict readiness, content-free metrics, schema migration 6, native
+  concurrency/recovery/security tests, a benchmark, Rust audit, and blocking CI.
+
 ## 2026.09-rust-connector-device-kernels
 
 - Replaced Curie's shared connector queue admission, priority/FIFO ordering,

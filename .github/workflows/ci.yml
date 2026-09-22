@@ -212,6 +212,45 @@ jobs:
           python -m scripts.benchmark_device_resolver
           --devices 250 --iterations 2 --mode rust
 
+  rust-task-engine:
+    name: Rust durable task engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python and native build dependencies
+        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+      - name: Check Rust formatting, lints, and unit tests
+        run: |
+          cargo fmt --manifest-path native/task_engine/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path native/task_engine/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path native/task_engine/Cargo.toml
+      - name: Build and install the ABI3 extension
+        run: |
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/task_engine/Cargo.toml
+          pip install dist/native/curie_task_engine-*.whl
+      - name: Require native atomicity, leases, fencing, recovery, and integration
+        env:
+          CURIE_TASK_ENGINE: rust
+        run: >-
+          pytest -q tests/test_task_engine_native.py
+          tests/test_task_runtime.py
+          tests/test_planning_execution.py
+          tests/test_phase10_extensibility.py
+      - name: Run bounded native benchmark smoke test
+        env:
+          CURIE_TASK_ENGINE: rust
+        run: >-
+          python -m scripts.benchmark_task_engine
+          --iterations 100 --mode rust
+
   unit-tests:
     name: Offline unit tests
     runs-on: ubuntu-latest
@@ -240,6 +279,7 @@ jobs:
           # this lane deterministic and exercise the audited rollback paths.
           CURIE_CONNECTOR_GATEWAY: python
           CURIE_DEVICE_RESOLVER: python
+          CURIE_TASK_ENGINE: python
         run: pytest -q
 
   integration-tests:
@@ -309,6 +349,7 @@ jobs:
           cargo audit --file native/media_transport/Cargo.lock
           cargo audit --file native/connector_gateway/Cargo.lock
           cargo audit --file native/device_resolver/Cargo.lock
+          cargo audit --file native/task_engine/Cargo.lock
       - name: Scan Python for high-severity findings
         run: >-
           bandit -q -r agent connectors evaluation llm memory scripts services utils
@@ -374,6 +415,7 @@ jobs:
       - rust-media-transport
       - rust-connector-gateway
       - rust-device-resolver
+      - rust-task-engine
       - unit-tests
       - integration-tests
       - security-tests
@@ -391,6 +433,7 @@ jobs:
           RUST_MEDIA_TRANSPORT: ${{ needs.rust-media-transport.result }}
           RUST_CONNECTOR_GATEWAY: ${{ needs.rust-connector-gateway.result }}
           RUST_DEVICE_RESOLVER: ${{ needs.rust-device-resolver.result }}
+          RUST_TASK_ENGINE: ${{ needs.rust-task-engine.result }}
           UNIT_TESTS: ${{ needs.unit-tests.result }}
           INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
           SECURITY_TESTS: ${{ needs.security-tests.result }}
@@ -405,6 +448,7 @@ jobs:
             "$RUST_MEDIA_TRANSPORT" \
             "$RUST_CONNECTOR_GATEWAY" \
             "$RUST_DEVICE_RESOLVER" \
+            "$RUST_TASK_ENGINE" \
             "$UNIT_TESTS" \
             "$INTEGRATION_TESTS" \
             "$SECURITY_TESTS" \
