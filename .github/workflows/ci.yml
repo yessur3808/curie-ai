@@ -235,6 +235,11 @@ jobs:
         run: pip install -r requirements-ci.txt
 
       - name: Run the deterministic offline suite in one process
+        env:
+          # Native behavior is covered by dedicated blocking Rust jobs. Keep
+          # this lane deterministic and exercise the audited rollback paths.
+          CURIE_CONNECTOR_GATEWAY: python
+          CURIE_DEVICE_RESOLVER: python
         run: pytest -q
 
   integration-tests:
