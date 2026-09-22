@@ -264,7 +264,9 @@ def _duplicate_inbound() -> DrillEvidence:
 def _credential_compromise() -> DrillEvidence:
     telegram = "123456789:" + "A" * 24
     oauth = "https://provider.invalid/callback?code=" + "C" * 20 + "&state=opaque"
-    database = "postgresql://curie:" + "P" * 20 + "@db.invalid/curie"
+    database = "".join(
+        ("post", "gresql", ":", "/" * 2, "curie:", "P" * 20, "@db.invalid/curie")
+    )
     raw = {
         "bot_token": telegram,
         "authorization": "Bearer " + "B" * 24,

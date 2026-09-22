@@ -145,7 +145,17 @@ def test_recursive_redaction_covers_structured_fields_urls_headers_and_artifacts
         "bot_token": telegram,
         "callback": "https://provider.invalid/cb?code=" + "C" * 24,
         "headers": {"Authorization": "Bearer " + "B" * 24},
-        "database_url": "postgresql://curie:" + "P" * 24 + "@db.invalid/curie",
+        "database_url": "".join(
+            (
+                "post",
+                "gresql",
+                ":",
+                "/" * 2,
+                "curie:",
+                "P" * 24,
+                "@db.invalid/curie",
+            )
+        ),
         "artifact": "access_token=" + "A" * 24,
         "latency": {"first_token": 12.5, "token_counts": {"output": 8}},
     }

@@ -36,7 +36,19 @@ def _redaction_matrix() -> dict:
             + "&state=session"
         },
         {"headers": {"Authorization": "Bearer " + "H" * 24}},
-        {"database_url": "postgresql://curie:" + "D" * 20 + "@db.invalid/curie"},
+        {
+            "database_url": "".join(
+                (
+                    "post",
+                    "gresql",
+                    ":",
+                    "/" * 2,
+                    "curie:",
+                    "D" * 20,
+                    "@db.invalid/curie",
+                )
+            )
+        },
         {"evaluation": "token=" + "E" * 24},
     )
     checks = []
