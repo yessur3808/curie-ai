@@ -17,9 +17,9 @@ from evaluation.phase345_suite import run as run_phase345
 from evaluation.phase67_suite import run as run_phase67
 from evaluation.phase8_suite import run as run_phase8
 from evaluation.phase10_hardening_suite import run as run_phase10
+from evaluation.phase11_stabilization_suite import run as run_phase11
 from evaluation.tool_provider_simulator import ProviderMode, run_provider_matrix
 from utils.formatting import telegram_html
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -266,6 +266,18 @@ def run(root: str | Path = ROOT) -> dict:
         ),
         **phase10["metrics"],
     }
+    phase11 = run_phase11(
+        metrics,
+        phase345=phase345,
+        phase67=phase67,
+        phase8=phase8,
+        simulator=simulator,
+        connector=connector,
+    )
+    phase_checks.extend(phase11["checks"].values())
+    metrics.update(phase11["metrics"])
+    metrics["task_success_rate"] = _ratio(sum(phase_checks), len(phase_checks))
+    metrics["correctness_pass_rate"] = metrics["task_success_rate"]
     return {
         "schema_version": 1,
         "metrics": metrics,
@@ -282,11 +294,12 @@ def run(root: str | Path = ROOT) -> dict:
             "connector_end_to_end": connector_e2e,
             "latency": latency,
             "operational_hardening": phase10,
+            "rollout_stabilization": phase11,
         },
         "per_taxonomy": catalog["taxonomy_counts"],
         "catalog": catalog,
         "checks": {
-            "all_metrics_present": len(metrics) == 24,
+            "all_metrics_present": len(metrics) == 32,
             "catalog_has_all_taxonomies": all(
                 catalog["taxonomy_counts"].get(name, 0) > 0
                 for name in (

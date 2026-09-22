@@ -8,8 +8,9 @@ python -m evaluation.release
 ```
 
 This command runs the offline tests, the phase suites, provider simulations,
-catalog validation, latency sampling, Phase 10 recovery drills, artifact
-redaction checks, and every blocking gate. It writes a
+catalog validation, latency sampling, Phase 10 recovery drills, Phase 11
+rollout/rollback and 9/10 scorecard evidence, artifact redaction checks, and
+every blocking gate. It writes a
 privacy-safe report to `evaluation/reports/latest.json` and exits non-zero when
 the release is blocked.
 

@@ -13,8 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from utils.redaction import secret_markers
-
+from utils.redaction import secret_markers  # noqa: E402 - repository path bootstrap
 
 _SUFFIXES = {".json", ".jsonl", ".log", ".txt"}
 

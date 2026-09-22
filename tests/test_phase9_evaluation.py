@@ -82,7 +82,7 @@ def test_subjective_grader_requires_human_calibration_and_cannot_gate_security()
 
 def test_release_gate_configuration_is_complete_and_missing_metrics_fail_closed():
     config = load_gate_config(ROOT / "evaluation/release_gates.json")
-    assert len(config["gates"]) == 24
+    assert len(config["gates"]) == 32
     assert all(gate["blocking"] for gate in config["gates"].values())
     results = evaluate_gates(config, {})
     assert release_blocked(results)
@@ -137,8 +137,8 @@ def test_complete_offline_release_report_has_stage_taxonomy_and_blocking_gates()
     assert report["tests"]["status"] == "skipped"
     assert report["tests"]["passed"] is None
     assert report["summary"] == {
-        "gate_count": 24,
-        "passed": 24,
+        "gate_count": 32,
+        "passed": 32,
         "waived": 0,
         "blocking_failures": 0,
     }
@@ -148,6 +148,7 @@ def test_complete_offline_release_report_has_stage_taxonomy_and_blocking_gates()
         "tool_simulation",
         "delivery",
         "connector_end_to_end",
+        "rollout_stabilization",
     }
     assert report["per_taxonomy"]["production_regressions"] >= 9
     assert report["failures"] == []

@@ -1,6 +1,7 @@
 # Phase 1 contract audit and turn-kernel architecture
 
-Status: implemented behind feature flags; the default remains `legacy`.
+Status: implemented and default-active after Phase 11 stabilization. The
+temporary legacy path is an owned, dated circuit-breaker until 2026-10-22.
 
 This document records the Phase 1 boundary decisions for Curie's typed turn
 kernel. It is intentionally narrower than the long-term architecture plan: the
@@ -123,15 +124,19 @@ can be removed.
 
 Environment variables:
 
+- `CURIE_TURN_PIPELINE_STAGE=offline|shadow|conversation_canary|smart_home_canary|connector_expansion|default_active|legacy_removed`
 - `CURIE_TURN_PIPELINE_MODE=legacy|shadow|active`
 - `CURIE_TURN_PIPELINE_ACTIVE_OWNERS=owner-a,owner-b`
 - `CURIE_TURN_PIPELINE_SHADOW_OWNERS=owner-c`
 - `CURIE_TURN_PIPELINE_ACTIVE_CONNECTORS=api`
 - `CURIE_TURN_PIPELINE_SHADOW_CONNECTORS=telegram`
+- `CURIE_TURN_PIPELINE_DEVICE_CANARY=Floor Lamp`
+- `CURIE_PIPELINE_ROLLOUT_STATE=~/.curie/pipeline-rollout.json`
 
-Owner rules take precedence over connector rules, and an explicit internal
-`_pipeline_mode` is reserved for controlled tests and canaries. The default is
-`legacy`, making rollback an environment change plus restart.
+Shadow holds take precedence over active rollout. An explicit internal
+`_pipeline_mode` requires an authorization marker and is reserved for tests and
+operator controls. The default is `active`; the atomic runtime circuit breaker
+changes subsequent turns to legacy without a restart.
 
 Shadow mode runs the legacy path once and keeps its response authoritative. The
 typed pipeline reuses that execution result and therefore does not repeat model
@@ -158,6 +163,8 @@ origin, and every active pipeline result includes the redacted stage trace.
   is reported.
 - Architecture direction: all six import gates pass.
 
-The default remains legacy until shadow evidence for an opted-in owner is
-reviewed. Phase 1 establishes the safe structure; it does not claim that the
-legacy core has already been fully decomposed.
+The typed pipeline is now the default. The legacy path has an explicit owner,
+rollback revision, and removal deadline; `legacy_removed` rejects even an
+authorized per-turn legacy override. Production observations must still
+replace the scorecard's explicitly labeled offline proxies before final legacy
+removal.

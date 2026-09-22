@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "bb258494",
+  "candidate": "2026.09-phase11-rollout-stabilization",
+  "expected_regressions": [],
+  "required_suites": [
+    "evaluation.release",
+    "evaluation.phase11_stabilization_suite"
+  ],
+  "required_gates": {
+    "rollout_stage_coverage": 1.0,
+    "rollback_trigger_coverage": 1.0,
+    "shadow_side_effect_safety": 1.0,
+    "smart_home_canary_safety": 1.0,
+    "operational_rollback_tested": 1.0,
+    "legacy_retention_completeness": 1.0,
+    "scorecard_measurement_coverage": 1.0,
+    "scorecard_pass_rate": 0.9,
+    "correctness_pass_rate": 1.0,
+    "security_pass_rate": 1.0
+  },
+  "new_coverage": [
+    "seven-stage rollout selection",
+    "owner and reversible-device canaries",
+    "nine automatic rollback triggers",
+    "atomic no-redeploy circuit breaker",
+    "fail-closed corrupted rollout state",
+    "legacy ownership and removal deadline",
+    "complete 9/10 scorecard measurement registry",
+    "aggregate CI release readiness"
+  ]
+}

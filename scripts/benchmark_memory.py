@@ -13,7 +13,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if (PROJECT_ROOT / "memory").is_dir():
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from memory.hierarchy import clear_retrieval_cache, rank_memories, retrieval_metrics
+from memory.hierarchy import (  # noqa: E402 - repository path bootstrap
+    clear_retrieval_cache,
+    rank_memories,
+    retrieval_metrics,
+)
 
 
 def document(index: int, key: str, value: str, kind: str = "biography") -> dict:

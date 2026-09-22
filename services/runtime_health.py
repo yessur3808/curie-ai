@@ -39,6 +39,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
     """Return truthful, independently actionable capability readiness."""
     from llm import manager
     from llm.inference_service import get_inference_service
+    from agent.kernel.feature_flags import PipelineFeatureFlags
     from agent.slo import slo_metrics
     from services.backpressure import runtime_backpressure
     from services.media_ingestion import media_backpressure_snapshot
@@ -104,6 +105,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         "inference": inference,
         "backpressure": backpressure,
         "slos": slo_metrics.snapshot(),
+        "pipeline_rollout": PipelineFeatureFlags.from_env().status(),
     }
     required = (
         capabilities["text"]["ready"],
@@ -134,5 +136,13 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         "- "
         f"{'✅' if capacity_ready else '⚠️'} **Capacity:** "
         f"{'Available' if capacity_ready else 'Saturated'}"
+    )
+    rollout = capabilities["pipeline_rollout"]
+    rollback = rollout["rollback"]
+    lines.append(
+        "- "
+        f"{'⚠️' if rollback['active'] else '✅'} **Pipeline:** "
+        f"{rollout['effective_stage'].replace('_', ' ').title()}"
+        f"{' (rollback active)' if rollback['active'] else ''}"
     )
     return "\n".join(lines)

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from statistics import mean
 from typing import Iterable, Mapping
 
-
 _SUBJECTIVE_DIMENSIONS = {
     "naturalness",
     "warmth",

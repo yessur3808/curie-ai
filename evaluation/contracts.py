@@ -8,7 +8,6 @@ from pathlib import Path
 import re
 from typing import Any, Iterable, Mapping
 
-
 CASE_SCHEMA_VERSION = "1.0"
 _CASE_ID = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)+\.v[1-9][0-9]*$")
 _RISKS = {"none", "read_only", "mutating", "sensitive", "critical"}

@@ -69,6 +69,8 @@ class LegacyTurnPipelineAdapter:
     public stage contract.
     """
 
+    SHADOW_ALLOWED_SIDE_EFFECTS: frozenset[SideEffect] = frozenset()
+
     def __init__(self, workflow: "ChatWorkflow"):
         self.workflow = workflow
 
@@ -343,7 +345,7 @@ class LegacyTurnPipelineAdapter:
             execution_plan = authorized.get("execution_plan")
             if shadow:
                 result = dict(shadow_result or {})
-                effects: frozenset[SideEffect] = frozenset()
+                effects: frozenset[SideEffect] = self.SHADOW_ALLOWED_SIDE_EFFECTS
             else:
                 result = await self.workflow._process_message_core(enriched)
                 declared = {

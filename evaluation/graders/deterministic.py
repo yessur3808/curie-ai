@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import re
 from typing import Any, Mapping, Sequence
 
-
 _SECRET = re.compile(
     r"-----BEGIN [A-Z ]+PRIVATE KEY-----|\b(?:sk|ghp|xox[baprs])[-_][A-Za-z0-9_-]{16,}\b|"
     r"\b(?:password|passcode|seed phrase|recovery phrase)\s*[:=]",

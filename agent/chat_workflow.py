@@ -542,7 +542,8 @@ class ChatWorkflow:
                 "input_error": exc.code,
             }
         selected_input = inbound.as_workflow_input()
-        mode = self.pipeline_flags.mode_for(selected_input)
+        rollout_decision = self.pipeline_flags.decision_for(selected_input)
+        mode = rollout_decision.mode
 
         # Owner flags must work even for connectors that leave identity
         # resolution to the workflow. Shadow mode also resolves once so its
@@ -566,7 +567,14 @@ class ChatWorkflow:
                         updated_by="chat_workflow_pipeline_rollout",
                     )
                 )
-                mode = self.pipeline_flags.mode_for(selected_input)
+                rollout_decision = self.pipeline_flags.decision_for(selected_input)
+                mode = rollout_decision.mode
+
+        selected_input["_rollout_stage"] = rollout_decision.stage.value
+        selected_input["_rollout_reason"] = rollout_decision.reason
+        selected_input["_rollout_require_verification"] = (
+            rollout_decision.require_verification
+        )
 
         owner_scope = str(
             selected_input.get("internal_id")
@@ -619,6 +627,31 @@ class ChatWorkflow:
             cancellation_event=cancellation_event,
         )
         result = self.turn_pipeline.finalize_active_result(state)
+        try:
+            from agent.kernel.rollout import (
+                detect_result_rollback,
+                trigger_pipeline_rollback,
+            )
+
+            rollback_trigger = detect_result_rollback(
+                result, expected_owner=str(selected_input.get("internal_id") or "")
+            )
+            if rollback_trigger is not None:
+                trigger_pipeline_rollback(
+                    rollback_trigger,
+                    evidence={
+                        "connector": platform,
+                        "verification_status": result.get("verification_status"),
+                    },
+                    path=self.pipeline_flags.rollout_state_file,
+                )
+                result["pipeline_rollback"] = {
+                    "active": True,
+                    "trigger": rollback_trigger.value,
+                    "next_turn_mode": "legacy",
+                }
+        except OSError:
+            logger.exception("Could not persist pipeline circuit breaker")
         logger.info(
             "Turn path=active platform=%s owner_scope=%s failed_stage=%s",
             platform,

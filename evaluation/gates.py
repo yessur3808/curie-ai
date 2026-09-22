@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-
 _OPERATORS = {"gte", "gt", "lte", "lt", "eq"}
 
 

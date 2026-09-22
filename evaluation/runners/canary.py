@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-
 _FORBIDDEN_DEFAULT = {
     "financial_transaction",
     "crypto_trade",

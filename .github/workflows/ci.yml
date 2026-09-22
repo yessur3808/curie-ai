@@ -5,11 +5,20 @@ on:
     branches: ["**"]
   pull_request:
     branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   static-analysis:
     name: Static analysis (flake8)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -27,12 +36,14 @@ jobs:
       - name: Run flake8
         # Flake8 settings are read from .flake8 in the repo root.
         run: |
-          flake8 agent/ connectors/ llm/ memory/ services/ utils/ main.py tests/ \
+          flake8 agent/ connectors/ contracts/ evaluation/ llm/ memory/ scripts/ \
+            services/ utils/ main.py tests/ \
             --exclude=__pycache__,migrations
 
   format-check:
     name: Format check (black)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -48,11 +59,14 @@ jobs:
         run: pip install black==26.5.1
 
       - name: Check formatting
-        run: black --check agent/ connectors/ llm/ memory/ services/ utils/ main.py tests/
+        run: >-
+          black --check agent/ connectors/ contracts/ evaluation/ llm/ memory/
+          scripts/ services/ utils/ main.py tests/
 
   unit-tests:
     name: Offline unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -77,6 +91,7 @@ jobs:
   integration-tests:
     name: Local integration tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -93,6 +108,7 @@ jobs:
   security-tests:
     name: Security invariants and targeted coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -115,6 +131,7 @@ jobs:
   security-scans:
     name: Dependency, static, and secret scans
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -132,7 +149,9 @@ jobs:
         # and PYSEC-2026-2447 has no fixed version; see docs/security.md.
         run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-2447
       - name: Scan Python for high-severity findings
-        run: bandit -q -r agent connectors llm memory services utils -lll
+        run: >-
+          bandit -q -r agent connectors evaluation llm memory scripts services utils
+          -lll
       - name: Scan tracked files for likely secrets
         run: >-
           git ls-files -z | xargs -0 detect-secrets-hook
@@ -142,6 +161,7 @@ jobs:
   deterministic-evaluation:
     name: Deterministic response evaluation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -154,11 +174,20 @@ jobs:
       - name: Run deterministic quality gates
         run: |
           pytest -q tests/test_evaluation_runner.py
-          python -m evaluation.release --report evaluation/reports/ci.json
+          python -m evaluation.release --skip-tests --report evaluation/reports/ci.json
+      - name: Verify generated evidence contains no credential shapes
+        run: python scripts/scan_runtime_artifacts.py evaluation/reports/ci.json
+      - name: Upload redacted release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: deterministic-release-evidence
+          path: evaluation/reports/ci.json
+          retention-days: 14
 
   release-contracts:
     name: Contracts, migrations, and release evidence
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -173,3 +202,42 @@ jobs:
         run: python -m scripts.check_release
       - name: Run public contract and migration conformance
         run: pytest -q tests/test_phase10_extensibility.py tests/test_connector_lifecycle.py tests/test_media_ingestion.py tests/test_tooling_registry.py
+
+  release-ready:
+    name: Release readiness
+    if: always()
+    needs:
+      - static-analysis
+      - format-check
+      - unit-tests
+      - integration-tests
+      - security-tests
+      - security-scans
+      - deterministic-evaluation
+      - release-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every independent lane to pass
+        env:
+          STATIC_ANALYSIS: ${{ needs.static-analysis.result }}
+          FORMAT_CHECK: ${{ needs.format-check.result }}
+          UNIT_TESTS: ${{ needs.unit-tests.result }}
+          INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
+          SECURITY_TESTS: ${{ needs.security-tests.result }}
+          SECURITY_SCANS: ${{ needs.security-scans.result }}
+          DETERMINISTIC_EVALUATION: ${{ needs.deterministic-evaluation.result }}
+          RELEASE_CONTRACTS: ${{ needs.release-contracts.result }}
+        run: |
+          for result in \
+            "$STATIC_ANALYSIS" \
+            "$FORMAT_CHECK" \
+            "$UNIT_TESTS" \
+            "$INTEGRATION_TESTS" \
+            "$SECURITY_TESTS" \
+            "$SECURITY_SCANS" \
+            "$DETERMINISTIC_EVALUATION" \
+            "$RELEASE_CONTRACTS"
+          do
+            test "$result" = "success"
+          done

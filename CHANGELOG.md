@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.09-phase11-rollout-stabilization
+
+- Made the typed turn pipeline the default while retaining a named and dated
+  legacy rollback path through 2026-10-22.
+- Added seven runtime-selectable rollout stages covering offline, shadow,
+  owner conversation, selected smart-home devices, connector expansion,
+  default-active, and final legacy removal.
+- Added an atomic local circuit breaker with nine automatic rollback signals,
+  fail-closed invalid-state handling, health visibility, and an operator CLI.
+- Added a transparent 45-measurement 9/10 scorecard that distinguishes direct
+  offline evidence from production-validation proxies.
+- Expanded the release contract from 24 to 32 blocking gates and hardened CI
+  with bounded jobs, concurrency cancellation, artifact secret scanning, and a
+  single aggregate release-readiness check.
+
 ## 2026.09-phase10-operational-hardening
 
 - Added privacy-safe end-to-end traces with stage assignment, route,

@@ -9,7 +9,6 @@ from agent.slo import SLO_DEFINITIONS
 from evaluation.failure_drills import failure_drill_report
 from utils.redaction import redact_secrets, secret_markers
 
-
 _EXPECTED_SLOS = {
     "connector_receive",
     "acknowledgement",

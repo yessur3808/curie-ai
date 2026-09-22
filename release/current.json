@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "release": "2026.09-phase10-operational-hardening",
+  "release": "2026.09-phase11-rollout-stabilization",
   "contract_version": "1.1.0",
   "changelog": "CHANGELOG.md",
-  "migration_notes": "docs/releases/PHASE10_HARDENING_MIGRATION.md",
-  "evaluation_delta": "evaluation/deltas/phase10-operational-hardening.json",
+  "migration_notes": "docs/releases/PHASE11_STABILIZATION_MIGRATION.md",
+  "evaluation_delta": "evaluation/deltas/phase11-rollout-stabilization.json",
   "rollback": {
-    "application": "Keep Curie stopped and restore commit ecd7996a or the prior reviewed release. Generated Phase 10 reports may be deleted under the private retention policy.",
+    "application": "Keep Curie stopped and restore commit bb258494. If Phase 11 is already deployed, trip the runtime pipeline circuit breaker first; no restart is needed for subsequent turns.",
     "sqlite_schema_target": 5,
-    "postgres_command": "No database rollback is required for Phase 10.",
+    "postgres_command": "No database rollback is required for Phase 11.",
     "data_backup_required": false
   }
 }

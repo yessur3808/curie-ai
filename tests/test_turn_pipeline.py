@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.chat_workflow import ChatWorkflow
-from agent.kernel.feature_flags import PipelineFeatureFlags, PipelineMode
+from agent.kernel.feature_flags import (
+    PIPELINE_CONTROL_TOKEN,
+    PipelineFeatureFlags,
+    PipelineMode,
+)
 from agent.kernel.pipeline import (
     PIPELINE_STAGE_ORDER,
     PipelineStage,
@@ -257,6 +261,16 @@ def test_feature_flags_support_default_connector_owner_and_explicit_rollout(
     assert flags.mode_for({"platform": "api"}) is PipelineMode.LEGACY
     assert (
         flags.mode_for({"platform": "api", "_pipeline_mode": "active"})
+        is PipelineMode.LEGACY
+    )
+    assert (
+        flags.mode_for(
+            {
+                "platform": "api",
+                "_pipeline_mode": "active",
+                "_pipeline_control_token": PIPELINE_CONTROL_TOKEN,
+            }
+        )
         is PipelineMode.ACTIVE
     )
 
@@ -280,6 +294,7 @@ async def test_active_chat_pipeline_completes_text_turn_without_changing_text():
         "text": "Hey Curie",
         "internal_id": "owner",
         "_pipeline_mode": "active",
+        "_pipeline_control_token": PIPELINE_CONTROL_TOKEN,
     }
 
     with (
@@ -369,6 +384,7 @@ async def test_active_deterministic_device_command_bypasses_model_generation():
         "text": "Turn off all lights",
         "internal_id": "owner",
         "_pipeline_mode": "active",
+        "_pipeline_control_token": PIPELINE_CONTROL_TOKEN,
     }
 
     with (
@@ -417,6 +433,7 @@ async def test_session_device_alias_is_resolved_before_routing():
         "text": "Turn off dreamview",
         "internal_id": "owner",
         "_pipeline_mode": "active",
+        "_pipeline_control_token": PIPELINE_CONTROL_TOKEN,
     }
 
     with (
@@ -453,6 +470,7 @@ async def test_shadow_mode_keeps_legacy_response_authoritative_and_compares_rout
         "text": "Turn off DreamView",
         "internal_id": "owner",
         "_pipeline_mode": "shadow",
+        "_pipeline_control_token": PIPELINE_CONTROL_TOKEN,
     }
 
     with patch("agent.chat_workflow.turn_event_writer.record_pipeline"):
