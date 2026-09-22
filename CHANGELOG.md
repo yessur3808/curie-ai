@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.09-rust-connector-device-kernels
+
+- Replaced Curie's shared connector queue admission, priority/FIFO ordering,
+  concurrency, deadlines, cancellation, live idempotency keys, retry-delay
+  policy, and queue counters with a PyO3 ABI3 Rust kernel.
+- Replaced the provider-neutral device/entity resolution hot path with a PyO3
+  ABI3 Rust kernel covering canonical IDs, owner alias tombstones, generic and
+  room-qualified groups, semantic names, fuzzy ambiguity gates, and recent
+  dialogue references.
+- Kept provider SDK calls, credentials, authorization, persistence, actual
+  delivery/device control, verification, and Curie's wording in Python.
+- Added strict Rust runtime modes, audited Python rollback modes, content-free
+  health/metrics, native parity and cancellation tests, benchmarks, Rust
+  dependency audits, and blocking CI lanes.
+
 ## 2026.09-rust-media-transport
 
 - Replaced Curie's attachment inspection, streaming hashing, file-signature

@@ -797,6 +797,9 @@ Missing specialist files fall back to the next available local model. At most
 | `CURIE_MEMORY_KERNEL` | `auto` | `auto` prefers the native Rust ranker, `rust` requires it, and `python` is the audited rollback |
 | `CURIE_MEDIA_TRANSPORT` | `rust` | `rust` requires native bounded media transport; `auto` is compatibility mode and `python` is the audited emergency rollback |
 | `CURIE_MEDIA_MAX_OUTPUT_BYTES` | `268435456` | Maximum combined or encoded media output size |
+| `CURIE_CONNECTOR_GATEWAY` | `rust` | Require native connector queue admission, ordering, deadlines, cancellation, and retry policy |
+| `CONNECTOR_DELIVERY_CONCURRENCY` | `4` | Maximum simultaneous outbound sends per connector within the bounded queue |
+| `CURIE_DEVICE_RESOLVER` | `rust` | Require native device/entity normalization, grouping, ambiguity detection, and ranking |
 | `MEMORY_RELEVANCE_MIN_SCORE` | `0.28` | Minimum hybrid relevance required before a memory enters the prompt |
 | `MEMORY_CONTEXT_CHAR_BUDGET` | `1600` | Maximum long-term-memory characters injected into one request |
 | `MEMORY_MAX_CANDIDATES` | `500` | Maximum owner-filtered records ranked during one recall |
@@ -827,6 +830,16 @@ Curie's second ABI3 Rust extension. Python continues to own speech and vision
 models, transcription, connector presentation, and personality decisions.
 Build it with `make media-transport`; see
 [Rust media transport](docs/RUST_MEDIA_TRANSPORT.md).
+
+Connector queue admission and device/entity resolution also have dedicated
+ABI3 Rust kernels. The connector kernel handles bounded cross-event-loop
+ordering without receiving message text or recipient IDs. The device kernel
+handles canonical IDs, owner aliases, generic groups such as “all lights,”
+room-qualified groups, ambiguity gates, close wording, and dialogue references
+over a credential-free inventory projection. Python still owns provider SDKs,
+authorization, persistence, actual delivery/control, and Curie's wording. See
+[Rust connector gateway](docs/RUST_CONNECTOR_GATEWAY.md) and
+[Rust device resolver](docs/RUST_DEVICE_RESOLVER.md).
 
 Inferred adaptations do not change live behavior directly. They become
 owner-scoped candidates, pass offline and adversarial evaluation, run in shadow

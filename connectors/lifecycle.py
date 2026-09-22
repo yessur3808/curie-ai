@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from enum import Enum
 import logging
 import threading
 import time
-from typing import Awaitable, Callable
+from typing import Callable
+
+from .delivery_gateway import (
+    DeliveryQueue,
+    DeliveryQueueExpired,
+    DeliveryQueueOverloaded,
+    DuplicateDelivery,
+    retry_delay_ms,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +36,9 @@ class DeliveryStatus(str, Enum):
     NOT_READY = "not_ready"
     UNAVAILABLE = "unavailable"
     FAILED = "failed"
+    OVERLOADED = "overloaded"
+    EXPIRED = "expired"
+    DUPLICATE = "duplicate"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +52,9 @@ class ConnectorHealth:
     error: str | None = None
     queue_saturated: bool = False
     queue_rejected: int = 0
+    queue_pending: int = 0
+    queue_concurrency: int = 0
+    gateway_backend: str = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +64,9 @@ class DeliveryReceipt:
     status: DeliveryStatus
     duration_ms: float
     error_type: str | None = None
+    queue_wait_ms: float = 0.0
+    attempts: int = 1
+    gateway_backend: str = "unknown"
 
     def as_dict(self) -> dict[str, str | bool | float | None]:
         return {
@@ -57,46 +75,14 @@ class DeliveryReceipt:
             "status": self.status.value,
             "duration_ms": self.duration_ms,
             "error_type": self.error_type,
+            "queue_wait_ms": self.queue_wait_ms,
+            "attempts": self.attempts,
+            "gateway_backend": self.gateway_backend,
         }
 
 
-class BoundedAsyncWorkQueue:
-    """Bound concurrent async work and reject overload instead of growing forever."""
-
-    def __init__(self, capacity: int = 64):
-        self.capacity = max(1, int(capacity))
-        self._slots = threading.BoundedSemaphore(self.capacity)
-        self._active = 0
-        self._rejected = 0
-        self._lock = threading.Lock()
-
-    @property
-    def size(self) -> int:
-        with self._lock:
-            return self._active
-
-    async def run(self, operation: Callable[[], Awaitable]):
-        if not self._slots.acquire(blocking=False):
-            with self._lock:
-                self._rejected += 1
-            raise RuntimeError("connector work queue is full")
-        with self._lock:
-            self._active += 1
-        try:
-            return await operation()
-        finally:
-            with self._lock:
-                self._active -= 1
-            self._slots.release()
-
-    def snapshot(self) -> dict[str, int | bool]:
-        with self._lock:
-            return {
-                "active": self._active,
-                "capacity": self.capacity,
-                "saturated": self._active >= self.capacity,
-                "rejected": self._rejected,
-            }
+class BoundedAsyncWorkQueue(DeliveryQueue):
+    """Compatibility name for the native-backed connector delivery queue."""
 
 
 class ConnectorApplication:
@@ -111,6 +97,7 @@ class ConnectorApplication:
         stop_fn: Callable | None = None,
         ready_probe: Callable[[], bool] | None = None,
         queue_capacity: int = 64,
+        queue_concurrency: int | None = None,
     ):
         self.name = name
         self.start_fn = start_fn
@@ -121,7 +108,9 @@ class ConnectorApplication:
         self.error: str | None = None
         self.thread: threading.Thread | None = None
         self.ready_event = threading.Event()
-        self.outbound_queue = BoundedAsyncWorkQueue(queue_capacity)
+        self.outbound_queue = BoundedAsyncWorkQueue(
+            queue_capacity, concurrency=queue_concurrency
+        )
         self.last_delivery_receipt: DeliveryReceipt | None = None
 
     def start(self, workflow) -> threading.Thread:
@@ -173,7 +162,16 @@ class ConnectorApplication:
             self.ready_event.wait(min(0.05, max(0.0, deadline - time.monotonic())))
         return self.refresh_readiness()
 
-    async def send_with_receipt(self, recipient: str, message: str) -> DeliveryReceipt:
+    async def send_with_receipt(
+        self,
+        recipient: str,
+        message: str,
+        *,
+        idempotency_key: str | None = None,
+        priority: int = 0,
+        timeout_seconds: float | None = None,
+        max_attempts: int = 1,
+    ) -> DeliveryReceipt:
         """Attempt delivery and return truthful, privacy-safe outcome metadata."""
         started = time.perf_counter()
 
@@ -181,6 +179,9 @@ class ConnectorApplication:
             delivered: bool,
             status: DeliveryStatus,
             error_type: str | None = None,
+            queue_wait_ms: float = 0.0,
+            attempts: int = 1,
+            gateway_backend: str | None = None,
         ) -> DeliveryReceipt:
             value = DeliveryReceipt(
                 connector=self.name,
@@ -188,6 +189,9 @@ class ConnectorApplication:
                 status=status,
                 duration_ms=round((time.perf_counter() - started) * 1000, 2),
                 error_type=error_type,
+                queue_wait_ms=queue_wait_ms,
+                attempts=attempts,
+                gateway_backend=gateway_backend or self.outbound_queue.backend,
             )
             self.last_delivery_receipt = value
             try:
@@ -204,21 +208,57 @@ class ConnectorApplication:
 
         if self.send_fn is None:
             return receipt(False, DeliveryStatus.UNAVAILABLE)
+        attempts = 0
+
+        async def deliver():
+            nonlocal attempts
+            limit = max(1, min(5, int(max_attempts)))
+            while True:
+                attempts += 1
+                try:
+                    return await self.send_fn(recipient, message)
+                except Exception:
+                    if not idempotency_key or attempts >= limit:
+                        raise
+                    seed = sum(idempotency_key.encode("utf-8", errors="ignore"))
+                    delay = retry_delay_ms(attempts, jitter_seed=seed)
+                    await asyncio.sleep(delay / 1000)
+
         try:
             if not self.refresh_readiness():
                 return receipt(False, DeliveryStatus.NOT_READY)
-            delivered = bool(
-                await self.outbound_queue.run(lambda: self.send_fn(recipient, message))
+            execution = await self.outbound_queue.run_with_metadata(
+                deliver,
+                idempotency_key=idempotency_key,
+                priority=priority,
+                timeout_seconds=timeout_seconds,
             )
+            delivered = bool(execution.value)
             return receipt(
                 delivered,
                 DeliveryStatus.DELIVERED if delivered else DeliveryStatus.REJECTED,
+                queue_wait_ms=execution.queue_wait_ms,
+                attempts=attempts,
+                gateway_backend=execution.backend,
             )
+        except DeliveryQueueOverloaded:
+            return receipt(False, DeliveryStatus.OVERLOADED, "queue_overloaded")
+        except DeliveryQueueExpired:
+            return receipt(False, DeliveryStatus.EXPIRED, "queue_deadline")
+        except DuplicateDelivery:
+            return receipt(False, DeliveryStatus.DUPLICATE, "duplicate_in_flight")
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.warning(
                 "Connector %s delivery failed (%s)", self.name, type(exc).__name__
             )
-            return receipt(False, DeliveryStatus.FAILED, type(exc).__name__)
+            return receipt(
+                False,
+                DeliveryStatus.FAILED,
+                type(exc).__name__,
+                attempts=max(1, attempts),
+            )
 
     async def send(self, recipient: str, message: str) -> bool:
         return (await self.send_with_receipt(recipient, message)).delivered
@@ -247,11 +287,14 @@ class ConnectorApplication:
             self.state,
             self.ready_event.is_set(),
             bool(self.thread and self.thread.is_alive()),
-            int(queue["active"]),
+            int(queue["size"]),
             int(queue["capacity"]),
             self.error,
             bool(queue["saturated"]),
             int(queue["rejected"]),
+            int(queue["pending"]),
+            int(queue["concurrency"]),
+            str(queue["backend"]),
         )
 
 

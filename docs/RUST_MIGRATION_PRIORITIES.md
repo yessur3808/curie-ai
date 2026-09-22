@@ -119,6 +119,12 @@ can supervise the Python inference child without becoming the inference engine.
 
 ## Priority 3: connector delivery gateway
 
+**Implemented in September 2026 for the shared queue/delivery boundary.** The
+ABI3 kernel now owns bounded admission, deterministic priority/FIFO ordering,
+concurrency, deadlines, cancellation, live idempotency keys, retry delays, and
+content-free counters. Provider-specific runtimes remain in Python. See
+[Rust connector gateway](RUST_CONNECTOR_GATEWAY.md).
+
 ### Scope
 
 After profiling proves connector overhead is material, move the shared
@@ -151,6 +157,11 @@ migrations and reuse their telemetry and rollout method.
 - Shadow traffic, owner canary, per-connector rollout, and instant rollback.
 
 ## Priority 4: deterministic entity and device resolver
+
+**Implemented in September 2026.** The ABI3 resolver now owns the
+credential-free canonical match, alias tombstone, safe group expansion,
+semantic/fuzzy ranking, ambiguity, and dialogue-reference hot path. See
+[Rust device resolver](RUST_DEVICE_RESOLVER.md).
 
 ### Scope
 

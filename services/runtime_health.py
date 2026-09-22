@@ -41,6 +41,8 @@ def capability_health(workflow_ready: bool = True) -> dict:
     from llm.inference_service import get_inference_service
     from agent.kernel.feature_flags import PipelineFeatureFlags
     from agent.slo import slo_metrics
+    from agent.understanding.entities import device_resolver_status
+    from connectors.delivery_gateway import connector_gateway_status
     from memory import memory_kernel_status
     from services.backpressure import runtime_backpressure
     from services.media_ingestion import media_backpressure_snapshot
@@ -69,6 +71,14 @@ def capability_health(workflow_ready: bool = True) -> dict:
     media_transport = media_transport_status()
     media_transport["ready"] = not (
         media_transport["mode"] == "rust" and media_transport["active"] != "rust"
+    )
+    connector_gateway = connector_gateway_status()
+    connector_gateway["ready"] = not (
+        connector_gateway["mode"] == "rust" and connector_gateway["active"] != "rust"
+    )
+    device_resolver = device_resolver_status()
+    device_resolver["ready"] = not (
+        device_resolver["mode"] == "rust" and device_resolver["active"] != "rust"
     )
     database = _database_health()
     disk = shutil.disk_usage(Path.cwd())
@@ -111,6 +121,8 @@ def capability_health(workflow_ready: bool = True) -> dict:
         "speech": {**voice, "fallback": "complete text reply"},
         "media_transport": media_transport,
         "memory_kernel": memory_kernel,
+        "connector_gateway": connector_gateway,
+        "device_resolver": device_resolver,
         "database": database,
         "disk": disk_health,
         "security": security_status(),
@@ -125,6 +137,8 @@ def capability_health(workflow_ready: bool = True) -> dict:
         disk_health["ready"],
         media_transport["ready"],
         memory_kernel["ready"],
+        connector_gateway["ready"],
+        device_resolver["ready"],
         not backpressure["saturated"],
     )
     return {
@@ -146,6 +160,8 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         "speech",
         "media_transport",
         "memory_kernel",
+        "connector_gateway",
+        "device_resolver",
         "database",
         "disk",
     ):

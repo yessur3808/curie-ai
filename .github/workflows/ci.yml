@@ -141,6 +141,77 @@ jobs:
           python -m scripts.benchmark_media_transport
           --megabytes 1 --iterations 1 --mode rust
 
+  rust-connector-gateway:
+    name: Rust connector gateway
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python and native build dependencies
+        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+      - name: Check Rust formatting, lints, and unit tests
+        run: |
+          cargo fmt --manifest-path native/connector_gateway/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path native/connector_gateway/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path native/connector_gateway/Cargo.toml
+      - name: Build and install the ABI3 extension
+        run: |
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/connector_gateway/Cargo.toml
+          pip install dist/native/curie_connector_gateway-*.whl
+      - name: Require native ordering, deadlines, cancellation, and integration
+        env:
+          CURIE_CONNECTOR_GATEWAY: rust
+        run: pytest -q tests/test_connector_gateway_native.py tests/test_connector_lifecycle.py
+      - name: Run bounded native benchmark smoke test
+        env:
+          CURIE_CONNECTOR_GATEWAY: rust
+        run: python -m scripts.benchmark_connector_gateway --jobs 100 --mode rust
+
+  rust-device-resolver:
+    name: Rust device resolver
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python and native build dependencies
+        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+      - name: Check Rust formatting, lints, and unit tests
+        run: |
+          cargo fmt --manifest-path native/device_resolver/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path native/device_resolver/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path native/device_resolver/Cargo.toml
+      - name: Build and install the ABI3 extension
+        run: |
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/device_resolver/Cargo.toml
+          pip install dist/native/curie_device_resolver-*.whl
+      - name: Require native parity, groups, ambiguity gates, and integration
+        env:
+          CURIE_DEVICE_RESOLVER: rust
+        run: >-
+          pytest -q tests/test_device_resolver_native.py
+          tests/test_smart_home.py
+          tests/test_phase345_reasoning.py
+      - name: Run bounded native benchmark smoke test
+        env:
+          CURIE_DEVICE_RESOLVER: rust
+        run: >-
+          python -m scripts.benchmark_device_resolver
+          --devices 250 --iterations 2 --mode rust
+
   unit-tests:
     name: Offline unit tests
     runs-on: ubuntu-latest
@@ -231,6 +302,8 @@ jobs:
           cargo install cargo-audit --locked --version 0.22.2
           cargo audit --file native/memory_kernel/Cargo.lock
           cargo audit --file native/media_transport/Cargo.lock
+          cargo audit --file native/connector_gateway/Cargo.lock
+          cargo audit --file native/device_resolver/Cargo.lock
       - name: Scan Python for high-severity findings
         run: >-
           bandit -q -r agent connectors evaluation llm memory scripts services utils
@@ -294,6 +367,8 @@ jobs:
       - format-check
       - rust-memory-kernel
       - rust-media-transport
+      - rust-connector-gateway
+      - rust-device-resolver
       - unit-tests
       - integration-tests
       - security-tests
@@ -309,6 +384,8 @@ jobs:
           FORMAT_CHECK: ${{ needs.format-check.result }}
           RUST_MEMORY_KERNEL: ${{ needs.rust-memory-kernel.result }}
           RUST_MEDIA_TRANSPORT: ${{ needs.rust-media-transport.result }}
+          RUST_CONNECTOR_GATEWAY: ${{ needs.rust-connector-gateway.result }}
+          RUST_DEVICE_RESOLVER: ${{ needs.rust-device-resolver.result }}
           UNIT_TESTS: ${{ needs.unit-tests.result }}
           INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
           SECURITY_TESTS: ${{ needs.security-tests.result }}
@@ -321,6 +398,8 @@ jobs:
             "$FORMAT_CHECK" \
             "$RUST_MEMORY_KERNEL" \
             "$RUST_MEDIA_TRANSPORT" \
+            "$RUST_CONNECTOR_GATEWAY" \
+            "$RUST_DEVICE_RESOLVER" \
             "$UNIT_TESTS" \
             "$INTEGRATION_TESTS" \
             "$SECURITY_TESTS" \

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: install install-optional memory-kernel memory-kernel-check media-transport media-transport-check run start test migrate migrate-down lint format check install-hooks shell verify help
+.PHONY: install install-optional memory-kernel memory-kernel-check media-transport media-transport-check connector-gateway connector-gateway-check device-resolver device-resolver-check run start test migrate migrate-down lint format check install-hooks shell verify help
 .PHONY: db-start db-stop db-restart db-status setup-db
 .PHONY: run-telegram run-discord run-whatsapp run-api run-all
 .PHONY: check-ports test-imports clean sync-env sync-env-add sync-env-clean sync-env-backup restart-clean
@@ -31,6 +31,26 @@ media-transport-check:  ## Check Rust media formatting, lints, tests, and parity
 	cargo clippy --locked --manifest-path native/media_transport/Cargo.toml --all-targets -- -D warnings
 	cargo test --locked --manifest-path native/media_transport/Cargo.toml
 	CURIE_MEDIA_TRANSPORT=rust .venv/bin/pytest -q tests/test_media_transport_native.py tests/test_media_ingestion.py tests/test_voice_delivery.py tests/test_trained_voice_runtime.py tests/test_trained_voice_stream.py
+
+connector-gateway:  ## Build and install Curie's Rust connector delivery gateway
+	.venv/bin/pip install -r requirements-rust.txt
+	.venv/bin/maturin develop --release --manifest-path native/connector_gateway/Cargo.toml
+
+connector-gateway-check:  ## Check Rust connector formatting, lints, tests, and integration
+	cargo fmt --manifest-path native/connector_gateway/Cargo.toml -- --check
+	cargo clippy --locked --manifest-path native/connector_gateway/Cargo.toml --all-targets -- -D warnings
+	cargo test --locked --manifest-path native/connector_gateway/Cargo.toml
+	CURIE_CONNECTOR_GATEWAY=rust .venv/bin/pytest -q tests/test_connector_gateway_native.py tests/test_connector_lifecycle.py
+
+device-resolver:  ## Build and install Curie's Rust device/entity resolver
+	.venv/bin/pip install -r requirements-rust.txt
+	.venv/bin/maturin develop --release --manifest-path native/device_resolver/Cargo.toml
+
+device-resolver-check:  ## Check Rust resolver formatting, lints, tests, and parity
+	cargo fmt --manifest-path native/device_resolver/Cargo.toml -- --check
+	cargo clippy --locked --manifest-path native/device_resolver/Cargo.toml --all-targets -- -D warnings
+	cargo test --locked --manifest-path native/device_resolver/Cargo.toml
+	CURIE_DEVICE_RESOLVER=rust .venv/bin/pytest -q tests/test_device_resolver_native.py tests/test_smart_home.py tests/test_phase345_reasoning.py
 
 verify:  ## Verify setup and dependencies
 	python scripts/verify_setup.py

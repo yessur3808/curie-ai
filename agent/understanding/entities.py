@@ -7,10 +7,80 @@ from difflib import SequenceMatcher
 from enum import Enum
 import os
 import re
+import threading
 from typing import Iterable, Sequence
 
 from services.smart_home.aliases import DeviceAlias, normalize_alias
 from services.smart_home.models import CanonicalDevice
+
+_NATIVE_MODULE = None
+_NATIVE_IMPORT_ATTEMPTED = False
+_NATIVE_IMPORT_ERROR: str | None = None
+_METRICS_LOCK = threading.Lock()
+_METRICS = {
+    "resolutions": 0,
+    "native_resolutions": 0,
+    "python_resolutions": 0,
+    "native_failures": 0,
+    "native_index_builds": 0,
+    "native_index_hits": 0,
+}
+
+
+def _resolver_mode() -> str:
+    configured = os.getenv("CURIE_DEVICE_RESOLVER", "auto").strip().casefold()
+    return configured if configured in {"auto", "rust", "python"} else "auto"
+
+
+def _native_module():
+    global _NATIVE_MODULE, _NATIVE_IMPORT_ATTEMPTED, _NATIVE_IMPORT_ERROR
+    if _NATIVE_IMPORT_ATTEMPTED:
+        return _NATIVE_MODULE
+    _NATIVE_IMPORT_ATTEMPTED = True
+    try:
+        import _curie_device_resolver as native
+
+        _NATIVE_MODULE = native
+        _NATIVE_IMPORT_ERROR = None
+    except (ImportError, OSError) as exc:
+        _NATIVE_MODULE = None
+        _NATIVE_IMPORT_ERROR = type(exc).__name__
+    return _NATIVE_MODULE
+
+
+def device_resolver_status() -> dict:
+    mode = _resolver_mode()
+    native = _native_module()
+    available = native is not None
+    version = None
+    if available:
+        try:
+            version = str(native.resolver_version())
+        except Exception:
+            available = False
+    active = "python" if mode == "python" or not available else "rust"
+    return {
+        "mode": mode,
+        "available": available,
+        "active": active,
+        "version": version,
+        "fallback": active == "python" and mode != "python",
+        "import_error": _NATIVE_IMPORT_ERROR,
+    }
+
+
+def device_resolver_metrics(*, reset: bool = False) -> dict:
+    with _METRICS_LOCK:
+        result = dict(_METRICS)
+        if reset:
+            for key in _METRICS:
+                _METRICS[key] = 0
+    return result
+
+
+def _record_metric(key: str) -> None:
+    with _METRICS_LOCK:
+        _METRICS[key] += 1
 
 
 class ResolutionStatus(str, Enum):
@@ -82,11 +152,22 @@ def _semantic_name(value: str) -> str:
 
 
 def _group_spec(target: str) -> tuple[str, str | None, bool] | None:
-    normalized = normalize_alias(target)
-    online_only = normalized.startswith("online ")
-    normalized = re.sub(
-        r"^(?:all|every|each|both|the|my|our|online)\s+", "", normalized
-    )
+    words = normalize_alias(target).split()
+    online_only = False
+    while words and words[0] in {
+        "all",
+        "every",
+        "each",
+        "both",
+        "the",
+        "my",
+        "our",
+        "online",
+        "of",
+    }:
+        online_only = online_only or words[0] == "online"
+        words.pop(0)
+    normalized = " ".join(words)
     room: str | None = None
     room_match = re.fullmatch(
         r"(?:lights?|lamps?|bulbs?)\s+(?:in\s+)?(?:the\s+)?(.+)", normalized
@@ -130,8 +211,117 @@ class DeviceResolver:
             if ambiguity_gap is not None
             else os.getenv("DEVICE_FUZZY_AMBIGUITY_GAP", "0.10")
         )
+        self._native_index_lock = threading.RLock()
+        self._native_index_source = None
+        self._native_index_items: tuple[CanonicalDevice, ...] = ()
+        self._native_index = None
+
+    def _index_for(
+        self,
+        source: Sequence[CanonicalDevice],
+        items: tuple[CanonicalDevice, ...],
+        native,
+    ):
+        with self._native_index_lock:
+            same_source = self._native_index_source is source
+            same_items = len(items) == len(self._native_index_items) and all(
+                left is right for left, right in zip(items, self._native_index_items)
+            )
+            if self._native_index is not None and (same_source or same_items):
+                self._native_index_source = source
+                _record_metric("native_index_hits")
+                return self._native_index
+            projections = (
+                {
+                    "index": index,
+                    "canonical_id": item.canonical_id,
+                    "provider": item.provider,
+                    "provider_id": item.provider_id,
+                    "display_name": item.display_name,
+                    "normalized_name": item.normalized_name,
+                    "room": item.room,
+                    "capabilities": sorted(item.capabilities),
+                    "online_status": item.online_status,
+                }
+                for index, item in enumerate(items)
+            )
+            self._native_index = native.DeviceIndex(projections)
+            self._native_index_source = source
+            self._native_index_items = items
+            _record_metric("native_index_builds")
+            return self._native_index
 
     def resolve(
+        self,
+        target: str,
+        devices: Sequence[CanonicalDevice],
+        *,
+        aliases: Iterable[DeviceAlias] = (),
+        explicit_provider: str | None = None,
+        recent_entity_ids: Sequence[str] = (),
+        consequential: bool = True,
+    ) -> DeviceResolution:
+        """Resolve through Rust when available, preserving the Python rollback."""
+        device_source = devices
+        device_items = tuple(devices)
+        alias_items = tuple(aliases)
+        mode = _resolver_mode()
+        native = _native_module()
+        _record_metric("resolutions")
+        if mode != "python" and native is not None:
+            alias_projections = (
+                {
+                    "normalized_alias": item.normalized_alias,
+                    "status": item.status,
+                    "device_key": item.device_key,
+                    "provider": item.provider,
+                    "provider_id": item.provider_id,
+                    "expired": item.expired,
+                }
+                for item in alias_items
+            )
+            try:
+                index = self._index_for(device_source, device_items, native)
+                status, indices, confidence, reason, candidates = index.resolve(
+                    str(target),
+                    alias_projections,
+                    explicit_provider=explicit_provider,
+                    recent_entity_ids=list(recent_entity_ids),
+                    consequential=bool(consequential),
+                    consequential_threshold=self.consequential_threshold,
+                    read_threshold=self.read_threshold,
+                    ambiguity_gap=self.ambiguity_gap,
+                )
+                selected = tuple(device_items[int(index)] for index in indices)
+                result = DeviceResolution(
+                    ResolutionStatus(str(status)),
+                    selected,
+                    float(confidence),
+                    str(reason),
+                    str(target),
+                    tuple(str(item) for item in candidates),
+                )
+                _record_metric("native_resolutions")
+                return result
+            except Exception:
+                _record_metric("native_failures")
+                if mode == "rust":
+                    raise
+        elif mode == "rust":
+            raise RuntimeError(
+                "CURIE_DEVICE_RESOLVER=rust but the native module is unavailable"
+            )
+        _record_metric("python_resolutions")
+        return self._resolve_python(
+            target,
+            device_items,
+            aliases=alias_items,
+            explicit_provider=explicit_provider,
+            recent_entity_ids=recent_entity_ids,
+            consequential=consequential,
+        )
+
+    def _resolve_python(
         self,
         target: str,
         devices: Sequence[CanonicalDevice],
