@@ -19,6 +19,7 @@ from agent.tooling.contracts import (
     ToolResult,
     VerificationPolicy,
 )
+from services.backpressure import runtime_backpressure
 
 _OBJECT = {"type": "object", "properties": {}}
 _TEXT_INPUT = {
@@ -451,11 +452,15 @@ class ToolRegistry:
             raise PermissionError(
                 f"Capability {name!r} requires per-invocation approval"
             )
-        async with self._semaphores[name]:
-            result = await asyncio.wait_for(
-                capability.executor.execute(params, context),
-                timeout=capability.resource_policy.timeout_seconds,
-            )
+        async with runtime_backpressure.tool_slot(
+            owner_id=context.internal_id,
+            mutating=capability.risk == "mutating",
+        ):
+            async with self._semaphores[name]:
+                result = await asyncio.wait_for(
+                    capability.executor.execute(params, context),
+                    timeout=capability.resource_policy.timeout_seconds,
+                )
         if not isinstance(result, ToolResult):
             raise TypeError(
                 f"Capability {name!r} returned {type(result).__name__}, expected ToolResult"

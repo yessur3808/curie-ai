@@ -21,6 +21,7 @@ import uuid
 
 from .errors import PipelineError, PipelineErrorKind
 from .feature_flags import PipelineMode
+from utils.redaction import redact_secrets
 
 
 class PipelineStage(str, Enum):
@@ -294,7 +295,7 @@ def _redact_safe_value(value: Any, *, key: str = "") -> Any:
         return [_redact_safe_value(item) for item in value]
     if isinstance(value, str) and _TOKEN_LIKE_VALUE.search(value):
         return "[redacted]"
-    return value
+    return redact_secrets(value, key)
 
 
 @dataclass(frozen=True, slots=True)

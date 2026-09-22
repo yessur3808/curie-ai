@@ -68,10 +68,13 @@ class ManagedInferenceService:
         return self._queue.qsize()
 
     def snapshot(self) -> dict:
+        queue_depth = self.queue_depth
         return {
             **self._metrics,
-            "queue_depth": self.queue_depth,
+            "queue_depth": queue_depth,
             "queue_capacity": self.capacity,
+            "queue_utilization_percent": round(queue_depth / self.capacity * 100, 1),
+            "saturated": queue_depth >= self.capacity,
             "active_requests": len(self._jobs),
             "workers": self.workers,
         }

@@ -43,6 +43,7 @@ def test_capability_health_publishes_independent_degradation(monkeypatch):
     assert message.startswith("**Curie status: Degraded**\n\n")
     assert "- ⚠️ **Text:** Degraded" in message
     assert "- ✅ **Database:** Ready" in message
+    assert "- ✅ **Capacity:** Available" in message
 
 
 @pytest.mark.asyncio

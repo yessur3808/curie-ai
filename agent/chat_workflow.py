@@ -1573,6 +1573,19 @@ class ChatWorkflow:
                     response_text=response,
                 ),
                 "context_selection": context_envelope.as_dict(),
+                "telemetry": {
+                    "prompt_tokens": max(1, int(len(prompt.split()) * 1.33)),
+                    "output_tokens": int(
+                        model_candidate.metadata.get(
+                            "output_tokens",
+                            max(1, int(len(response.split()) * 1.33)),
+                        )
+                    ),
+                    "queue_wait_ms": float(model_candidate.metadata.get("queue_ms", 0)),
+                    "first_token_ms": float(
+                        model_candidate.metadata.get("first_token_ms", 0)
+                    ),
+                },
             }
 
         except Exception as e:

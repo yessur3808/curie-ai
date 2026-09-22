@@ -39,8 +39,19 @@ class PipelineError:
 
     @classmethod
     def from_exception(cls, stage: str, exc: BaseException) -> "PipelineError":
+        message = str(exc).casefold()
         if isinstance(exc, TimeoutError):
             kind, retryable = PipelineErrorKind.TIMEOUT, True
+        elif "model unavailable" in message or "capability unavailable" in message:
+            kind, retryable = PipelineErrorKind.UNAVAILABLE_CAPABILITY, True
+        elif isinstance(exc, PermissionError) and "expired" in message:
+            kind, retryable = PipelineErrorKind.AUTHENTICATION_EXPIRED, False
+        elif "rate limit" in message or "too many requests" in message:
+            kind, retryable = PipelineErrorKind.RATE_LIMITED, True
+        elif "provider" in message and "reject" in message:
+            kind, retryable = PipelineErrorKind.PROVIDER_REJECTED, False
+        elif "verification" in message or "state mismatch" in message:
+            kind, retryable = PipelineErrorKind.VERIFICATION_FAILED, True
         elif isinstance(exc, PermissionError):
             kind, retryable = PipelineErrorKind.PERMISSION_DENIED, False
         elif isinstance(exc, ValueError):

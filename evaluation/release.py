@@ -16,6 +16,7 @@ from typing import Any, Mapping
 from evaluation.contracts import FailureRecord
 from evaluation.gates import evaluate_gates, load_gate_config, release_blocked
 from evaluation.phase9_suite import ROOT, run as run_phase9
+from utils.redaction import redact_secrets
 
 
 def _safe_version(value: str, fallback: str) -> str:
@@ -47,28 +48,32 @@ def _run_tests(root: Path) -> dict[str, Any]:
         matches = re.findall(rf"(\d+)\s+{label}\b", output)
         return sum(int(item) for item in matches)
 
-    return {
-        "status": "passed" if process.returncode == 0 else "failed",
-        "exit_code": process.returncode,
-        "duration_seconds": round(time.perf_counter() - started, 3),
-        "passed": count("passed"),
-        "failed": count("failed"),
-        "deselected": count("deselected"),
-        "failure_tail": (
-            "\n".join(output.splitlines()[-30:]) if process.returncode else ""
-        ),
-    }
+    return redact_secrets(
+        {
+            "status": "passed" if process.returncode == 0 else "failed",
+            "exit_code": process.returncode,
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "passed": count("passed"),
+            "failed": count("failed"),
+            "deselected": count("deselected"),
+            "failure_tail": (
+                "\n".join(output.splitlines()[-30:]) if process.returncode else ""
+            ),
+        }
+    )
 
 
 def _baseline_gate_status(path: str | Path | None) -> dict[str, bool]:
     if path is None:
         return {}
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    return {
-        str(item["name"]): bool(item["passed"])
-        for item in payload.get("gates", ())
-        if isinstance(item, Mapping) and item.get("name")
-    }
+    return redact_secrets(
+        {
+            str(item["name"]): bool(item["passed"])
+            for item in payload.get("gates", ())
+            if isinstance(item, Mapping) and item.get("name")
+        }
+    )
 
 
 def run_release(
@@ -131,32 +136,35 @@ def run_release(
         )
 
     blocked = release_blocked(gates) or test_report["status"] == "failed"
-    return {
-        "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "offline": True,
-        "release_blocked": blocked,
-        "runtime": {
-            "model_version": model_version,
-            "prompt_version": prompt_version,
-            "feature_flags": list(flags),
-        },
-        "tests": test_report,
-        "metrics": suite["metrics"],
-        "per_stage": suite["per_stage"],
-        "per_taxonomy": suite["per_taxonomy"],
-        "catalog": suite["catalog"],
-        "gates": [gate.as_dict() for gate in gates],
-        "summary": {
-            "gate_count": len(gates),
-            "passed": sum(gate.passed for gate in gates),
-            "waived": sum(gate.waived for gate in gates),
-            "blocking_failures": sum(
-                gate.blocking and not gate.passed and not gate.waived for gate in gates
-            ),
-        },
-        "failures": failures,
-    }
+    return redact_secrets(
+        {
+            "schema_version": 1,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "offline": True,
+            "release_blocked": blocked,
+            "runtime": {
+                "model_version": model_version,
+                "prompt_version": prompt_version,
+                "feature_flags": list(flags),
+            },
+            "tests": test_report,
+            "metrics": suite["metrics"],
+            "per_stage": suite["per_stage"],
+            "per_taxonomy": suite["per_taxonomy"],
+            "catalog": suite["catalog"],
+            "gates": [gate.as_dict() for gate in gates],
+            "summary": {
+                "gate_count": len(gates),
+                "passed": sum(gate.passed for gate in gates),
+                "waived": sum(gate.waived for gate in gates),
+                "blocking_failures": sum(
+                    gate.blocking and not gate.passed and not gate.waived
+                    for gate in gates
+                ),
+            },
+            "failures": failures,
+        }
+    )
 
 
 def main() -> int:

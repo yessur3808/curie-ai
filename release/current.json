@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "release": "2026.09-phase9-comprehensive-evaluation",
+  "release": "2026.09-phase10-operational-hardening",
   "contract_version": "1.1.0",
   "changelog": "CHANGELOG.md",
-  "migration_notes": "docs/releases/PHASE9_MIGRATION.md",
-  "evaluation_delta": "evaluation/deltas/phase9-comprehensive-evaluation.json",
+  "migration_notes": "docs/releases/PHASE10_HARDENING_MIGRATION.md",
+  "evaluation_delta": "evaluation/deltas/phase10-operational-hardening.json",
   "rollback": {
-    "application": "Keep Curie stopped and restore commit 98a13672 or the prior reviewed release. Generated Phase 9 reports may be deleted.",
+    "application": "Keep Curie stopped and restore commit ecd7996a or the prior reviewed release. Generated Phase 10 reports may be deleted under the private retention policy.",
     "sqlite_schema_target": 5,
-    "postgres_command": "No database rollback is required for Phase 9.",
+    "postgres_command": "No database rollback is required for Phase 10.",
     "data_backup_required": false
   }
 }

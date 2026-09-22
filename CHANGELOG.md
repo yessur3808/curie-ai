@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026.09-phase10-operational-hardening
+
+- Added privacy-safe end-to-end traces with stage assignment, route,
+  confidence, capability, outcome, verification, feature, model, prompt,
+  token, queue, and timing metadata.
+- Added independent service objectives for connector receipt,
+  acknowledgement, context, routing, model, tool, verification, and delivery
+  latency and success.
+- Added fail-fast global read and per-owner mutation budgets, complete model,
+  attachment, connector, and tool saturation health, and degraded readiness
+  during saturation.
+- Added recursive credential redaction and offline scanning for private logs,
+  evaluation artifacts, Telegram URLs, OAuth queries, provider headers, and
+  database URLs.
+- Added twelve deterministic failure and recovery drills plus five new
+  blocking release gates, bringing the complete offline release contract to 24
+  gates.
+
 ## 2026.09-phase9-comprehensive-evaluation
 
 - Added a versioned evaluation taxonomy and portable case contract spanning

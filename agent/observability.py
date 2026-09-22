@@ -12,6 +12,32 @@ import threading
 import time
 from typing import Any, Mapping
 
+from agent.slo import slo_metrics
+from utils.redaction import redact_secrets
+
+
+TRACE_SCHEMA_VERSION = 2
+TRACE_REQUIRED_FIELDS = frozenset(
+    {
+        "trace_id",
+        "turn_id",
+        "owner_scope_hash",
+        "connector",
+        "stage",
+        "duration_ms",
+        "route",
+        "confidence",
+        "capability",
+        "outcome_category",
+        "verification_category",
+        "feature_flags",
+        "model_version",
+        "prompt_version",
+        "token_counts",
+        "queue_wait_ms",
+    }
+)
+
 
 @dataclass(slots=True)
 class RequestTrace:
@@ -108,6 +134,12 @@ class OperationalMetrics:
         inference: dict | None = None,
     ) -> None:
         now = time.time()
+        if "context" in timings:
+            slo_metrics.observe("context_build", timings["context"])
+        if "model_response" in timings:
+            slo_metrics.observe(
+                "model_generation", timings["model_response"], success=True
+            )
         with self._lock:
             self._request_times.append(now)
             self._total_requests += 1
@@ -136,6 +168,7 @@ class OperationalMetrics:
                 "inference": dict(inference or {}),
                 "errors": self._errors,
                 "fallbacks": self._fallbacks,
+                "slos": slo_metrics.snapshot(),
             }
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +234,9 @@ class TurnEventWriter:
             pass
 
     def _append(self, event: Mapping[str, Any]) -> None:
-        encoded = json.dumps(event, separators=(",", ":"), sort_keys=True)
+        encoded = json.dumps(
+            redact_secrets(event), separators=(",", ":"), sort_keys=True
+        )
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             try:
@@ -286,18 +321,83 @@ class TurnEventWriter:
         try:
             safe = state.as_dict()
             stages = tuple(safe.get("stages") or ())
+            stage_map = {
+                str(item.get("stage")): item
+                for item in stages
+                if isinstance(item, Mapping)
+            }
+
+            def summary(stage: str) -> Mapping[str, Any]:
+                value = (stage_map.get(stage) or {}).get("summary") or {}
+                return value if isinstance(value, Mapping) else {}
+
+            understanding = summary("understand")
+            routing = summary("route")
+            execution = summary("execute")
+            verification = summary("verify")
+            response_plan = summary("plan_response")
+            telemetry = (
+                response.get("telemetry", {})
+                if isinstance(response, Mapping)
+                and isinstance(response.get("telemetry"), Mapping)
+                else {}
+            )
+            capabilities = [
+                str(item) for item in routing.get("capabilities", ()) if item
+            ]
+            slo_metrics.observe_pipeline(stages)
             event: dict[str, Any] = {
-                "schema_version": 1,
+                "schema_version": TRACE_SCHEMA_VERSION,
                 "event_type": "pipeline_trace",
                 "recorded_at": time.time(),
                 "trace_id": str(safe.get("trace_id") or ""),
                 "turn_id": str(safe.get("turn_id") or ""),
+                "stage": str(safe.get("failed_stage") or "complete"),
+                "connector": str(safe.get("platform") or "unknown"),
                 "platform": str(safe.get("platform") or "unknown"),
                 "owner_scope_hash": str(safe.get("owner_scope_hash") or ""),
                 "message_hash": str(safe.get("message_hash") or ""),
                 "message_chars": int(safe.get("message_chars") or 0),
                 "pipeline_mode": str(safe.get("mode") or "unknown"),
+                "feature_flags": {
+                    "turn_pipeline_mode": str(safe.get("mode") or "unknown")
+                },
                 "pipeline_failed_stage": safe.get("failed_stage"),
+                "duration_ms": round(
+                    sum(
+                        float(item.get("duration_ms") or 0)
+                        for item in stages
+                        if isinstance(item, Mapping)
+                    ),
+                    2,
+                ),
+                "route": str(
+                    routing.get("route") or understanding.get("intent") or "unknown"
+                ),
+                "confidence": float(understanding.get("recognizer_confidence") or 0.0),
+                "capability": capabilities[0] if capabilities else None,
+                "capabilities": capabilities,
+                "outcome_category": str(response_plan.get("outcome") or "unknown"),
+                "verification_category": str(
+                    verification.get("verification_status") or "not_recorded"
+                ),
+                "model_version": str(
+                    (
+                        response.get("model_used")
+                        if isinstance(response, Mapping)
+                        else None
+                    )
+                    or execution.get("model_family")
+                    or "unknown"
+                ),
+                "prompt_version": str(
+                    os.getenv("CURIE_PROMPT_VERSION", "repository-current")
+                )[:120],
+                "token_counts": {
+                    "prompt": int(telemetry.get("prompt_tokens") or 0),
+                    "output": int(telemetry.get("output_tokens") or 0),
+                },
+                "queue_wait_ms": float(telemetry.get("queue_wait_ms") or 0),
                 "pipeline_stage_statuses": {
                     str(item.get("stage")): str(item.get("status"))
                     for item in stages
@@ -308,6 +408,7 @@ class TurnEventWriter:
                     for item in stages
                     if isinstance(item, Mapping)
                 },
+                "slo_snapshot": slo_metrics.snapshot(),
             }
             if response is not None:
                 event.update(
@@ -339,3 +440,17 @@ class TurnEventWriter:
 
 
 turn_event_writer = TurnEventWriter()
+
+
+__all__ = [
+    "TRACE_REQUIRED_FIELDS",
+    "TRACE_SCHEMA_VERSION",
+    "LatencyMetrics",
+    "OperationalMetrics",
+    "RequestTrace",
+    "TurnEventWriter",
+    "latency_metrics",
+    "operational_metrics",
+    "reset_telemetry",
+    "turn_event_writer",
+]

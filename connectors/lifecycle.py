@@ -38,6 +38,8 @@ class ConnectorHealth:
     queue_size: int
     queue_capacity: int
     error: str | None = None
+    queue_saturated: bool = False
+    queue_rejected: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +67,7 @@ class BoundedAsyncWorkQueue:
         self.capacity = max(1, int(capacity))
         self._slots = threading.BoundedSemaphore(self.capacity)
         self._active = 0
+        self._rejected = 0
         self._lock = threading.Lock()
 
     @property
@@ -74,6 +77,8 @@ class BoundedAsyncWorkQueue:
 
     async def run(self, operation: Callable[[], Awaitable]):
         if not self._slots.acquire(blocking=False):
+            with self._lock:
+                self._rejected += 1
             raise RuntimeError("connector work queue is full")
         with self._lock:
             self._active += 1
@@ -83,6 +88,15 @@ class BoundedAsyncWorkQueue:
             with self._lock:
                 self._active -= 1
             self._slots.release()
+
+    def snapshot(self) -> dict[str, int | bool]:
+        with self._lock:
+            return {
+                "active": self._active,
+                "capacity": self.capacity,
+                "saturated": self._active >= self.capacity,
+                "rejected": self._rejected,
+            }
 
 
 class ConnectorApplication:
@@ -176,6 +190,16 @@ class ConnectorApplication:
                 error_type=error_type,
             )
             self.last_delivery_receipt = value
+            try:
+                from agent.slo import slo_metrics
+
+                slo_metrics.observe(
+                    "connector_delivery",
+                    value.duration_ms,
+                    success=value.delivered,
+                )
+            except Exception:
+                pass
             return value
 
         if self.send_fn is None:
@@ -217,14 +241,17 @@ class ConnectorApplication:
             ConnectorState.STOPPED,
         }:
             self.refresh_readiness()
+        queue = self.outbound_queue.snapshot()
         return ConnectorHealth(
             self.name,
             self.state,
             self.ready_event.is_set(),
             bool(self.thread and self.thread.is_alive()),
-            self.outbound_queue.size,
-            self.outbound_queue.capacity,
+            int(queue["active"]),
+            int(queue["capacity"]),
             self.error,
+            bool(queue["saturated"]),
+            int(queue["rejected"]),
         )
 
 

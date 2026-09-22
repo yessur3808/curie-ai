@@ -16,6 +16,7 @@ from evaluation.phase2_suite import _evaluate as evaluate_phase2
 from evaluation.phase345_suite import run as run_phase345
 from evaluation.phase67_suite import run as run_phase67
 from evaluation.phase8_suite import run as run_phase8
+from evaluation.phase10_hardening_suite import run as run_phase10
 from evaluation.tool_provider_simulator import ProviderMode, run_provider_matrix
 from utils.formatting import telegram_html
 
@@ -192,6 +193,7 @@ def run(root: str | Path = ROOT) -> dict:
     phase345 = run_phase345()
     phase67 = run_phase67()
     phase8 = run_phase8()
+    phase10 = run_phase10()
     simulator = _simulator_metrics()
     connector = _connector_metrics()
     connector_e2e = _end_to_end_connector_metrics()
@@ -204,6 +206,7 @@ def run(root: str | Path = ROOT) -> dict:
         *phase345["checks"].values(),
         *phase67["checks"].values(),
         *phase8["checks"].values(),
+        *phase10["checks"].values(),
         *connector["checks"].values(),
         *connector_e2e["checks"].values(),
         simulator["tool_simulation_pass_rate"] == 1.0,
@@ -261,6 +264,7 @@ def run(root: str | Path = ROOT) -> dict:
         "personality_pass_rate": _ratio(
             phase67["natural_command_passed"], phase67["response_examples"]
         ),
+        **phase10["metrics"],
     }
     return {
         "schema_version": 1,
@@ -277,11 +281,12 @@ def run(root: str | Path = ROOT) -> dict:
             "delivery": connector,
             "connector_end_to_end": connector_e2e,
             "latency": latency,
+            "operational_hardening": phase10,
         },
         "per_taxonomy": catalog["taxonomy_counts"],
         "catalog": catalog,
         "checks": {
-            "all_metrics_present": len(metrics) == 19,
+            "all_metrics_present": len(metrics) == 24,
             "catalog_has_all_taxonomies": all(
                 catalog["taxonomy_counts"].get(name, 0) > 0
                 for name in (

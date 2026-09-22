@@ -45,6 +45,10 @@ _vision_lock = threading.Lock()
 _media_slots = threading.BoundedSemaphore(
     max(1, int(os.getenv("MEDIA_CONCURRENCY_LIMIT", "1")))
 )
+_media_capacity = max(1, int(os.getenv("MEDIA_CONCURRENCY_LIMIT", "1")))
+_media_active = 0
+_media_rejected = 0
+_media_metrics_lock = threading.Lock()
 MEDIA_CONNECTORS = ("telegram", "discord", "whatsapp", "slack", "api")
 MEDIA_KINDS = ("image", "document", "audio")
 
@@ -346,14 +350,32 @@ async def _prepare_attachment_message(
 
 async def prepare_attachment_message(*args, **kwargs) -> str:
     """Reject media overload so ordinary text chat retains resources."""
+    global _media_active, _media_rejected
     if not _media_slots.acquire(blocking=False):
+        with _media_metrics_lock:
+            _media_rejected += 1
         raise RuntimeError(
             "Media processing is busy. Please retry shortly; ordinary text chat is still available."
         )
+    with _media_metrics_lock:
+        _media_active += 1
     try:
         return await _prepare_attachment_message(*args, **kwargs)
     finally:
+        with _media_metrics_lock:
+            _media_active = max(0, _media_active - 1)
         _media_slots.release()
+
+
+def media_backpressure_snapshot() -> dict[str, int | bool | float]:
+    with _media_metrics_lock:
+        return {
+            "active": _media_active,
+            "capacity": _media_capacity,
+            "utilization_percent": round(_media_active / _media_capacity * 100, 1),
+            "saturated": _media_active >= _media_capacity,
+            "rejected": _media_rejected,
+        }
 
 
 def attachment_prompt(

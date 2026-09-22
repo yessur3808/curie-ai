@@ -194,6 +194,11 @@ class DurableTaskRuntime:
         self._per_user_limit = max(1, per_user_read_limit)
         self._users: dict[str, asyncio.Semaphore] = {}
 
+    @staticmethod
+    def interrupted_step_action(risk: str) -> str:
+        """Return the only safe restart behavior for an interrupted task step."""
+        return "verify_without_replay" if risk == "mutating" else "retry_read"
+
     async def _progress(
         self, callback: ProgressCallback | None, task: dict, message: str
     ) -> None:
@@ -443,7 +448,8 @@ class DurableTaskRuntime:
         for step in task["steps"]:
             if step["status"] == "running":
                 definition = get_runtime_registry().get(step["capability"])
-                if definition.risk == "mutating":
+                action = self.interrupted_step_action(definition.risk)
+                if action == "verify_without_replay":
                     await self._recover_interrupted_mutation(task, step, profile or {})
                 else:
                     step["status"] = "pending"

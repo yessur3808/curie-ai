@@ -13,6 +13,8 @@ import uuid
 from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
+from utils.redaction import redact_text
+
 _SECRET_KEY = re.compile(
     r"token|secret|password|passcode|credential|api.?key|authorization|cookie", re.I
 )
@@ -60,7 +62,7 @@ def redact(value: Any, key: str = "") -> Any:
         raw = str(value)
         return {"sha256": _digest(raw), "length": len(raw)}
     if isinstance(value, str):
-        return _SECRET_VALUE.sub("[REDACTED]", value)[:1000]
+        return redact_text(_SECRET_VALUE.sub("[REDACTED]", value))[:1000]
     return (
         value
         if value is None or isinstance(value, (bool, int, float))

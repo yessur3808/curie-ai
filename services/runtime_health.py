@@ -9,6 +9,16 @@ import shutil
 import sqlite3
 
 
+def disk_budget(free_bytes: int, minimum_free_bytes: int) -> dict:
+    minimum = max(1, int(minimum_free_bytes))
+    free = max(0, int(free_bytes))
+    return {
+        "ready": free >= minimum,
+        "free_bytes": free,
+        "minimum_free_bytes": minimum,
+    }
+
+
 def _configured_file(name: str) -> dict:
     value = os.getenv(name, "").strip()
     return {"configured": bool(value), "ready": bool(value and Path(value).is_file())}
@@ -29,6 +39,9 @@ def capability_health(workflow_ready: bool = True) -> dict:
     """Return truthful, independently actionable capability readiness."""
     from llm import manager
     from llm.inference_service import get_inference_service
+    from agent.slo import slo_metrics
+    from services.backpressure import runtime_backpressure
+    from services.media_ingestion import media_backpressure_snapshot
     from services.security import security_status
     from services.voice_delivery import voice_health
 
@@ -50,10 +63,21 @@ def capability_health(workflow_ready: bool = True) -> dict:
     disk = shutil.disk_usage(Path.cwd())
     minimum = int(os.getenv("CURIE_MIN_FREE_DISK_BYTES", str(2 * 1024**3)))
     disk_health = {
-        "ready": disk.free >= minimum,
-        "free_bytes": disk.free,
-        "minimum_free_bytes": minimum,
+        **disk_budget(disk.free, minimum),
         "percent_used": round(disk.used / disk.total * 100, 1),
+    }
+    inference = get_inference_service().snapshot()
+    media_pressure = media_backpressure_snapshot()
+    tool_pressure = runtime_backpressure.snapshot()
+    backpressure = {
+        "model": inference,
+        "attachments": media_pressure,
+        "tools": tool_pressure,
+        "saturated": bool(
+            inference["saturated"]
+            or media_pressure["saturated"]
+            or tool_pressure["saturated"]
+        ),
     }
     transcription_ready = bool(importlib.util.find_spec("whisper"))
     capabilities = {
@@ -77,9 +101,16 @@ def capability_health(workflow_ready: bool = True) -> dict:
         "database": database,
         "disk": disk_health,
         "security": security_status(),
-        "inference": get_inference_service().snapshot(),
+        "inference": inference,
+        "backpressure": backpressure,
+        "slos": slo_metrics.snapshot(),
     }
-    required = (capabilities["text"]["ready"], database["ready"], disk_health["ready"])
+    required = (
+        capabilities["text"]["ready"],
+        database["ready"],
+        disk_health["ready"],
+        not backpressure["saturated"],
+    )
     return {
         "status": "healthy" if all(required) else "degraded",
         "capabilities": capabilities,
@@ -98,4 +129,10 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         icon = "✅" if ready else "⚠️"
         state = "Ready" if ready else "Degraded"
         lines.append(f"- {icon} **{name.title()}:** {state}")
+    capacity_ready = not capabilities["backpressure"]["saturated"]
+    lines.append(
+        "- "
+        f"{'✅' if capacity_ready else '⚠️'} **Capacity:** "
+        f"{'Available' if capacity_ready else 'Saturated'}"
+    )
     return "\n".join(lines)

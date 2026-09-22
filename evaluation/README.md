@@ -8,7 +8,8 @@ python -m evaluation.release
 ```
 
 This command runs the offline tests, the phase suites, provider simulations,
-catalog validation, latency sampling, and every blocking gate. It writes a
+catalog validation, latency sampling, Phase 10 recovery drills, artifact
+redaction checks, and every blocking gate. It writes a
 privacy-safe report to `evaluation/reports/latest.json` and exits non-zero when
 the release is blocked.
 
@@ -26,6 +27,10 @@ the release is blocked.
 - `release_gates.json` owns thresholds, calculations, datasets, blocking
   behavior, components, and waiver rules.
 - `reports/` contains generated reports; JSON output is intentionally ignored.
+- `failure_drills.py` provides isolated recovery evidence for twelve required
+  operational failures without touching production services.
+- `phase10_hardening_suite.py` validates the trace, SLO, backpressure,
+  redaction, and recovery contracts used by the final five release gates.
 
 ## Evaluation layers
 
