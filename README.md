@@ -1030,3 +1030,7 @@ This project is licensed under the MIT License — see [LICENSE](LICENSE) for de
 ---
 
 **C.U.R.I.E. — Your Personal AI Assistant, Running Locally.**
+
+## Locally trained Curie voice
+
+Curie owns the trained Nano speech worker, live sentence streaming, local transcription, personality delivery and training/evaluation tools in `services/trained_voice/`. Private weights and recordings live in `data/trained-voice/` and are excluded from Git. The Observatory dashboard uses this service. See [setup, provenance and resource limits](docs/TRAINED_VOICE.md).

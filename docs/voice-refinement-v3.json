@@ -1,0 +1,179 @@
+{
+  "samples": [
+    {
+      "variant": "baseline",
+      "text": "Bonjour, Yaser. I am here. Let us see what needs your attention today. We can review your projects, check the weather, or simply talk for a moment.",
+      "audio": "baseline-0.wav",
+      "seconds": 10.08,
+      "generationSeconds": 15.207461185986176,
+      "retries": 0,
+      "transcript": "Bonjour, yes sir. I am here. Let us see what needs your attention today. We can review your projects, check the weather, or simply talk for a moment.",
+      "wordErrors": 2,
+      "wordCount": 27,
+      "wer": 0.07407407407407407
+    },
+    {
+      "variant": "baseline",
+      "text": "Your next meeting is at three thirty. The latest deployment is healthy, and traffic is up twelve percent.",
+      "audio": "baseline-1.wav",
+      "seconds": 6.52,
+      "generationSeconds": 11.803208937169984,
+      "retries": 0,
+      "transcript": "Your next meeting is at 3.30. The latest deployment is healthy, and traffic is up 12%.",
+      "wordErrors": 0,
+      "wordCount": 18,
+      "wer": 0.0
+    },
+    {
+      "variant": "baseline",
+      "text": "There is a thunderstorm warning in Hong Kong. Please take care if you're going outside.",
+      "audio": "baseline-2.wav",
+      "seconds": 4.96,
+      "generationSeconds": 11.149379866197705,
+      "retries": 0,
+      "transcript": "There is a thunderstorm warning in Hong Kong. Please take care if you're going outside.",
+      "wordErrors": 0,
+      "wordCount": 16,
+      "wer": 0.0
+    },
+    {
+      "variant": "baseline",
+      "text": "That is an interesting question. Let us examine it together, one small step at a time.",
+      "audio": "baseline-3.wav",
+      "seconds": 5.52,
+      "generationSeconds": 11.507798376027495,
+      "retries": 0,
+      "transcript": "That is an interesting question. Let us examine it together one small step at a time.",
+      "wordErrors": 0,
+      "wordCount": 16,
+      "wer": 0.0
+    },
+    {
+      "variant": "measured",
+      "text": "Bonjour, Yaser. I am here. Let us see what needs your attention today. We can review your projects, check the weather, or simply talk for a moment.",
+      "audio": "measured-0.wav",
+      "seconds": 10.69,
+      "generationSeconds": 17.047144441865385,
+      "retries": 0,
+      "transcript": "Bonjour, yes sir. I am here. Let us see what need your attention today. We can review your projects, check the weather, or simply talk for a moment.",
+      "wordErrors": 3,
+      "wordCount": 27,
+      "wer": 0.1111111111111111
+    },
+    {
+      "variant": "measured",
+      "text": "Your next meeting is at three thirty. The latest deployment is healthy, and traffic is up twelve percent.",
+      "audio": "measured-1.wav",
+      "seconds": 6.53,
+      "generationSeconds": 12.263570307055488,
+      "retries": 0,
+      "transcript": "Your next meeting is at 3.30. The latest deployment is healthy, and traffic is up 12%.",
+      "wordErrors": 0,
+      "wordCount": 18,
+      "wer": 0.0
+    },
+    {
+      "variant": "measured",
+      "text": "There is a thunderstorm warning in Hong Kong. Please take care if you're going outside.",
+      "audio": "measured-2.wav",
+      "seconds": 4.86,
+      "generationSeconds": 10.64940292807296,
+      "retries": 0,
+      "transcript": "There's a thunderstorm warning in Hong Kong. Please take care if you're going outside.",
+      "wordErrors": 1,
+      "wordCount": 16,
+      "wer": 0.0625
+    },
+    {
+      "variant": "measured",
+      "text": "That is an interesting question. Let us examine it together, one small step at a time.",
+      "audio": "measured-3.wav",
+      "seconds": 5.55,
+      "generationSeconds": 11.423855861183256,
+      "retries": 0,
+      "transcript": "That is an interesting question. Let us examine it together one small step at a time.",
+      "wordErrors": 0,
+      "wordCount": 16,
+      "wer": 0.0
+    },
+    {
+      "variant": "clear",
+      "text": "Bonjour, Yaser. I am here. Let us see what needs your attention today. We can review your projects, check the weather, or simply talk for a moment.",
+      "audio": "clear-0.wav",
+      "seconds": 10.04,
+      "generationSeconds": 15.462851179996505,
+      "retries": 0,
+      "transcript": "Bonjour, yes sir. I am here. Let us see what needs your attention today. We can review your projects, check the weather, or simply talk for a moment.",
+      "wordErrors": 2,
+      "wordCount": 27,
+      "wer": 0.07407407407407407
+    },
+    {
+      "variant": "clear",
+      "text": "Your next meeting is at three thirty. The latest deployment is healthy, and traffic is up twelve percent.",
+      "audio": "clear-1.wav",
+      "seconds": 6.44,
+      "generationSeconds": 11.99082055897452,
+      "retries": 0,
+      "transcript": "Your next meeting is at 3.30. The latest deployment is healthy and traffic is up 12%.",
+      "wordErrors": 0,
+      "wordCount": 18,
+      "wer": 0.0
+    },
+    {
+      "variant": "clear",
+      "text": "There is a thunderstorm warning in Hong Kong. Please take care if you're going outside.",
+      "audio": "clear-2.wav",
+      "seconds": 4.96,
+      "generationSeconds": 10.973135526059195,
+      "retries": 0,
+      "transcript": "There is a thunderstorm warning in Hong Kong. Please take care if you're going outside.",
+      "wordErrors": 0,
+      "wordCount": 16,
+      "wer": 0.0
+    },
+    {
+      "variant": "clear",
+      "text": "That is an interesting question. Let us examine it together, one small step at a time.",
+      "audio": "clear-3.wav",
+      "seconds": 5.8,
+      "generationSeconds": 11.390715186018497,
+      "retries": 0,
+      "transcript": "That is an interesting question. Let us examine it together one small step at a time.",
+      "wordErrors": 0,
+      "wordCount": 16,
+      "wer": 0.0
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "errors": 2,
+      "words": 77,
+      "audioSeconds": 27.080000000000002,
+      "generationSeconds": 49.66784836538136,
+      "wer": 0.025974025974025976
+    },
+    "measured": {
+      "errors": 4,
+      "words": 77,
+      "audioSeconds": 27.63,
+      "generationSeconds": 51.38397353817709,
+      "wer": 0.05194805194805195
+    },
+    "clear": {
+      "errors": 2,
+      "words": 77,
+      "audioSeconds": 27.240000000000002,
+      "generationSeconds": 49.81752245104872,
+      "wer": 0.025974025974025976
+    }
+  },
+  "limitation": "ASR estimates intelligibility; a human listening comparison is needed for accent and naturalness.",
+  "selected": "clear",
+  "changes": {
+    "temperatureOffset": -0.07,
+    "pauseScale": 0.9
+  },
+  "weightsChanged": false,
+  "comparison": "Same trained adapter, reference, seed, and four prompts; inference and pause tuning only."
+}

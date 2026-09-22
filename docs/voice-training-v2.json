@@ -1,0 +1,114 @@
+{
+  "method": "LoRA weight fine-tuning",
+  "rank": 8,
+  "alpha": 16,
+  "contract": 2,
+  "seed": 852,
+  "trainableParameters": 1179648,
+  "curieClips": 325,
+  "frenchEnglishClips": 6,
+  "validationClips": 30,
+  "learningRate": 0.0001,
+  "history": [
+    {
+      "step": 0,
+      "validationLoss": 4.830995217959086
+    },
+    {
+      "step": 20,
+      "trainLoss": 4.525705772638321,
+      "seconds": 28.3
+    },
+    {
+      "step": 40,
+      "trainLoss": 4.300571990013123,
+      "seconds": 52.6
+    },
+    {
+      "step": 60,
+      "trainLoss": 4.316380476951599,
+      "seconds": 74.7,
+      "validationLoss": 4.197570649782817
+    },
+    {
+      "step": 80,
+      "trainLoss": 4.2775485694408415,
+      "seconds": 103.2
+    },
+    {
+      "step": 100,
+      "trainLoss": 4.198823064565659,
+      "seconds": 128.3
+    },
+    {
+      "step": 120,
+      "trainLoss": 4.2348678529262545,
+      "seconds": 152.6,
+      "validationLoss": 4.128828557332357
+    },
+    {
+      "step": 140,
+      "trainLoss": 4.214036548137665,
+      "seconds": 179.9
+    },
+    {
+      "step": 160,
+      "trainLoss": 4.306365752220154,
+      "seconds": 201.8
+    },
+    {
+      "step": 180,
+      "trainLoss": 4.084338986873627,
+      "seconds": 224.5,
+      "validationLoss": 4.09997497399648
+    },
+    {
+      "step": 200,
+      "trainLoss": 4.054618102312088,
+      "seconds": 253.0
+    },
+    {
+      "step": 220,
+      "trainLoss": 4.093492877483368,
+      "seconds": 276.9
+    },
+    {
+      "step": 240,
+      "trainLoss": 4.083423984050751,
+      "seconds": 299.4,
+      "validationLoss": 4.089254593849182
+    }
+  ],
+  "status": "complete",
+  "elapsedSeconds": 305.2,
+  "bestValidationLoss": 4.089254593849182,
+  "completedSteps": 240,
+  "peakMiB": 4434,
+  "bestStep": 240,
+  "improvedHeldOutLoss": true,
+  "adapterSHA256": "8975273590704566ecf22897b1a35488f0fd1dd458b7ee8d5abb8489f7302d0a",
+  "productionStrength": 0.2,
+  "productionRevision": "curie-v2-lora240-strength20",
+  "limitations": [
+    "Teacher-forced validation loss is not a perceptual accent score.",
+    "Full-strength generation repeated or dropped words; only the conservative blend was selected.",
+    "Automatic transcripts can contain errors.",
+    "Proper names and quantities still require listening checks."
+  ],
+  "runtimeValidation": {
+    "greetingAudioSeconds": 10.08,
+    "greetingGenerationSeconds": 12.08,
+    "briefingWords": 213,
+    "briefingChunks": 21,
+    "briefingSpeechSecondsExcludingPauses": 100.96,
+    "briefingGenerationSeconds": 80.44,
+    "briefingRetries": 0,
+    "peakWorkerMiB": 4434,
+    "liveChatPeakWorkerMiB": 5655,
+    "notes": "Preserve report line boundaries. ASR is a diagnostic; names and accented words can be transcribed incorrectly.",
+    "liveBriefingRequestSeconds": 78.0,
+    "cachedBriefingReplaySeconds": 0.01,
+    "browserComparisonPlayback": "Both samples advance currentTime, readyState=4, no media or console errors",
+    "privateAudioRanges": "206 authenticated; 401 unauthenticated"
+  }
+}
