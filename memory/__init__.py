@@ -9,7 +9,7 @@ from .adaptive import (
     get_relevant_memories,
     record_conversation_episode,
 )
-from .hierarchy import memory_stats, memory_tier, rank_memories
+from .hierarchy import memory_kernel_status, memory_stats, memory_tier, rank_memories
 from .repositories import get_repositories
 from .service import (
     ConfirmationState,
@@ -36,6 +36,7 @@ __all__ = [
     "record_conversation_episode",
     "rank_memories",
     "memory_stats",
+    "memory_kernel_status",
     "memory_tier",
     "get_repositories",
     "MemoryRecord",

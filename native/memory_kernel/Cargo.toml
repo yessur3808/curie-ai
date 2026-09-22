@@ -1,0 +1,22 @@
+[package]
+name = "curie-memory-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Bounded native retrieval and ranking kernel for Curie memory"
+license = "MIT"
+publish = false
+
+[lib]
+name = "_curie_memory_kernel"
+crate-type = ["cdylib"]
+
+[dependencies]
+blake2 = "0.10.6"
+lru = "0.18.4"
+pyo3 = { version = "0.29.2", features = ["extension-module", "abi3-py310"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"

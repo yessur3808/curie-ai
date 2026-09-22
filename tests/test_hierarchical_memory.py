@@ -146,6 +146,41 @@ def test_retrieval_cache_fingerprint_tracks_memory_edits():
     assert metrics["cache_misses"] == 2
 
 
+def test_auto_mode_circuit_breaks_to_python_after_native_failure(monkeypatch):
+    from memory import hierarchy
+
+    class BrokenKernel:
+        @staticmethod
+        def kernel_version():
+            return "broken-test-kernel"
+
+        @staticmethod
+        def cache_entries():
+            return 0
+
+        @staticmethod
+        def rank_memories(*_args, **_kwargs):
+            raise RuntimeError("synthetic native failure")
+
+    monkeypatch.setenv("CURIE_MEMORY_KERNEL", "auto")
+    monkeypatch.setattr(hierarchy, "_NATIVE_IMPORT_ATTEMPTED", True)
+    monkeypatch.setattr(hierarchy, "_NATIVE_MODULE", BrokenKernel())
+    monkeypatch.setattr(hierarchy, "_NATIVE_IMPORT_ERROR", None)
+    monkeypatch.setattr(hierarchy, "_NATIVE_FAILURE_LOGGED", False)
+    hierarchy.retrieval_metrics(reset=True)
+
+    results = hierarchy.rank_memories(
+        "favorite food", [_memory("favorite_food", "spicy noodles")]
+    )
+    metrics = hierarchy.retrieval_metrics(reset=True)
+
+    assert results[0]["value"] == "spicy noodles"
+    assert metrics["native_failures"] == 1
+    assert metrics["python_queries"] == 1
+    assert metrics["kernel"]["active"] == "python"
+    assert metrics["kernel"]["import_error"] == "runtime:RuntimeError"
+
+
 def test_recall_suppresses_duplicate_long_memory_values():
     repeated = "We agreed to make Curie's memory precise, bounded, and private."
     memories = [

@@ -132,6 +132,7 @@ models/**/*.onnx
 projects/
 .curie_credentials.enc
 .curie-browser/
+target/
 
 # Trained voice data and isolated inference runtimes are private local assets.
 /data/trained-voice/

@@ -982,6 +982,7 @@ class MemoryService:
             limit=max(1, int(limit)),
             char_budget=char_budget,
             explicit_search=explicit_search,
+            owner_id=owner_id,
         )
         by_id = {record.record_id: record for record in eligible}
         hits: list[RetrievalHit] = []
@@ -1439,6 +1440,7 @@ class MemoryService:
                     legacy_documents,
                     limit=limit,
                     explicit_search=True,
+                    owner_id=owner_id,
                 )
             ]
             unified_ids = [

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.09-rust-memory-kernel
+
+- Replaced Curie's deterministic memory retrieval, hybrid ranking,
+  deduplication, tier limiting, and context-budget packing hot path with a
+  PyO3 ABI3 Rust extension.
+- Preserved the Python implementation as an explicit, tested rollback and
+  added `auto`, required `rust`, and forced `python` routing modes.
+- Added a second owner-boundary check inside the ranking kernel, native/Python
+  parity coverage, Rust formatting and Clippy gates, Cargo unit tests, a Rust
+  dependency audit, and reproducible benchmarks.
+
 ## 2026.09-trained-voice-default
 
 - Made Curie's trained Chatterbox Nano/LoRA voice authoritative across bot

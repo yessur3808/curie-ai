@@ -63,6 +63,44 @@ jobs:
           black --check agent/ connectors/ contracts/ evaluation/ llm/ memory/
           scripts/ services/ utils/ main.py tests/
 
+  rust-memory-kernel:
+    name: Rust memory kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python and native build dependencies
+        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+      - name: Verify the runner Rust toolchain
+        run: rustc --version && cargo --version
+      - name: Check Rust formatting, lints, and unit tests
+        run: |
+          cargo fmt --manifest-path native/memory_kernel/Cargo.toml -- --check
+          cargo clippy --manifest-path native/memory_kernel/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path native/memory_kernel/Cargo.toml
+      - name: Build and install the ABI3 extension
+        run: |
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/memory_kernel/Cargo.toml
+          pip install dist/native/curie_memory_kernel-*.whl
+      - name: Require native parity, isolation, and integration
+        env:
+          CURIE_MEMORY_KERNEL: rust
+        run: >-
+          pytest -q tests/test_memory_kernel_native.py
+          tests/test_hierarchical_memory.py
+          tests/test_phase67_response_memory.py
+      - name: Run a bounded native benchmark smoke test
+        env:
+          CURIE_MEMORY_KERNEL: rust
+        run: python -m scripts.benchmark_memory_kernel --sizes 250 --iterations 1 --mode rust
+
   unit-tests:
     name: Offline unit tests
     runs-on: ubuntu-latest
@@ -148,6 +186,10 @@ jobs:
         # diskcache is pulled by llama-cpp-python. 5.6.3 is the latest release
         # and PYSEC-2026-2447 has no fixed version; see docs/security.md.
         run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-2447
+      - name: Audit pinned Rust dependencies
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit --file native/memory_kernel/Cargo.lock
       - name: Scan Python for high-severity findings
         run: >-
           bandit -q -r agent connectors evaluation llm memory scripts services utils
@@ -209,6 +251,7 @@ jobs:
     needs:
       - static-analysis
       - format-check
+      - rust-memory-kernel
       - unit-tests
       - integration-tests
       - security-tests
@@ -222,6 +265,7 @@ jobs:
         env:
           STATIC_ANALYSIS: ${{ needs.static-analysis.result }}
           FORMAT_CHECK: ${{ needs.format-check.result }}
+          RUST_MEMORY_KERNEL: ${{ needs.rust-memory-kernel.result }}
           UNIT_TESTS: ${{ needs.unit-tests.result }}
           INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
           SECURITY_TESTS: ${{ needs.security-tests.result }}
@@ -232,6 +276,7 @@ jobs:
           for result in \
             "$STATIC_ANALYSIS" \
             "$FORMAT_CHECK" \
+            "$RUST_MEMORY_KERNEL" \
             "$UNIT_TESTS" \
             "$INTEGRATION_TESTS" \
             "$SECURITY_TESTS" \

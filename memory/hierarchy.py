@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -141,8 +142,51 @@ _RETRIEVAL_TOTALS: dict[str, float] = {
     "selected": 0,
     "cache_hits": 0,
     "cache_misses": 0,
+    "native_queries": 0,
+    "python_queries": 0,
+    "native_failures": 0,
     "total_latency_ms": 0.0,
 }
+_NATIVE_MODULE: Any = None
+_NATIVE_IMPORT_ATTEMPTED = False
+_NATIVE_IMPORT_ERROR: str | None = None
+_NATIVE_FAILURE_LOGGED = False
+logger = logging.getLogger(__name__)
+
+
+def _kernel_mode() -> str:
+    configured = os.getenv("CURIE_MEMORY_KERNEL", "auto").strip().casefold()
+    return configured if configured in {"auto", "rust", "python"} else "auto"
+
+
+def _native_kernel():
+    """Load the optional ABI3 module without making import a startup requirement."""
+    global _NATIVE_MODULE, _NATIVE_IMPORT_ATTEMPTED, _NATIVE_IMPORT_ERROR
+    if _NATIVE_IMPORT_ATTEMPTED:
+        return _NATIVE_MODULE
+    _NATIVE_IMPORT_ATTEMPTED = True
+    try:
+        import _curie_memory_kernel as native
+
+        _NATIVE_MODULE = native
+    except Exception as error:
+        _NATIVE_IMPORT_ERROR = type(error).__name__
+    return _NATIVE_MODULE
+
+
+def memory_kernel_status() -> dict[str, Any]:
+    """Return content-free native-kernel readiness and active routing."""
+    mode = _kernel_mode()
+    native = _native_kernel()
+    available = native is not None
+    return {
+        "mode": mode,
+        "available": available,
+        "active": "rust" if available and mode != "python" else "python",
+        "version": native.kernel_version() if available else None,
+        "fallback": mode != "rust",
+        "import_error": _NATIVE_IMPORT_ERROR,
+    }
 
 
 def default_importance(kind: str) -> float:
@@ -315,8 +359,13 @@ def retrieval_metrics(*, reset: bool = False) -> dict[str, Any]:
         if reset:
             for key in _RETRIEVAL_TOTALS:
                 _RETRIEVAL_TOTALS[key] = 0.0
-    with _CACHE_LOCK:
-        cache_entries = len(_PREPARED_CACHE)
+    status = memory_kernel_status()
+    native = _native_kernel() if status["active"] == "rust" else None
+    if native is not None:
+        cache_entries = int(native.cache_entries())
+    else:
+        with _CACHE_LOCK:
+            cache_entries = len(_PREPARED_CACHE)
     attempts = snapshot["cache_hits"] + snapshot["cache_misses"]
     queries = snapshot["queries"]
     return {
@@ -330,6 +379,7 @@ def retrieval_metrics(*, reset: bool = False) -> dict[str, Any]:
         "cache_hit_rate": round(snapshot["cache_hits"] / max(1, attempts), 4),
         "cache_entries": cache_entries,
         "cache_capacity": _cache_capacity(),
+        "kernel": status,
     }
 
 
@@ -337,6 +387,9 @@ def clear_retrieval_cache() -> None:
     """Drop only ephemeral compiled features; persisted memories are untouched."""
     with _CACHE_LOCK:
         _PREPARED_CACHE.clear()
+    native = _native_kernel()
+    if native is not None:
+        native.clear_cache()
 
 
 def _as_datetime(value: Any) -> datetime | None:
@@ -461,20 +514,23 @@ def _hybrid_score(
     return score
 
 
-def rank_memories(
+def _rank_memories_python(
     query: str,
     memories: Iterable[dict[str, Any]],
     *,
     limit: int = 8,
     char_budget: int | None = None,
     explicit_search: bool = False,
+    owner_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return only relevant, active memories within a strict prompt budget."""
+    """Auditable Python rollback for the native ranking kernel."""
     started = time.perf_counter()
     clean_query = str(query or "").strip()
     if not clean_query:
         _record_retrieval_metrics(
-            queries=1, total_latency_ms=(time.perf_counter() - started) * 1000
+            queries=1,
+            python_queries=1,
+            total_latency_ms=(time.perf_counter() - started) * 1000,
         )
         return []
     reference_request = bool(_REFERENCE_CUES.search(clean_query))
@@ -485,6 +541,7 @@ def rank_memories(
     ):
         _record_retrieval_metrics(
             queries=1,
+            python_queries=1,
             bypassed=1,
             total_latency_ms=(time.perf_counter() - started) * 1000,
         )
@@ -519,6 +576,10 @@ def rank_memories(
     for raw in memories:
         scanned += 1
         memory = raw
+        if owner_id is not None and str(
+            memory.get("owner_id") or memory.get("internal_id") or ""
+        ) != str(owner_id):
+            continue
         if not memory.get("active", True) or _is_expired(memory, now):
             continue
         status = str(memory.get("status", "verified")).casefold()
@@ -627,6 +688,7 @@ def rank_memories(
             break
     _record_retrieval_metrics(
         queries=1,
+        python_queries=1,
         candidates_scanned=scanned,
         candidates_reranked=len(candidates),
         selected=len(selected),
@@ -635,6 +697,191 @@ def rank_memories(
         total_latency_ms=(time.perf_counter() - started) * 1000,
     )
     return selected
+
+
+def _value_text(value: Any) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, default=str, sort_keys=True)
+    return str(value)
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _timestamp(value: Any) -> float | None:
+    parsed = _as_datetime(value)
+    return parsed.timestamp() if parsed is not None else None
+
+
+def _native_payload(index: int, memory: dict[str, Any]) -> dict[str, Any]:
+    key = str(memory.get("key", ""))
+    value = _value_text(memory.get("value", ""))
+    observed = (
+        memory.get("last_confirmed_at")
+        or memory.get("last_seen_at")
+        or memory.get("created_at")
+    )
+    return {
+        "index": index,
+        "id": str(memory.get("id", "")),
+        "owner_id": str(memory.get("owner_id") or memory.get("internal_id") or ""),
+        "key": key.casefold(),
+        "key_chars": len(key),
+        "value_text": value.casefold(),
+        "value_chars": len(value),
+        "text": _memory_text(memory).casefold(),
+        "active": bool(memory.get("active", True)),
+        "expires_at": _timestamp(memory.get("expires_at")),
+        "observed_at": _timestamp(observed),
+        "status": str(memory.get("status", "verified")).casefold(),
+        "confidence": _safe_float(memory.get("confidence")),
+        "importance": _optional_float(memory.get("importance")),
+        "confirmations": max(0, _safe_int(memory.get("confirmation_count"))),
+        "kind": str(memory.get("kind", "")).casefold(),
+        "explicit_tier": str(memory.get("tier", "")).casefold(),
+    }
+
+
+def _rank_memories_native(
+    native,
+    query: str,
+    memories: list[dict[str, Any]],
+    *,
+    limit: int,
+    char_budget: int | None,
+    explicit_search: bool,
+    owner_id: str | None,
+) -> list[dict[str, Any]]:
+    started = time.perf_counter()
+    clean_query = str(query or "").strip()
+    if not clean_query:
+        _record_retrieval_metrics(
+            queries=1,
+            native_queries=1,
+            total_latency_ms=(time.perf_counter() - started) * 1000,
+        )
+        return []
+    reference_request = bool(_REFERENCE_CUES.search(clean_query))
+    if (
+        _OPERATIONAL_COMMAND.search(clean_query)
+        and not reference_request
+        and not explicit_search
+    ):
+        _record_retrieval_metrics(
+            queries=1,
+            native_queries=1,
+            bypassed=1,
+            total_latency_ms=(time.perf_counter() - started) * 1000,
+        )
+        return []
+    minimum = _safe_float(os.getenv("MEMORY_RELEVANCE_MIN_SCORE"), 0.28)
+    if reference_request:
+        minimum = max(0.16, minimum - 0.08)
+    if explicit_search:
+        minimum = max(0.14, minimum - 0.1)
+    if len(_tokens(clean_query)) <= 1:
+        minimum += 0.05
+    hypothesis_minimum = _safe_float(os.getenv("ADAPTIVE_MEMORY_MIN_CONFIDENCE"), 0.8)
+    budget = max(
+        300,
+        _safe_int(
+            (
+                char_budget
+                if char_budget is not None
+                else os.getenv("MEMORY_CONTEXT_CHAR_BUDGET")
+            ),
+            1600,
+        ),
+    )
+    now = datetime.now(timezone.utc)
+    selected, scanned, reranked, cache_hits, cache_misses = native.rank_memories(
+        clean_query.casefold(),
+        (_native_payload(index, memory) for index, memory in enumerate(memories)),
+        limit=max(1, int(limit)),
+        budget=budget,
+        explicit_search=bool(explicit_search),
+        minimum=minimum,
+        hypothesis_minimum=hypothesis_minimum,
+        rerank_candidates=_safe_int(os.getenv("MEMORY_RERANK_CANDIDATES"), 96),
+        cache_capacity=_cache_capacity(),
+        now_epoch=now.timestamp(),
+        expected_owner=str(owner_id) if owner_id is not None else None,
+    )
+    results: list[dict[str, Any]] = []
+    for index, relevance, reason, tier in selected:
+        memory = dict(memories[int(index)])
+        memory["_relevance"] = float(relevance)
+        memory["_retrieval_reason"] = str(reason)
+        memory["_memory_tier"] = str(tier)
+        results.append(memory)
+    _record_retrieval_metrics(
+        queries=1,
+        native_queries=1,
+        candidates_scanned=int(scanned),
+        candidates_reranked=int(reranked),
+        selected=len(results),
+        cache_hits=int(cache_hits),
+        cache_misses=int(cache_misses),
+        total_latency_ms=(time.perf_counter() - started) * 1000,
+    )
+    return results
+
+
+def rank_memories(
+    query: str,
+    memories: Iterable[dict[str, Any]],
+    *,
+    limit: int = 8,
+    char_budget: int | None = None,
+    explicit_search: bool = False,
+    owner_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Rank through Rust when installed, with an explicit Python rollback."""
+    global _NATIVE_FAILURE_LOGGED, _NATIVE_MODULE, _NATIVE_IMPORT_ERROR
+    memory_list = list(memories)
+    mode = _kernel_mode()
+    native = None if mode == "python" else _native_kernel()
+    if native is None and mode == "rust":
+        raise RuntimeError(
+            "CURIE_MEMORY_KERNEL=rust but the native module is unavailable"
+        )
+    if native is not None:
+        try:
+            return _rank_memories_native(
+                native,
+                query,
+                memory_list,
+                limit=limit,
+                char_budget=char_budget,
+                explicit_search=explicit_search,
+                owner_id=owner_id,
+            )
+        except Exception as error:
+            _record_retrieval_metrics(native_failures=1)
+            if mode == "rust":
+                raise RuntimeError(
+                    "the required native memory kernel failed"
+                ) from error
+            _NATIVE_MODULE = None
+            _NATIVE_IMPORT_ERROR = f"runtime:{type(error).__name__}"
+            if not _NATIVE_FAILURE_LOGGED:
+                logger.warning(
+                    "Native memory kernel failed; using the Python rollback (%s)",
+                    type(error).__name__,
+                )
+                _NATIVE_FAILURE_LOGGED = True
+    return _rank_memories_python(
+        query,
+        memory_list,
+        limit=limit,
+        char_budget=char_budget,
+        explicit_search=explicit_search,
+        owner_id=owner_id,
+    )
 
 
 def memory_stats(memories: Iterable[dict[str, Any]]) -> dict[str, Any]:

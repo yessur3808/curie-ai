@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: install install-optional run start test migrate migrate-down lint format check install-hooks shell verify help
+.PHONY: install install-optional memory-kernel memory-kernel-check run start test migrate migrate-down lint format check install-hooks shell verify help
 .PHONY: db-start db-stop db-restart db-status setup-db
 .PHONY: run-telegram run-discord run-whatsapp run-api run-all
 .PHONY: check-ports test-imports clean sync-env sync-env-add sync-env-clean sync-env-backup restart-clean
@@ -11,6 +11,16 @@ install:  ## Install all dependencies from requirements.txt
 
 install-optional:  ## Install optional dependencies (voice features, Discord, WhatsApp)
 	pip install -r requirements-optional.txt
+
+memory-kernel:  ## Build and install Curie's Rust memory ranker into .venv
+	.venv/bin/pip install -r requirements-rust.txt
+	.venv/bin/maturin develop --release --manifest-path native/memory_kernel/Cargo.toml
+
+memory-kernel-check:  ## Check Rust formatting, lints, tests, and native parity
+	cargo fmt --manifest-path native/memory_kernel/Cargo.toml -- --check
+	cargo clippy --manifest-path native/memory_kernel/Cargo.toml --all-targets -- -D warnings
+	cargo test --manifest-path native/memory_kernel/Cargo.toml
+	CURIE_MEMORY_KERNEL=rust .venv/bin/pytest -q tests/test_memory_kernel_native.py tests/test_hierarchical_memory.py tests/test_phase67_response_memory.py
 
 verify:  ## Verify setup and dependencies
 	python scripts/verify_setup.py
@@ -152,5 +162,3 @@ help:  ## Show available commands
 	@echo "     make format            # Auto-format with black"
 	@echo "     make install-hooks     # Install git pre-commit and pre-push hooks"
 	@echo ""
-
-	

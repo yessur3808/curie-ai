@@ -41,6 +41,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
     from llm.inference_service import get_inference_service
     from agent.kernel.feature_flags import PipelineFeatureFlags
     from agent.slo import slo_metrics
+    from memory import memory_kernel_status
     from services.backpressure import runtime_backpressure
     from services.media_ingestion import media_backpressure_snapshot
     from services.security import security_status
@@ -60,6 +61,10 @@ def capability_health(workflow_ready: bool = True) -> dict:
     vision_model = _configured_file("VISION_MODEL_PATH")
     vision_projector = _configured_file("VISION_MMPROJ_PATH")
     voice = voice_health()
+    memory_kernel = memory_kernel_status()
+    memory_kernel["ready"] = not (
+        memory_kernel["mode"] == "rust" and memory_kernel["active"] != "rust"
+    )
     database = _database_health()
     disk = shutil.disk_usage(Path.cwd())
     minimum = int(os.getenv("CURIE_MIN_FREE_DISK_BYTES", str(2 * 1024**3)))
@@ -99,6 +104,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
             "fallback": "request typed text",
         },
         "speech": {**voice, "fallback": "complete text reply"},
+        "memory_kernel": memory_kernel,
         "database": database,
         "disk": disk_health,
         "security": security_status(),
@@ -111,6 +117,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         capabilities["text"]["ready"],
         database["ready"],
         disk_health["ready"],
+        memory_kernel["ready"],
         not backpressure["saturated"],
     )
     return {
@@ -125,12 +132,21 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
     health = capability_health(workflow_ready)
     capabilities = health["capabilities"]
     lines = [f"**Curie status: {health['status'].title()}**", ""]
-    for name in ("text", "vision", "transcription", "speech", "database", "disk"):
+    for name in (
+        "text",
+        "vision",
+        "transcription",
+        "speech",
+        "memory_kernel",
+        "database",
+        "disk",
+    ):
         item = capabilities[name]
         ready = bool(item.get("ready"))
         icon = "✅" if ready else "⚠️"
         state = "Ready" if ready else "Degraded"
-        lines.append(f"- {icon} **{name.title()}:** {state}")
+        label = name.replace("_", " ").title()
+        lines.append(f"- {icon} **{label}:** {state}")
     capacity_ready = not capabilities["backpressure"]["saturated"]
     lines.append(
         "- "

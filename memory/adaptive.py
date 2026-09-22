@@ -628,6 +628,7 @@ def _handle_memory_command(internal_id: str, action: str, argument: str) -> str:
             limit=10,
             char_budget=4000,
             explicit_search=True,
+            owner_id=internal_id,
         )
         if not matches:
             return f"I couldn't find a relevant memory for `{argument}`."
