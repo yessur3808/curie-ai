@@ -24,7 +24,15 @@ from llm import manager
 from agent.orchestration.model_service import ModelConversationService
 from agent.personality_context import PersonalityContext
 from .voice_persona import persona_prompt, delivery_settings, persona_revision
-from .voice_stream import worker_events, until_disconnect
+from .runtime import (
+    TrainedVoiceBusy,
+    TrainedVoiceError,
+    synthesize_trained_voice,
+    trained_voice_health,
+    trained_voice_required,
+    trained_voice_stream_events,
+)
+from .voice_stream import until_disconnect
 from utils.voice import (
     text_to_speech,
     get_voice_config_from_persona,
@@ -56,8 +64,6 @@ history = collections.OrderedDict()
 gate = asyncio.Semaphore(1)
 voice_paths = VoicePaths.from_root(ROOT)
 VOICE_PYTHON = voice_paths.transcription_python
-REFERENCE_PYTHON = voice_paths.speech_python
-REFERENCE_CONFIG = voice_paths.config
 audio_dir = pathlib.Path(tempfile.mkdtemp(prefix="curie-dashboard-audio-"))
 os.chmod(audio_dir, 0o700)
 
@@ -66,7 +72,9 @@ class Message(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
     user_id: str = Field(min_length=1, max_length=256)
     voice_response: bool = False
-    voice_profile: str = Field(default="french", pattern="^(french|clear|custom)$")
+    voice_profile: str = Field(
+        default="trained", pattern="^(trained|french|clear|custom)$"
+    )
     ephemeral: bool = False
     live: bool = False
     username: str | None = None
@@ -93,50 +101,25 @@ def custom_config():
 
 
 def reference_voice_ready():
-    return voice_paths.ready()
+    return trained_voice_health()["ready"]
 
 
 async def reference_voice(text, output, delivery):
-    proc = await asyncio.create_subprocess_exec(
-        str(REFERENCE_PYTHON),
-        "-m",
-        "services.trained_voice.reference_voice",
-        "--config",
-        str(REFERENCE_CONFIG),
-        "--output",
-        str(output),
-        "--delivery",
-        json.dumps(delivery),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=str(ROOT),
-        env={
-            k: os.environ[k]
-            for k in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "XDG_CACHE_HOME")
-            if k in os.environ
-        },
-    )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(text.encode()), timeout=115
-        )
-    except (asyncio.TimeoutError, asyncio.CancelledError) as error:
-        if proc.returncode is None:
-            proc.kill()
-        await proc.wait()
-        if isinstance(error, asyncio.CancelledError):
-            raise
-        raise HTTPException(504, "Voice generation timed out. Try a shorter message.")
-    if proc.returncode:
+        metrics = await synthesize_trained_voice(text, output, delivery)
+    except TrainedVoiceBusy as error:
         raise HTTPException(
-            503, "Reference voice synthesis failed; check the isolated voice runtime"
-        )
-    # Keep metrics, never spoken private content, in the adapter log.
-    for line in reversed(stdout.decode(errors="replace").splitlines()):
-        if line.startswith("{"):
-            print("Reference voice metrics: " + line, flush=True)
-            break
+            429, "The trained voice is busy. Try again shortly."
+        ) from error
+    except TrainedVoiceError as error:
+        if error.code == "trained_voice_timeout":
+            raise HTTPException(
+                504, "Voice generation timed out. Try a shorter message."
+            ) from error
+        raise HTTPException(
+            503, "Curie's trained voice could not generate speech."
+        ) from error
+    print("Reference voice metrics: " + json.dumps(metrics, sort_keys=True), flush=True)
 
 
 def voice_status():
@@ -151,14 +134,16 @@ def voice_status():
         and importlib.util.find_spec("TTS")
     )
     piper = bool(get_piper_executable() and get_ffmpeg_executable())
-    reference = reference_voice_ready()
-    voice_cfg = json.loads(REFERENCE_CONFIG.read_text()) if reference else {}
-    trained = bool(voice_cfg.get("adapter"))
+    trained_health = trained_voice_health()
+    reference = bool(trained_health["ready"])
+    trained = bool(trained_health["trained"])
     return {
+        "trained": reference,
+        "default": "trained",
         "french": piper and voice_model("french").is_file(),
         "clear": piper and voice_model("clear").is_file(),
         "custom": reference_voice_ready() or custom_ready,
-        "revision": voice_cfg.get("revision", "reference-v1"),
+        "revision": trained_health.get("revision") or "reference-v1",
         "persona": persona.get("name"),
         "personaRevision": persona_revision(persona),
         "owner": "curie-ai",
@@ -184,24 +169,50 @@ async def make_voice(text, profile, mode="professional"):
     path = audio_dir / name
     # Bounded input; no random code-switching can change factual headline/calendar text.
     text = re.sub(r"[*#`•]", "", text)
-    if profile == "custom":
+    if reference_voice_ready():
         with tempfile.NamedTemporaryFile(suffix=".wav") as wav:
-            if reference_voice_ready():
-                await reference_voice(text, wav.name, delivery)
-            else:
-                from services.custom_voice import (
-                    synthesize_custom_voice,
-                    custom_voice_health,
-                )
+            await reference_voice(text, wav.name, delivery)
+            ffmpeg = get_ffmpeg_executable()
+            if not ffmpeg:
+                raise HTTPException(503, "Voice encoding is unavailable")
+            proc = await asyncio.create_subprocess_exec(
+                ffmpeg,
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                wav.name,
+                "-c:a",
+                "libopus",
+                str(path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=30)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                proc.kill()
+                await proc.wait()
+                raise
+            if proc.returncode:
+                raise HTTPException(503, "Voice encoding failed")
+    elif trained_voice_required():
+        raise HTTPException(503, "Curie's trained voice is not available")
+    elif profile == "custom":
+        with tempfile.NamedTemporaryFile(suffix=".wav") as wav:
+            from services.custom_voice import (
+                synthesize_custom_voice,
+                custom_voice_health,
+            )
 
-                cfg = custom_config()
-                if not custom_voice_health(cfg)["ready"]:
-                    raise HTTPException(
-                        503,
-                        "Custom voice is not configured. Add the model and reference on the server.",
-                    )
-                if not await synthesize_custom_voice(text, wav.name, cfg):
-                    raise HTTPException(503, "Custom voice synthesis failed")
+            cfg = custom_config()
+            if not custom_voice_health(cfg)["ready"]:
+                raise HTTPException(
+                    503,
+                    "Custom voice is not configured. Add the model and reference on the server.",
+                )
+            if not await synthesize_custom_voice(text, wav.name, cfg):
+                raise HTTPException(503, "Custom voice synthesis failed")
             proc = await asyncio.create_subprocess_exec(
                 get_ffmpeg_executable(),
                 "-y",
@@ -244,7 +255,9 @@ async def make_voice(text, profile, mode="professional"):
 
 class Speech(BaseModel):
     text: str = Field(min_length=1, max_length=24000)
-    voice_profile: str = Field(default="french", pattern="^(french|clear|custom)$")
+    voice_profile: str = Field(
+        default="trained", pattern="^(trained|french|clear|custom)$"
+    )
 
 
 @app.post("/speak")
@@ -295,35 +308,13 @@ async def speak_stream(req: Speech):
                 for old in audio_dir.glob("*"):
                     if time.time() - old.stat().st_mtime > 3600:
                         old.unlink(missing_ok=True)
-                if req.voice_profile == "custom" and reference_voice_ready():
+                if reference_voice_ready():
                     with tempfile.NamedTemporaryFile(suffix=".wav") as combined:
-                        command = [
-                            str(REFERENCE_PYTHON),
-                            "-m",
-                            "services.trained_voice.reference_voice",
-                            "--config",
-                            str(REFERENCE_CONFIG),
-                            "--output",
+                        stream = trained_voice_stream_events(
+                            req.text,
                             combined.name,
-                            "--delivery",
-                            json.dumps(delivery),
-                            "--stream-dir",
-                            str(audio_dir),
-                        ]
-                        env = {
-                            k: os.environ[k]
-                            for k in (
-                                "PATH",
-                                "HOME",
-                                "LANG",
-                                "LC_ALL",
-                                "TMPDIR",
-                                "XDG_CACHE_HOME",
-                            )
-                            if k in os.environ
-                        }
-                        stream = worker_events(
-                            command, req.text, env=env, cwd=str(ROOT)
+                            audio_dir,
+                            delivery,
                         )
                         try:
                             async for event in stream:

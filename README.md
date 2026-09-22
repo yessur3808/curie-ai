@@ -306,7 +306,7 @@ Bot:   ⚖️ Unit Conversion (Mass):
 | **Coding Assistant** | Code generation, review, bug detection, performance analysis |
 | **PR/MR Management** | Create and review GitHub, GitLab, and Bitbucket pull requests |
 | **Pair Programming** | Interactive collaborative coding sessions |
-| **Voice** | Speech-to-text (Whisper) and text-to-speech (Google TTS) |
+| **Voice** | Local speech-to-text plus Curie's trained Chatterbox Nano/LoRA voice |
 | **Proactive Messaging** | Scheduled background messages and reminder delivery |
 | **Persona** | Fully customizable personality via JSON |
 
@@ -508,9 +508,10 @@ are documented in [docs/SMART_HOME_INTEGRATIONS.md](docs/SMART_HOME_INTEGRATIONS
 - Natural-language queries understood on all platforms
 
 ### Voice Interface
-- **Speech-to-text**: OpenAI Whisper with automatic language detection
-- **Text-to-speech**: Google TTS with multi-accent support (American, British, Indian, Australian, and more)
-- Persona-based voice settings (accent, language, speed)
+- **Speech-to-text**: local Whisper-compatible transcription with automatic language detection
+- **Text-to-speech**: Curie's locally trained Chatterbox Nano/LoRA voice on bot connectors, the API, and the dashboard
+- Persona-aware delivery settings (contextual pace, pauses, warmth, and expression)
+- Text-only failure behavior: a worker failure never silently switches Curie back to a different voice
 
 ### Advanced Coding Suite
 - **Code generation**: Multi-language AI code creation
@@ -1033,4 +1034,4 @@ This project is licensed under the MIT License — see [LICENSE](LICENSE) for de
 
 ## Locally trained Curie voice
 
-Curie owns the trained Nano speech worker, live sentence streaming, local transcription, personality delivery and training/evaluation tools in `services/trained_voice/`. Private weights and recordings live in `data/trained-voice/` and are excluded from Git. The Observatory dashboard uses this service. See [setup, provenance and resource limits](docs/TRAINED_VOICE.md).
+Curie owns the trained Nano speech worker, live sentence streaming, local transcription, personality delivery and training/evaluation tools in `services/trained_voice/`. The trained voice is the default for Telegram, Discord, Slack, WhatsApp, the main API, and the Observatory dashboard. Private weights and recordings live in `data/trained-voice/` and are excluded from Git. See [setup, provenance and resource limits](docs/TRAINED_VOICE.md).

@@ -191,18 +191,13 @@ async def chat_api(req: MessageRequest):
     voice_url = None
     if req.voice_response:
         try:
-            from utils.voice import text_to_speech, get_voice_config_from_persona
+            from services.voice_delivery import synthesize_reply
 
-            voice_config = get_voice_config_from_persona(_workflow.persona)
-
-            # Generate voice file with server-generated UUID to prevent path traversal
-            # Use a separate safe server-side filename instead of client-provided message_id
-            voice_file_id = str(uuid.uuid4())
-            voice_filename = f"voice_{voice_file_id}.ogg"
-            voice_path = f"/tmp/{voice_filename}"
-
-            success = await text_to_speech(result["text"], voice_path, voice_config)
-            if success:
+            voice_path = await synthesize_reply(
+                result["text"], _workflow.persona, internal_id
+            )
+            if voice_path:
+                voice_filename = os.path.basename(voice_path)
                 voice_url = f"/audio/{voice_filename}"
                 # Track file for cleanup
                 with _voice_files_lock:

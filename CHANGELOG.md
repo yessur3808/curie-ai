@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.09-trained-voice-default
+
+- Made Curie's trained Chatterbox Nano/LoRA voice authoritative across bot
+  connectors, the main API, and the dashboard voice bridge.
+- Added a shared, bounded cross-process worker lease to prevent overlapping
+  model loads and their multi-gigabyte memory spikes.
+- Made trained-voice failures text-only by default instead of silently falling
+  back to a different voice; legacy synthesis now requires explicit rollback.
+- Applied persona delivery rate consistently to streamed and complete trained
+  speech and exposed trained/default status through health metadata.
+
 ## 2026.09-phase11-rollout-stabilization
 
 - Made the typed turn pipeline the default while retaining a named and dated

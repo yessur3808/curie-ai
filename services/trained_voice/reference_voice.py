@@ -116,33 +116,28 @@ def main():
                     wav = librosa.effects.time_stretch(
                         wav, rate=max(0.9, min(1.1, float(cfg["rateScale"])))
                     )
+                persona_rate = max(0.85, min(1.15, float(delivery.get("rate", 1.0))))
+                if abs(persona_rate - 1.0) > 0.005:
+                    import librosa
+
+                    wav = librosa.effects.time_stretch(wav, rate=persona_rate)
                 if args.stream_dir:
                     # Each chunk is independently decodable on iOS and desktop.
                     # File names are generated locally, never from caller input.
-                    delivered = wav
-                    persona_rate = max(
-                        0.85, min(1.15, float(delivery.get("rate", 1.0)))
-                    )
-                    if abs(persona_rate - 1.0) > 0.005:
-                        import librosa
-
-                        delivered = librosa.effects.time_stretch(
-                            delivered, rate=persona_rate
-                        )
-                    delivered = np.concatenate(
-                        (delivered, np.zeros(int(model.sr * pause), dtype=np.float32))
+                    streamed = np.concatenate(
+                        (wav, np.zeros(int(model.sr * pause), dtype=np.float32))
                     )
                     path = pathlib.Path(args.stream_dir) / (
                         "voice_" + str(uuid.uuid4()) + ".wav"
                     )
-                    sf.write(path, delivered, model.sr, subtype="PCM_16")
+                    sf.write(path, streamed, model.sr, subtype="PCM_16")
                     os.chmod(path, 0o600)
                     print(
                         json.dumps(
                             {
                                 "type": "audio",
                                 "url": "/audio/" + path.name,
-                                "duration": round(len(delivered) / model.sr, 3),
+                                "duration": round(len(streamed) / model.sr, 3),
                             }
                         ),
                         flush=True,

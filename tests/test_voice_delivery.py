@@ -10,7 +10,12 @@ from utils.voice import get_piper_executable, normalize_for_speech
 
 
 def test_local_voice_synthesis_produces_audio(monkeypatch):
+    monkeypatch.setenv("CURIE_TRAINED_VOICE_REQUIRED", "false")
     monkeypatch.setattr("utils.voice.get_ffmpeg_executable", lambda: None)
+    monkeypatch.setattr(
+        "services.trained_voice.runtime.trained_voice_health",
+        lambda: {"ready": False},
+    )
 
     async def fake_tts(text, path, config):
         Path(path).write_bytes(b"RIFF-local-audio")
@@ -23,6 +28,57 @@ def test_local_voice_synthesis_produces_audio(monkeypatch):
     finally:
         if path:
             Path(path).unlink(missing_ok=True)
+
+
+def test_trained_voice_replaces_legacy_synthesis(monkeypatch):
+    monkeypatch.setattr("utils.voice.get_ffmpeg_executable", lambda: None)
+    monkeypatch.setattr(
+        "services.trained_voice.runtime.trained_voice_health",
+        lambda: {"ready": True},
+    )
+
+    async def fake_trained(text, path, delivery):
+        assert text == "Ready when you are."
+        assert delivery["mode"] == "casual"
+        Path(path).write_bytes(b"RIFF-trained-audio")
+        return {"engine": "chatterbox-nano"}
+
+    async def forbidden_legacy(*_args, **_kwargs):
+        raise AssertionError("legacy voice must not run")
+
+    monkeypatch.setattr(
+        "services.trained_voice.runtime.synthesize_trained_voice", fake_trained
+    )
+    monkeypatch.setattr("utils.voice.text_to_speech", forbidden_legacy)
+    path = asyncio.run(synthesize_reply("Ready when you are.", {}))
+    try:
+        assert path and Path(path).read_bytes() == b"RIFF-trained-audio"
+    finally:
+        if path:
+            Path(path).unlink(missing_ok=True)
+
+
+def test_trained_voice_failure_falls_back_to_text_not_old_voice(monkeypatch):
+    from services.trained_voice.runtime import TrainedVoiceError
+
+    monkeypatch.setenv("CURIE_TRAINED_VOICE_REQUIRED", "true")
+    monkeypatch.setattr("utils.voice.get_ffmpeg_executable", lambda: None)
+    monkeypatch.setattr(
+        "services.trained_voice.runtime.trained_voice_health",
+        lambda: {"ready": True},
+    )
+
+    async def failed_trained(*_args, **_kwargs):
+        raise TrainedVoiceError("trained_voice_worker_failed")
+
+    async def forbidden_legacy(*_args, **_kwargs):
+        raise AssertionError("legacy voice must not run")
+
+    monkeypatch.setattr(
+        "services.trained_voice.runtime.synthesize_trained_voice", failed_trained
+    )
+    monkeypatch.setattr("utils.voice.text_to_speech", forbidden_legacy)
+    assert asyncio.run(synthesize_reply("Try this.", {})) is None
 
 
 def test_speech_normalization_handles_technical_text_and_links():
@@ -38,6 +94,10 @@ def test_speech_normalization_handles_technical_text_and_links():
 def test_quality_policy_reports_text_fallback_when_neural_voice_missing(monkeypatch):
     monkeypatch.setenv("PIPER_MODEL_PATH", "/missing/voice.onnx")
     monkeypatch.setenv("LOCAL_TTS_ALLOW_ESPEAK", "false")
+    monkeypatch.setattr(
+        "services.trained_voice.runtime.trained_voice_health",
+        lambda: {"ready": False, "backend": None},
+    )
     health = voice_health()
     assert health["piper_ready"] is False
     assert health["quality_fallback_policy"] == "text"

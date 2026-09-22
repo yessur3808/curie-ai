@@ -108,6 +108,42 @@ def _profile_config(preferences: dict, history: list[dict] | None = None) -> dic
     return configured
 
 
+def _delivery_mode(text: str) -> str:
+    if re.search(r"\b(?:urgent|emergency|danger|warning|failed)\b", text, re.I):
+        return "urgent"
+    if len(text) > 320 or "\n" in text:
+        return "professional"
+    return "casual"
+
+
+async def _encode_trained_wav(source: str, destination: str) -> bool:
+    """Move WAV directly or encode Telegram-compatible Opus locally."""
+    if destination.endswith(".wav"):
+        shutil.move(source, destination)
+        return True
+    from utils.voice import get_ffmpeg_executable
+
+    ffmpeg = get_ffmpeg_executable()
+    if not ffmpeg:
+        return False
+    encoder = await asyncio.create_subprocess_exec(
+        ffmpeg,
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        source,
+        "-c:a",
+        "libopus",
+        destination,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await encoder.wait()
+    encoded = Path(destination)
+    return encoder.returncode == 0 and encoded.is_file() and encoded.stat().st_size > 0
+
+
 def voice_replies_enabled(internal_id: str, channel: str | None = None) -> bool:
     from memory.adaptation import get_preferences
 
@@ -123,8 +159,14 @@ def voice_replies_enabled(internal_id: str, channel: str | None = None) -> bool:
 
 def voice_health() -> dict:
     """Report local voice readiness without loading or downloading a model."""
+    from services.trained_voice.runtime import (
+        trained_voice_health,
+        trained_voice_required,
+    )
     from utils.voice import get_ffmpeg_executable, get_piper_executable
 
+    trained = trained_voice_health()
+    required = trained_voice_required()
     piper_model = os.getenv("PIPER_MODEL_PATH", "").strip()
     english_model = os.getenv("PIPER_ENGLISH_MODEL_PATH", "").strip()
     piper_ready = bool(
@@ -137,20 +179,33 @@ def voice_health() -> dict:
         "yes",
         "on",
     }
+    legacy_ready = piper_ready or (allow_espeak and espeak_ready)
     return {
-        "ready": piper_ready or (allow_espeak and espeak_ready),
+        "ready": trained["ready"] or (not required and legacy_ready),
         "backend": (
-            "piper"
-            if piper_ready
-            else "espeak" if allow_espeak and espeak_ready else None
+            trained["backend"]
+            if trained["ready"]
+            else (
+                "piper"
+                if not required and piper_ready
+                else (
+                    "espeak" if not required and allow_espeak and espeak_ready else None
+                )
+            )
         ),
+        "trained_voice": trained,
+        "trained_voice_required": required,
         "piper_ready": piper_ready,
         "bilingual_ready": bool(
             piper_ready and english_model and Path(english_model).is_file()
         ),
         "offline_fallback_ready": allow_espeak and espeak_ready,
         "espeak_installed": espeak_ready,
-        "quality_fallback_policy": "espeak" if allow_espeak else "text",
+        "quality_fallback_policy": (
+            "text"
+            if required
+            else "espeak" if allow_espeak and espeak_ready else "text"
+        ),
         "opus_encoder_ready": bool(get_ffmpeg_executable()),
     }
 
@@ -179,6 +234,51 @@ async def synthesize_reply(
             state = get_adaptation_state(str(internal_id))
             preferences = state["preferences"] if state["enabled"] else {}
             config.update(_profile_config(preferences, state.get("history", [])))
+        from services.trained_voice.runtime import (
+            TrainedVoiceError,
+            synthesize_trained_voice,
+            trained_voice_health,
+            trained_voice_required,
+        )
+        from services.trained_voice.voice_persona import delivery_settings
+
+        trained = trained_voice_health()
+        if trained["ready"]:
+            trained_fd, trained_wav = tempfile.mkstemp(
+                prefix="curie_trained_voice_", suffix=".wav"
+            )
+            os.close(trained_fd)
+            try:
+                delivery = delivery_settings(persona, _delivery_mode(text))
+                speed = str(config.get("speed") or "normal")
+                delivery["rate"] = round(
+                    float(delivery.get("rate") or 1.0)
+                    * {"slow": 0.94, "normal": 1.0, "fast": 1.06}.get(speed, 1.0),
+                    4,
+                )
+                try:
+                    await synthesize_trained_voice(text, trained_wav, delivery)
+                except TrainedVoiceError:
+                    Path(path).unlink(missing_ok=True)
+                    return None
+                if not await _encode_trained_wav(trained_wav, path):
+                    Path(path).unlink(missing_ok=True)
+                    return None
+                from agent.observability import latency_metrics
+
+                latency_metrics.observe(
+                    {
+                        "voice_synthesize": round(
+                            (time.perf_counter() - started) * 1000, 2
+                        )
+                    }
+                )
+                return path
+            finally:
+                Path(trained_wav).unlink(missing_ok=True)
+        if trained_voice_required():
+            Path(path).unlink(missing_ok=True)
+            return None
         if config.get("profile") == "custom":
             from services.custom_voice import synthesize_custom_voice
 
