@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: install install-optional memory-kernel memory-kernel-check run start test migrate migrate-down lint format check install-hooks shell verify help
+.PHONY: install install-optional memory-kernel memory-kernel-check media-transport media-transport-check run start test migrate migrate-down lint format check install-hooks shell verify help
 .PHONY: db-start db-stop db-restart db-status setup-db
 .PHONY: run-telegram run-discord run-whatsapp run-api run-all
 .PHONY: check-ports test-imports clean sync-env sync-env-add sync-env-clean sync-env-backup restart-clean
@@ -21,6 +21,16 @@ memory-kernel-check:  ## Check Rust formatting, lints, tests, and native parity
 	cargo clippy --manifest-path native/memory_kernel/Cargo.toml --all-targets -- -D warnings
 	cargo test --manifest-path native/memory_kernel/Cargo.toml
 	CURIE_MEMORY_KERNEL=rust .venv/bin/pytest -q tests/test_memory_kernel_native.py tests/test_hierarchical_memory.py tests/test_phase67_response_memory.py
+
+media-transport:  ## Build and install Curie's Rust audio/media transport
+	.venv/bin/pip install -r requirements-rust.txt
+	.venv/bin/maturin develop --release --manifest-path native/media_transport/Cargo.toml
+
+media-transport-check:  ## Check Rust media formatting, lints, tests, and parity
+	cargo fmt --manifest-path native/media_transport/Cargo.toml -- --check
+	cargo clippy --locked --manifest-path native/media_transport/Cargo.toml --all-targets -- -D warnings
+	cargo test --locked --manifest-path native/media_transport/Cargo.toml
+	CURIE_MEDIA_TRANSPORT=rust .venv/bin/pytest -q tests/test_media_transport_native.py tests/test_media_ingestion.py tests/test_voice_delivery.py tests/test_trained_voice_runtime.py tests/test_trained_voice_stream.py
 
 verify:  ## Verify setup and dependencies
 	python scripts/verify_setup.py

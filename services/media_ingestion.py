@@ -266,7 +266,12 @@ async def _prepare_attachment_message(
 
     scan = await asyncio.to_thread(scan_attachment, path, filename, content_type)
     classify_started = time.perf_counter()
-    kind = classify_attachment(filename, content_type)
+    detected_kind = str(scan.get("detected_kind") or "")
+    kind = (
+        detected_kind
+        if detected_kind in {"image", "audio", "document"}
+        else classify_attachment(filename, content_type)
+    )
     from agent.observability import latency_metrics
 
     latency_metrics.observe(

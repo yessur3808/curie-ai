@@ -80,6 +80,12 @@ service split. A native extension also avoids network and serialization costs.
 
 ## Priority 2: audio and media transport worker
 
+**Implemented in September 2026.** The bounded PyO3 worker now covers streaming
+inspection and hashing, signature validation, PCM/WAV concatenation, and
+cancellable subprocess supervision. See
+[Rust audio and media transport](RUST_MEDIA_TRANSPORT.md) for the live boundary,
+verification, and rollback contract.
+
 ### Scope
 
 Build a small Rust process or library for bounded byte-oriented work:

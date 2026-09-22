@@ -1,2 +1,2 @@
-# Build-only dependency for Curie's ABI3 Rust extension.
+# Build-only dependency for Curie's ABI3 Rust extensions.
 maturin==1.9.6

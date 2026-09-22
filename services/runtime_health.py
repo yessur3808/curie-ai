@@ -44,6 +44,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
     from memory import memory_kernel_status
     from services.backpressure import runtime_backpressure
     from services.media_ingestion import media_backpressure_snapshot
+    from services.media_transport import media_transport_status
     from services.security import security_status
     from services.voice_delivery import voice_health
 
@@ -64,6 +65,10 @@ def capability_health(workflow_ready: bool = True) -> dict:
     memory_kernel = memory_kernel_status()
     memory_kernel["ready"] = not (
         memory_kernel["mode"] == "rust" and memory_kernel["active"] != "rust"
+    )
+    media_transport = media_transport_status()
+    media_transport["ready"] = not (
+        media_transport["mode"] == "rust" and media_transport["active"] != "rust"
     )
     database = _database_health()
     disk = shutil.disk_usage(Path.cwd())
@@ -104,6 +109,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
             "fallback": "request typed text",
         },
         "speech": {**voice, "fallback": "complete text reply"},
+        "media_transport": media_transport,
         "memory_kernel": memory_kernel,
         "database": database,
         "disk": disk_health,
@@ -117,6 +123,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         capabilities["text"]["ready"],
         database["ready"],
         disk_health["ready"],
+        media_transport["ready"],
         memory_kernel["ready"],
         not backpressure["saturated"],
     )
@@ -137,6 +144,7 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         "vision",
         "transcription",
         "speech",
+        "media_transport",
         "memory_kernel",
         "database",
         "disk",

@@ -121,27 +121,13 @@ async def _encode_trained_wav(source: str, destination: str) -> bool:
     if destination.endswith(".wav"):
         shutil.move(source, destination)
         return True
+    from services.media_transport import encode_opus
     from utils.voice import get_ffmpeg_executable
 
     ffmpeg = get_ffmpeg_executable()
     if not ffmpeg:
         return False
-    encoder = await asyncio.create_subprocess_exec(
-        ffmpeg,
-        "-y",
-        "-loglevel",
-        "error",
-        "-i",
-        source,
-        "-c:a",
-        "libopus",
-        destination,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    await encoder.wait()
-    encoded = Path(destination)
-    return encoder.returncode == 0 and encoded.is_file() and encoded.stat().st_size > 0
+    return await encode_opus(source, destination, ffmpeg)
 
 
 def voice_replies_enabled(internal_id: str, channel: str | None = None) -> bool:
@@ -288,26 +274,8 @@ async def synthesize_reply(
             os.close(custom_fd)
             try:
                 if await synthesize_custom_voice(text, custom_wav, config):
-                    if path.endswith(".wav"):
-                        shutil.move(custom_wav, path)
-                    else:
-                        ffmpeg = get_ffmpeg_executable()
-                        encoder = await asyncio.create_subprocess_exec(
-                            ffmpeg,
-                            "-y",
-                            "-loglevel",
-                            "error",
-                            "-i",
-                            custom_wav,
-                            "-c:a",
-                            "libopus",
-                            path,
-                            stdout=asyncio.subprocess.DEVNULL,
-                            stderr=asyncio.subprocess.PIPE,
-                        )
-                        await encoder.communicate()
-                        if encoder.returncode:
-                            return None
+                    if not await _encode_trained_wav(custom_wav, path):
+                        return None
                     return path
             finally:
                 Path(custom_wav).unlink(missing_ok=True)
@@ -339,49 +307,26 @@ async def synthesize_reply(
                         return None
                     wav_paths.append(chunk_path)
                 if len(wav_paths) == 1:
-                    if path.endswith(".wav"):
-                        shutil.move(wav_paths[0], path)
-                        wav_paths.clear()
-                    else:
-                        ffmpeg = get_ffmpeg_executable()
-                        encoder = await asyncio.create_subprocess_exec(
-                            ffmpeg,
-                            "-y",
-                            "-loglevel",
-                            "error",
-                            "-i",
-                            wav_paths[0],
-                            "-c:a",
-                            "libopus",
-                            path,
-                            stdout=asyncio.subprocess.DEVNULL,
-                            stderr=asyncio.subprocess.PIPE,
-                        )
-                        await encoder.communicate()
-                        if encoder.returncode:
-                            return None
-                else:
-                    ffmpeg = get_ffmpeg_executable()
-                    args = [ffmpeg, "-y", "-loglevel", "error"]
-                    for wav_path in wav_paths:
-                        args.extend(["-i", wav_path])
-                    args.extend(
-                        [
-                            "-filter_complex",
-                            f"concat=n={len(wav_paths)}:v=0:a=1",
-                            "-c:a",
-                            "libopus",
-                            path,
-                        ]
-                    )
-                    encoder = await asyncio.create_subprocess_exec(
-                        *args,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    await encoder.communicate()
-                    if encoder.returncode:
+                    if not await _encode_trained_wav(wav_paths[0], path):
                         return None
+                    if path.endswith(".wav"):
+                        wav_paths.clear()
+                else:
+                    from services.media_transport import concatenate_pcm_wav
+
+                    combined_fd, combined_wav = tempfile.mkstemp(
+                        prefix="curie_voice_combined_", suffix=".wav"
+                    )
+                    os.close(combined_fd)
+                    Path(combined_wav).unlink(missing_ok=True)
+                    try:
+                        await asyncio.to_thread(
+                            concatenate_pcm_wav, wav_paths, combined_wav
+                        )
+                        if not await _encode_trained_wav(combined_wav, path):
+                            return None
+                    finally:
+                        Path(combined_wav).unlink(missing_ok=True)
             finally:
                 for wav_path in wav_paths:
                     Path(wav_path).unlink(missing_ok=True)

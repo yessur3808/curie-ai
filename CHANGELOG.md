@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.09-rust-media-transport
+
+- Replaced Curie's attachment inspection, streaming hashing, file-signature
+  checks, PCM/WAV concatenation, and bounded worker supervision hot path with a
+  PyO3 ABI3 Rust extension.
+- Integrated native cancellation and deadlines into trained-voice and FFmpeg
+  execution while leaving model inference, transcription, personality, and
+  connector presentation in Python.
+- Added explicit `auto`, required `rust`, and forced `python` routing, runtime
+  health and content-free metrics, parity and malformed-media coverage, Rust
+  dependency auditing, benchmarks, and a blocking CI lane.
+
 ## 2026.09-rust-memory-kernel
 
 - Replaced Curie's deterministic memory retrieval, hybrid ranking,

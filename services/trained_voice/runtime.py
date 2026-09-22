@@ -194,30 +194,35 @@ async def synthesize_trained_voice(
     paths = _paths()
     try:
         async with trained_voice_lease(paths):
-            process = await asyncio.create_subprocess_exec(
-                *_command(paths, output_path, delivery),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                cwd=str(paths.root),
-                env=_worker_environment(),
-            )
+            from services.media_transport import inspect_attachment, supervise_process
+
             try:
-                stdout, _ = await asyncio.wait_for(
-                    process.communicate(text.encode()), timeout=_timeout_seconds()
+                result = await supervise_process(
+                    _command(paths, output_path, delivery),
+                    text.encode(),
+                    cwd=str(paths.root),
+                    environment=_worker_environment(),
+                    timeout=_timeout_seconds(),
+                    max_stdout_bytes=1024 * 1024,
                 )
-            except (asyncio.TimeoutError, asyncio.CancelledError) as error:
-                if process.returncode is None:
-                    process.kill()
-                await process.wait()
-                if isinstance(error, asyncio.CancelledError):
-                    raise
+            except asyncio.TimeoutError as error:
                 raise TrainedVoiceError("trained_voice_timeout") from error
-            if process.returncode:
+            if result.return_code:
                 raise TrainedVoiceError("trained_voice_worker_failed")
             if not output_path.is_file() or output_path.stat().st_size <= 44:
                 raise TrainedVoiceError("trained_voice_empty_output")
-            return _safe_metrics(stdout)
+            inspection = inspect_attachment(
+                str(output_path),
+                output_path.name,
+                "audio/wav",
+                max_bytes=int(
+                    os.getenv("CURIE_MEDIA_MAX_OUTPUT_BYTES", str(256 * 1024 * 1024))
+                ),
+                strict=True,
+            )
+            if inspection["signature"] != "wav":
+                raise TrainedVoiceError("trained_voice_invalid_output")
+            return _safe_metrics(result.stdout)
     except BaseException:
         output_path.unlink(missing_ok=True)
         raise

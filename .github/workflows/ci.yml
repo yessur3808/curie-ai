@@ -101,6 +101,46 @@ jobs:
           CURIE_MEMORY_KERNEL: rust
         run: python -m scripts.benchmark_memory_kernel --sizes 250 --iterations 1 --mode rust
 
+  rust-media-transport:
+    name: Rust media transport
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python and native build dependencies
+        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+      - name: Check Rust formatting, lints, and unit tests
+        run: |
+          cargo fmt --manifest-path native/media_transport/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path native/media_transport/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path native/media_transport/Cargo.toml
+      - name: Build and install the ABI3 extension
+        run: |
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/media_transport/Cargo.toml
+          pip install dist/native/curie_media_transport-*.whl
+      - name: Require native parity, cancellation, and integration
+        env:
+          CURIE_MEDIA_TRANSPORT: rust
+        run: >-
+          pytest -q tests/test_media_transport_native.py
+          tests/test_media_ingestion.py
+          tests/test_voice_delivery.py
+          tests/test_trained_voice_runtime.py
+          tests/test_trained_voice_stream.py
+      - name: Run bounded native benchmark smoke test
+        env:
+          CURIE_MEDIA_TRANSPORT: rust
+        run: >-
+          python -m scripts.benchmark_media_transport
+          --megabytes 1 --iterations 1 --mode rust
+
   unit-tests:
     name: Offline unit tests
     runs-on: ubuntu-latest
@@ -190,6 +230,7 @@ jobs:
         run: |
           cargo install cargo-audit --locked --version 0.22.2
           cargo audit --file native/memory_kernel/Cargo.lock
+          cargo audit --file native/media_transport/Cargo.lock
       - name: Scan Python for high-severity findings
         run: >-
           bandit -q -r agent connectors evaluation llm memory scripts services utils
@@ -252,6 +293,7 @@ jobs:
       - static-analysis
       - format-check
       - rust-memory-kernel
+      - rust-media-transport
       - unit-tests
       - integration-tests
       - security-tests
@@ -266,6 +308,7 @@ jobs:
           STATIC_ANALYSIS: ${{ needs.static-analysis.result }}
           FORMAT_CHECK: ${{ needs.format-check.result }}
           RUST_MEMORY_KERNEL: ${{ needs.rust-memory-kernel.result }}
+          RUST_MEDIA_TRANSPORT: ${{ needs.rust-media-transport.result }}
           UNIT_TESTS: ${{ needs.unit-tests.result }}
           INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
           SECURITY_TESTS: ${{ needs.security-tests.result }}
@@ -277,6 +320,7 @@ jobs:
             "$STATIC_ANALYSIS" \
             "$FORMAT_CHECK" \
             "$RUST_MEMORY_KERNEL" \
+            "$RUST_MEDIA_TRANSPORT" \
             "$UNIT_TESTS" \
             "$INTEGRATION_TESTS" \
             "$SECURITY_TESTS" \

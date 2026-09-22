@@ -67,14 +67,19 @@ def retention_policy() -> dict[str, int]:
 
 def scan_attachment(path: str, filename: str = "", content_type: str = "") -> dict:
     """Fail closed on executable, malformed, bomb-like, or malware-positive media."""
+    from services.media_transport import inspect_attachment
+
     source = Path(path)
-    if not source.is_file() or source.is_symlink():
-        raise ValueError("Attachment must be a regular local file")
-    size = source.stat().st_size
     limit = int(os.getenv("TELEGRAM_MAX_ATTACHMENT_BYTES", str(20 * 1024 * 1024)))
-    if size <= 0 or size > limit:
-        raise ValueError("Attachment is empty or exceeds the configured size limit")
-    safe_name = Path(filename or source.name).name
+    transport = inspect_attachment(
+        str(source),
+        filename or source.name,
+        content_type,
+        max_bytes=limit,
+        strict=True,
+    )
+    size = int(transport["size_bytes"])
+    safe_name = str(transport["filename"])
     suffix = Path(safe_name).suffix.casefold()
     guessed = (content_type or mimetypes.guess_type(safe_name)[0] or "").casefold()
     if suffix in _EXECUTABLE_SUFFIXES or guessed in _EXECUTABLE_MIME:
@@ -127,6 +132,11 @@ def scan_attachment(path: str, filename: str = "", content_type: str = "") -> di
         "safe": True,
         "filename": safe_name,
         "size_bytes": size,
+        "sha256": transport["sha256"],
+        "detected_mime": transport["detected_mime"],
+        "detected_kind": transport["detected_kind"],
+        "signature": transport["signature"],
+        "transport": transport["backend"],
         "malware_scanner": "clamav" if scanner else "structural_only",
         "archive_checked": zipfile.is_zipfile(source),
     }

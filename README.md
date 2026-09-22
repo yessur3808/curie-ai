@@ -795,6 +795,8 @@ Missing specialist files fall back to the next available local model. At most
 | `LEARNING_CANARY_MIN_OBSERVATIONS` | `20` | Canary outcomes required before Level 3 promotion |
 | `CURIE_LOCAL_MEMORY_DB` | `.curie_memory.sqlite3` | Durable fallback when Mongo/Postgres are unset |
 | `CURIE_MEMORY_KERNEL` | `auto` | `auto` prefers the native Rust ranker, `rust` requires it, and `python` is the audited rollback |
+| `CURIE_MEDIA_TRANSPORT` | `auto` | `auto` prefers native bounded media transport, `rust` requires it, and `python` is the audited rollback |
+| `CURIE_MEDIA_MAX_OUTPUT_BYTES` | `268435456` | Maximum combined or encoded media output size |
 | `MEMORY_RELEVANCE_MIN_SCORE` | `0.28` | Minimum hybrid relevance required before a memory enters the prompt |
 | `MEMORY_CONTEXT_CHAR_BUDGET` | `1600` | Maximum long-term-memory characters injected into one request |
 | `MEMORY_MAX_CANDIDATES` | `500` | Maximum owner-filtered records ranked during one recall |
@@ -818,6 +820,13 @@ A cheap relevance gate runs before vector reranking, and unchanged memory
 features are reused from a bounded LRU cache.
 Routine operational commands bypass long-term recall so unrelated memories
 cannot pull a reply back to an old topic.
+
+Attachment inspection, file-signature validation, SHA-256 streaming, PCM/WAV
+concatenation, and trained-voice/FFmpeg subprocess supervision can run through
+Curie's second ABI3 Rust extension. Python continues to own speech and vision
+models, transcription, connector presentation, and personality decisions.
+Build it with `make media-transport`; see
+[Rust media transport](docs/RUST_MEDIA_TRANSPORT.md).
 
 Inferred adaptations do not change live behavior directly. They become
 owner-scoped candidates, pass offline and adversarial evaluation, run in shadow
