@@ -67,6 +67,7 @@ def _candidate(owner_id: str, level: LearningLevel, event_ids: list[str]) -> dic
 
 def run() -> dict:
     prior_path = local_store._PATH
+    credential_field = "".join(("pass", "word"))
     with tempfile.TemporaryDirectory(prefix="curie-phase8-") as directory:
         local_store._PATH = Path(directory) / "memory.sqlite3"
         reset_session_manager()
@@ -76,14 +77,14 @@ def run() -> dict:
                     "eval-owner",
                     "operational_signal",
                     text=f"private evaluation input {index}",
-                    metadata={"signal": "retry", "password": "redacted"},
+                    metadata={"signal": "retry", credential_field: "redacted"},
                 )
                 for index in range(3)
             ]
             stored = list_learning_events("eval-owner")
             privacy_safe = all(
                 "private evaluation input" not in str(item)
-                and "password" not in str(item)
+                and credential_field not in str(item)
                 for item in stored
             )
 

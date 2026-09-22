@@ -15,7 +15,6 @@ from typing import Any, Mapping
 from agent.slo import slo_metrics
 from utils.redaction import redact_secrets
 
-
 TRACE_SCHEMA_VERSION = 2
 TRACE_REQUIRED_FIELDS = frozenset(
     {

@@ -6,7 +6,6 @@ import re
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-
 REDACTED = "[REDACTED]"
 _NON_SECRET_TELEMETRY_FIELDS = frozenset(
     {

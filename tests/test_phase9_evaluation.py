@@ -15,7 +15,6 @@ from evaluation.release import run_release
 from evaluation.runners import CanaryPolicyError, validate_canary_plan
 from evaluation.tool_provider_simulator import ProviderMode, run_provider_matrix
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

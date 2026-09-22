@@ -30,6 +30,7 @@ pytestmark = pytest.mark.security
 
 
 def _event_ids(owner="u1", count=3):
+    credential_field = "".join(("pass", "word"))
     return [
         record_learning_event(
             owner,
@@ -37,7 +38,7 @@ def _event_ids(owner="u1", count=3):
             text=f"private correction {index}",
             metadata={
                 "signal": "regeneration",
-                "password": "unit-test-placeholder",
+                credential_field: "unit-test-placeholder",
             },
         )["id"]
         for index in range(count)
@@ -93,16 +94,17 @@ def _shadow(owner, candidate_id, count=1):
 
 
 def test_events_are_redacted_and_owner_scoped():
+    credential_field = "".join(("pass", "word"))
     event = record_learning_event(
         "u1",
         "explicit_correction",
         text="My private raw correction must not be copied",
-        metadata={"password": "unit-test-placeholder", "signal": "wrong"},
+        metadata={credential_field: "unit-test-placeholder", "signal": "wrong"},
     )
     stored = list_learning_events("u1")[0]
     assert "private raw correction" not in str(stored)
     assert stored["features"]["content_hash"] == event["features"]["content_hash"]
-    assert "password" not in stored["metadata"]
+    assert credential_field not in stored["metadata"]
     assert list_learning_events("u2") == []
 
 

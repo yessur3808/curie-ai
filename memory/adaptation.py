@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _MIN_IMPLICIT_SAMPLES = 3
 _DEFAULTS = {

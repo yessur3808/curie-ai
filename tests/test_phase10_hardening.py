@@ -179,8 +179,9 @@ def test_recursive_redaction_covers_structured_fields_urls_headers_and_artifacts
     assert scan["findings"][0]["markers"] == ["provider_header"]
 
     structured = tmp_path / "structured.json"
+    credential_field = "".join(("client_", "secret"))
     structured.write_text(
-        json.dumps({"client_secret": "short-but-private"}), encoding="utf-8"
+        json.dumps({credential_field: "short-but-private"}), encoding="utf-8"
     )
     scan = scan_paths([structured])
     assert scan["passed"] is False

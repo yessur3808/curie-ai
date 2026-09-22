@@ -22,8 +22,7 @@ def _connect() -> sqlite3.Connection:
     except OSError:
         pass
     conn.row_factory = sqlite3.Row
-    conn.executescript(
-        """
+    conn.executescript("""
         PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS users (
             channel TEXT NOT NULL, external_id TEXT NOT NULL, internal_id TEXT NOT NULL,
@@ -138,8 +137,7 @@ def _connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL
         );
-        """
-    )
+        """)
     from memory.schema_migrations import apply_migrations
 
     apply_migrations(conn)
