@@ -273,7 +273,8 @@ jobs:
           cargo test --locked --manifest-path native/task_engine/Cargo.toml
       - name: Build and install the ABI3 extension
         run: |
-          maturin build --release --locked --out dist/native \
+          maturin build --release --locked --compatibility linux \
+            --auditwheel skip --out dist/native \
             --manifest-path native/task_engine/Cargo.toml
           pip install dist/native/curie_task_engine-*.whl
       - name: Require native atomicity, leases, fencing, recovery, and integration
@@ -315,9 +316,11 @@ jobs:
           cargo test --locked --manifest-path native/runtime_kernel/Cargo.toml
       - name: Build and install unified runtime and scheduler extensions
         run: |
-          maturin build --release --locked --out dist/native \
+          maturin build --release --locked --compatibility linux \
+            --auditwheel skip --out dist/native \
             --manifest-path native/runtime_kernel/Cargo.toml
-          maturin build --release --locked --out dist/native \
+          maturin build --release --locked --compatibility linux \
+            --auditwheel skip --out dist/native \
             --manifest-path native/task_engine/Cargo.toml
           pip install dist/native/curie_runtime_kernel-*.whl
           pip install dist/native/curie_task_engine-*.whl

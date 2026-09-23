@@ -149,6 +149,10 @@ def test_native_sqlite_uses_the_process_shared_library():
             f"{module_name} must dynamically link the process-shared SQLite library; "
             "a bundled copy can corrupt WAL databases used by Python sqlite3"
         )
+        assert ".libs/libsqlite3" not in dependencies.casefold(), (
+            f"{module_name} must not package a private SQLite shared library; "
+            "Python and Rust must resolve the same system library and lock manager"
+        )
 
 
 def test_mixed_python_and_native_wal_writes_preserve_integrity(runtime, tmp_path):
