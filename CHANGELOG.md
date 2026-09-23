@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026.09-rust-api-voice-runtime
+
+- Added a coarse-grained PyO3 ABI3 runtime for bounded API admission,
+  idempotent response replay, native inference priority/cancellation, live
+  voice-session fencing, bounded spoken-conversation history, and artifact
+  expiry.
+- Moved speech-recognition plans and output validation plus trained-speech
+  readiness, command construction, cross-process leasing, metrics, and stream
+  event validation into Rust while retaining Faster-Whisper and Chatterbox as
+  isolated model workers.
+- Integrated the native boundary into the main API, WebSocket chat, dashboard
+  live voice, inference service, transcription, trained speech, health, and
+  cancellation flows with an explicit audited Python rollback.
+- Added native concurrency, fencing, input-validation, worker-boundary, and
+  integration tests plus blocking formatting, Clippy, Cargo test, and audit CI.
+
 ## 2026.09-rust-unified-runtime
 
 - Added one coarse-grained PyO3 ABI3 runtime kernel for process-resident SQLite

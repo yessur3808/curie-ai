@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: install install-optional memory-kernel memory-kernel-check media-transport media-transport-check connector-gateway connector-gateway-check device-resolver device-resolver-check task-engine task-engine-check runtime-kernel runtime-kernel-check run start test migrate migrate-down lint format check install-hooks shell verify help
+.PHONY: install install-optional memory-kernel memory-kernel-check media-transport media-transport-check api-voice-runtime api-voice-runtime-check connector-gateway connector-gateway-check device-resolver device-resolver-check task-engine task-engine-check runtime-kernel runtime-kernel-check run start test migrate migrate-down lint format check install-hooks shell verify help
 .PHONY: db-start db-stop db-restart db-status setup-db
 .PHONY: run-telegram run-discord run-whatsapp run-api run-all
 .PHONY: check-ports test-imports clean sync-env sync-env-add sync-env-clean sync-env-backup restart-clean
@@ -31,6 +31,16 @@ media-transport-check:  ## Check Rust media formatting, lints, tests, and parity
 	cargo clippy --locked --manifest-path native/media_transport/Cargo.toml --all-targets -- -D warnings
 	cargo test --locked --manifest-path native/media_transport/Cargo.toml
 	CURIE_MEDIA_TRANSPORT=rust .venv/bin/pytest -q tests/test_media_transport_native.py tests/test_media_ingestion.py tests/test_voice_delivery.py tests/test_trained_voice_runtime.py tests/test_trained_voice_stream.py
+
+api-voice-runtime:  ## Build and install Curie's Rust API and live-voice runtime
+	.venv/bin/pip install -r requirements-rust.txt
+	.venv/bin/maturin develop --release --manifest-path native/api_voice_runtime/Cargo.toml
+
+api-voice-runtime-check:  ## Check API admission, live sessions, recognition, and speech runtime
+	cargo fmt --manifest-path native/api_voice_runtime/Cargo.toml -- --check
+	cargo clippy --locked --manifest-path native/api_voice_runtime/Cargo.toml --all-targets -- -D warnings
+	cargo test --locked --manifest-path native/api_voice_runtime/Cargo.toml
+	CURIE_API_VOICE_RUNTIME=rust .venv/bin/pytest -q tests/test_api_voice_runtime_native.py tests/test_inference_service.py tests/test_trained_voice_runtime.py tests/test_trained_voice_stream.py
 
 connector-gateway:  ## Build and install Curie's Rust connector delivery gateway
 	.venv/bin/pip install -r requirements-rust.txt

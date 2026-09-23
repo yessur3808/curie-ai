@@ -117,6 +117,23 @@ async def transcribe_audio(
     Returns:
         Transcribed text or None if transcription fails
     """
+    from services.api_voice_runtime import api_voice_runtime_status
+
+    if api_voice_runtime_status()["active"] == "rust":
+        try:
+            from services.speech_runtime import transcribe_audio_native
+
+            result = await transcribe_audio_native(
+                audio_path,
+                language=language,
+                accent=accent,
+                auto_detect=auto_detect,
+            )
+            return result["text"]
+        except Exception as exc:
+            logger.error("Native speech recognition failed: %s", exc)
+            return None
+
     # Map accent to language code if provided
     if accent and accent.lower() in ACCENT_LANGUAGE_MAP:
         language_code = ACCENT_LANGUAGE_MAP[accent.lower()]

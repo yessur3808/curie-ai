@@ -1,6 +1,7 @@
 import os
 import datetime
 import uuid
+import json
 import logging
 import time
 import threading
@@ -24,6 +25,14 @@ from agent.chat_workflow import ChatWorkflow
 from memory import UserManager
 from memory.session_store import get_session_manager
 from utils.db import is_master_user
+from services.api_voice_runtime import (
+    begin_request,
+    fail_request,
+    finish_request,
+    validate_message,
+    voice_session_manager,
+    now_ms,
+)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -65,12 +74,17 @@ def cleanup_old_voice_files() -> NoReturn:
         try:
             time.sleep(300)  # Run every 5 minutes
             current_time = time.time()
+            sessions = voice_session_manager()
+            if sessions is not None:
+                expired_files = sessions.expired_artifacts(now_ms(), 10_000)
+            else:
+                with _voice_files_lock:
+                    expired_files = [
+                        filename
+                        for filename, created_time in _voice_files.items()
+                        if current_time - created_time > VOICE_FILE_TTL
+                    ]
             with _voice_files_lock:
-                expired_files = [
-                    filename
-                    for filename, created_time in _voice_files.items()
-                    if current_time - created_time > VOICE_FILE_TTL
-                ]
                 for filename in expired_files:
                     file_path = os.path.join("/tmp", filename)
                     try:
@@ -80,7 +94,7 @@ def cleanup_old_voice_files() -> NoReturn:
                     except Exception as e:
                         logger.warning(f"Failed to delete {filename}: {e}")
                     finally:
-                        del _voice_files[filename]
+                        _voice_files.pop(filename, None)
         except Exception as e:
             logger.error(f"Error in voice file cleanup: {e}")
 
@@ -158,15 +172,42 @@ async def chat_api(req: MessageRequest):
     if not _workflow:
         raise HTTPException(status_code=500, detail="System not initialized")
 
-    # Generate or use provided idempotency key
-    message_id = req.idempotency_key or str(uuid.uuid4())
-
-    # Validate idempotency_key is safe for filesystem use (UUID format only)
-    # This prevents path traversal attacks when generating voice files
-    if req.idempotency_key and not _IDEMPOTENCY_KEY_RE.match(req.idempotency_key):
+    try:
+        validated = validate_message(req.user_id, req.message, req.idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    message_id = (
+        validated["request_id"]
+        if validated is not None
+        else (req.idempotency_key or str(uuid.uuid4()))
+    )
+    if (
+        validated is None
+        and req.idempotency_key
+        and not _IDEMPOTENCY_KEY_RE.match(req.idempotency_key)
+    ):
         raise HTTPException(
             status_code=400, detail="idempotency_key must be a valid UUID format"
         )
+    admission = begin_request(message_id, req.user_id, "chat")
+    lease_token = None
+    if admission is not None:
+        outcome = admission["outcome"]
+        if outcome == "replay":
+            return MessageResponse(**admission["response"])
+        if outcome == "in_progress":
+            raise HTTPException(
+                status_code=409, detail="Request is already in progress"
+            )
+        if outcome == "owner_busy":
+            raise HTTPException(
+                status_code=429, detail="Too many requests for this user"
+            )
+        if outcome == "overloaded":
+            raise HTTPException(
+                status_code=503, detail="Curie is handling too many requests"
+            )
+        lease_token = int(admission["lease_token"])
 
     # Normalize to standard ChatWorkflow format
     # Compute internal_id upfront using the same helper as /clear_memory so
@@ -184,35 +225,44 @@ async def chat_api(req: MessageRequest):
         "attachments": [],
     }
 
-    # Process through workflow
-    result = await _workflow.process_message(normalized_input)
+    try:
+        result = await _workflow.process_message(normalized_input)
+        voice_url = None
+        if req.voice_response:
+            try:
+                from services.voice_delivery import synthesize_reply
 
-    # Generate voice response if requested
-    voice_url = None
-    if req.voice_response:
-        try:
-            from services.voice_delivery import synthesize_reply
-
-            voice_path = await synthesize_reply(
-                result["text"], _workflow.persona, internal_id
-            )
-            if voice_path:
-                voice_filename = os.path.basename(voice_path)
-                voice_url = f"/audio/{voice_filename}"
-                # Track file for cleanup
-                with _voice_files_lock:
-                    _voice_files[voice_filename] = time.time()
-                logger.info(f"Generated voice response: {voice_url}")
-        except Exception as e:
-            logger.error(f"Failed to generate voice response: {e}")
-
-    return MessageResponse(
-        text=result["text"],
-        timestamp=result["timestamp"].isoformat(),
-        model_used=result["model_used"],
-        processing_time_ms=result["processing_time_ms"],
-        voice_url=voice_url,
-    )
+                voice_path = await synthesize_reply(
+                    result["text"], _workflow.persona, internal_id
+                )
+                if voice_path:
+                    voice_filename = os.path.basename(voice_path)
+                    voice_url = f"/audio/{voice_filename}"
+                    sessions = voice_session_manager()
+                    if sessions is not None:
+                        sessions.register_artifact(
+                            voice_filename, now_ms(), VOICE_FILE_TTL * 1000
+                        )
+                    else:
+                        with _voice_files_lock:
+                            _voice_files[voice_filename] = time.time()
+                    logger.info("Generated voice response: %s", voice_url)
+            except Exception as exc:
+                logger.error("Failed to generate voice response: %s", exc)
+        response = {
+            "text": result["text"],
+            "timestamp": result["timestamp"].isoformat(),
+            "model_used": result["model_used"],
+            "processing_time_ms": result["processing_time_ms"],
+            "voice_url": voice_url,
+        }
+        if lease_token is not None:
+            finish_request(message_id, lease_token, response)
+        return MessageResponse(**response)
+    except BaseException:
+        if lease_token is not None:
+            fail_request(message_id, lease_token)
+        raise
 
 
 @app.get("/health")
@@ -381,8 +431,12 @@ async def websocket_chat(websocket: WebSocket):
     Server responds: {"text": "Response", "timestamp": "...", "model_used": "..."}
     """
     await websocket.accept()
-    with active_connections_lock:
-        active_connections.append(websocket)
+    sessions = voice_session_manager()
+    session_id = None
+    session_owner = None
+    if sessions is None:
+        with active_connections_lock:
+            active_connections.append(websocket)
 
     try:
         while True:
@@ -400,6 +454,28 @@ async def websocket_chat(websocket: WebSocket):
                 await websocket.send_json({"error": "Missing user_id or message"})
                 continue
 
+            if session_owner is not None and session_owner != user_id:
+                await websocket.send_json(
+                    {"error": "A live session cannot change users"}
+                )
+                continue
+            session_owner = user_id
+            session_token = None
+            if sessions is not None:
+                session = json.loads(
+                    sessions.open(
+                        user_id, "api-websocket", now_ms(), 3_600_000, session_id, True
+                    )
+                )
+                session_id = session["session_id"]
+                operation = json.loads(
+                    sessions.start_operation(session_id, "chat", now_ms(), 3_600_000)
+                )
+                if operation["outcome"] != "started":
+                    await websocket.send_json({"error": "This live session is busy"})
+                    continue
+                session_token = int(operation["token"])
+
             # Process message
             message_id = str(uuid.uuid4())
             internal_id = get_internal_id(user_id)
@@ -413,7 +489,14 @@ async def websocket_chat(websocket: WebSocket):
                 "internal_id": internal_id,
             }
 
-            result = await _workflow.process_message(normalized_input)
+            try:
+                result = await _workflow.process_message(normalized_input)
+            except BaseException:
+                if sessions is not None and session_token is not None:
+                    sessions.cancel_active(session_id, now_ms())
+                raise
+            if sessions is not None and session_token is not None:
+                sessions.finish_operation(session_id, session_token, now_ms())
 
             # Send response
             await websocket.send_json(
@@ -422,10 +505,13 @@ async def websocket_chat(websocket: WebSocket):
                     "timestamp": result["timestamp"].isoformat(),
                     "model_used": result["model_used"],
                     "processing_time_ms": result["processing_time_ms"],
+                    "session_id": session_id,
                 }
             )
 
     except WebSocketDisconnect:
+        if sessions is not None and session_id is not None:
+            sessions.close(session_id)
         with active_connections_lock:
             if websocket in active_connections:
                 active_connections.remove(websocket)
@@ -443,6 +529,8 @@ async def websocket_chat(websocket: WebSocket):
                 "Failed to send error message or close WebSocket", exc_info=True
             )
         finally:
+            if sessions is not None and session_id is not None:
+                sessions.close(session_id)
             with active_connections_lock:
                 if websocket in active_connections:
                     active_connections.remove(websocket)
@@ -607,6 +695,14 @@ async def get_audio_file(filename: str):
     Returns:
         Audio file as streaming response
     """
+    from services.api_voice_runtime import required_native
+
+    native = required_native()
+    if native is not None:
+        try:
+            native.validate_audio_artifact_name(filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid filename") from exc
     # Sanitize filename to prevent path traversal
     # Only allow alphanumeric, dash, underscore, and dot
     if not re.match(r"^[a-zA-Z0-9_\-]+\.(mp3|wav|ogg)$", filename):

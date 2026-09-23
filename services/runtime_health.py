@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import importlib.util
 from pathlib import Path
 import shutil
 import sqlite3
@@ -51,6 +50,8 @@ def capability_health(workflow_ready: bool = True) -> dict:
     from services.runtime_kernel import model_supervisor_status, runtime_kernel_status
     from services.security import security_status
     from services.voice_delivery import voice_health
+    from services.api_voice_runtime import api_voice_runtime_status
+    from services.speech_runtime import speech_recognition_status
 
     models = []
     for value in os.getenv("LLM_MODELS", "").split(","):
@@ -91,6 +92,10 @@ def capability_health(workflow_ready: bool = True) -> dict:
         runtime_kernel["mode"] == "rust" and runtime_kernel["active"] != "rust"
     )
     model_lifecycle = model_supervisor_status()
+    api_voice_runtime = api_voice_runtime_status()
+    api_voice_runtime["ready"] = not (
+        api_voice_runtime["mode"] == "rust" and api_voice_runtime["active"] != "rust"
+    )
     model_lifecycle["resident_count"] = (
         (model_lifecycle.get("snapshot") or {}).get("resident_count", 0)
         if model_lifecycle["active"] == "rust"
@@ -116,7 +121,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
             or tool_pressure["saturated"]
         ),
     }
-    transcription_ready = bool(importlib.util.find_spec("whisper"))
+    transcription = speech_recognition_status()
     capabilities = {
         "text": {
             "ready": text_ready and workflow_ready,
@@ -130,10 +135,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
             "projector": vision_projector,
             "fallback": "request text description",
         },
-        "transcription": {
-            "ready": transcription_ready,
-            "fallback": "request typed text",
-        },
+        "transcription": {**transcription, "fallback": "request typed text"},
         "speech": {**voice, "fallback": "complete text reply"},
         "media_transport": media_transport,
         "memory_kernel": memory_kernel,
@@ -141,6 +143,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         "device_resolver": device_resolver,
         "task_engine": task_engine,
         "runtime_kernel": runtime_kernel,
+        "api_voice_runtime": api_voice_runtime,
         "model_lifecycle": model_lifecycle,
         "database": database,
         "disk": disk_health,
@@ -160,6 +163,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         device_resolver["ready"],
         task_engine["ready"],
         runtime_kernel["ready"],
+        api_voice_runtime["ready"],
         not backpressure["saturated"],
     )
     return {
@@ -185,6 +189,7 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         "device_resolver",
         "task_engine",
         "runtime_kernel",
+        "api_voice_runtime",
         "database",
         "disk",
     ):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import itertools
+import json
 import os
 import time
 from typing import AsyncIterator, Awaitable, Callable
@@ -49,11 +50,21 @@ class ManagedInferenceService:
     def __init__(self, *, capacity: int = 16, workers: int = 1):
         self.capacity = max(1, capacity)
         self.workers = max(1, workers)
+        from services.api_voice_runtime import required_native
+
+        native = required_native()
+        self._native = (
+            native.InferenceCoordinator(self.capacity, self.workers)
+            if native is not None
+            else None
+        )
         self._queue: asyncio.PriorityQueue[tuple[int, int, _Job]] = (
             asyncio.PriorityQueue(maxsize=self.capacity)
         )
+        self._queue_event = asyncio.Event()
         self._sequence = itertools.count()
         self._jobs: dict[str, _Job] = {}
+        self._running: set[str] = set()
         self._worker_tasks: list[asyncio.Task] = []
         self._metrics = {
             "submitted": 0,
@@ -65,9 +76,13 @@ class ManagedInferenceService:
 
     @property
     def queue_depth(self) -> int:
+        if self._native is not None:
+            return int(json.loads(self._native.snapshot())["queue_depth"])
         return self._queue.qsize()
 
     def snapshot(self) -> dict:
+        if self._native is not None:
+            return json.loads(self._native.snapshot())
         queue_depth = self.queue_depth
         return {
             **self._metrics,
@@ -80,6 +95,9 @@ class ManagedInferenceService:
         }
 
     def note_model_reload(self) -> None:
+        if self._native is not None:
+            self._native.note_model_reload()
+            return
         self._metrics["model_reloads"] += 1
 
     def _ensure_workers(self) -> None:
@@ -114,13 +132,29 @@ class ManagedInferenceService:
         )
         if job.request_id in self._jobs:
             raise ValueError("Inference request_id is already active")
-        try:
-            self._queue.put_nowait((job.priority, next(self._sequence), job))
-        except asyncio.QueueFull as exc:
-            self._metrics["overloaded"] += 1
-            raise InferenceOverloaded("Inference queue is full") from exc
+        if self._native is not None:
+            try:
+                self._native.submit(
+                    job.request_id,
+                    job.owner_id,
+                    priority,
+                    int(job.created * 1000),
+                )
+            except RuntimeError as exc:
+                if "inference_queue_full" in str(exc):
+                    raise InferenceOverloaded("Inference queue is full") from exc
+                raise
+        else:
+            try:
+                self._queue.put_nowait((job.priority, next(self._sequence), job))
+            except asyncio.QueueFull as exc:
+                self._metrics["overloaded"] += 1
+                raise InferenceOverloaded("Inference queue is full") from exc
         self._jobs[job.request_id] = job
-        self._metrics["submitted"] += 1
+        if self._native is not None:
+            self._queue_event.set()
+        else:
+            self._metrics["submitted"] += 1
         try:
             return await job.future
         except asyncio.CancelledError:
@@ -149,12 +183,26 @@ class ManagedInferenceService:
         if not job:
             return False
         job.cancelled.set()
+        if self._native is not None:
+            outcome = json.loads(self._native.cancel(request_id))
+            if not outcome.get("was_running"):
+                if not job.future.done():
+                    job.future.cancel()
+                job.token_queue.put_nowait(None)
+                self._jobs.pop(request_id, None)
         return True
 
     def cancel_owner(self, owner_id: str) -> int:
         jobs = [job for job in self._jobs.values() if job.owner_id == str(owner_id)]
+        if self._native is not None:
+            self._native.cancel_owner(str(owner_id))
         for job in jobs:
             job.cancelled.set()
+            if self._native is not None and job.request_id not in self._running:
+                if not job.future.done():
+                    job.future.cancel()
+                job.token_queue.put_nowait(None)
+                self._jobs.pop(job.request_id, None)
         return len(jobs)
 
     async def close(self) -> None:
@@ -168,8 +216,12 @@ class ManagedInferenceService:
 
     async def _worker(self) -> None:
         while True:
-            _, _, job = await self._queue.get()
+            if self._native is not None:
+                job = await self._next_native_job()
+            else:
+                _, _, job = await self._queue.get()
             started = time.perf_counter()
+            self._running.add(job.request_id)
             first_token_at: float | None = None
             chunks: list[str] = []
 
@@ -206,18 +258,50 @@ class ManagedInferenceService:
                 )
                 if not job.future.done():
                     job.future.set_result(result)
-                self._metrics["completed"] += 1
+                if self._native is not None:
+                    self._native.finish(job.request_id, "completed")
+                else:
+                    self._metrics["completed"] += 1
             except asyncio.CancelledError:
                 if not job.future.done():
                     job.future.cancel()
-                self._metrics["cancelled"] += 1
+                if self._native is not None:
+                    self._native.finish(job.request_id, "cancelled")
+                else:
+                    self._metrics["cancelled"] += 1
             except Exception as exc:
                 if not job.future.done():
                     job.future.set_exception(exc)
+                if self._native is not None:
+                    self._native.finish(job.request_id, "failed")
             finally:
                 await job.token_queue.put(None)
                 self._jobs.pop(job.request_id, None)
-                self._queue.task_done()
+                self._running.discard(job.request_id)
+                if self._native is None:
+                    self._queue.task_done()
+
+    async def _next_native_job(self) -> _Job:
+        while True:
+            encoded = self._native.pop(int(time.perf_counter() * 1000))
+            if encoded is not None:
+                request_id = json.loads(encoded)["request_id"]
+                job = self._jobs.get(request_id)
+                if job is not None:
+                    return job
+                self._native.finish(request_id, "cancelled")
+                continue
+            self._queue_event.clear()
+            encoded = self._native.pop(int(time.perf_counter() * 1000))
+            if encoded is not None:
+                self._queue_event.set()
+                request_id = json.loads(encoded)["request_id"]
+                job = self._jobs.get(request_id)
+                if job is not None:
+                    return job
+                self._native.finish(request_id, "cancelled")
+                continue
+            await self._queue_event.wait()
 
 
 _service: ManagedInferenceService | None = None

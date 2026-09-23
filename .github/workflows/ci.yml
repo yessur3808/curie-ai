@@ -141,6 +141,43 @@ jobs:
           python -m scripts.benchmark_media_transport
           --megabytes 1 --iterations 1 --mode rust
 
+  rust-api-voice-runtime:
+    name: Rust API and voice runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python and native build dependencies
+        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+      - name: Check Rust formatting, lints, and unit tests
+        run: |
+          cargo fmt --manifest-path native/api_voice_runtime/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path native/api_voice_runtime/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path native/api_voice_runtime/Cargo.toml
+      - name: Build and install API/voice and media extensions
+        run: |
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/api_voice_runtime/Cargo.toml
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/media_transport/Cargo.toml
+          pip install dist/native/curie_api_voice_runtime-*.whl
+          pip install dist/native/curie_media_transport-*.whl
+      - name: Require native admission, fencing, cancellation, and worker integration
+        env:
+          CURIE_API_VOICE_RUNTIME: rust
+          CURIE_MEDIA_TRANSPORT: rust
+        run: >-
+          pytest -q tests/test_api_voice_runtime_native.py
+          tests/test_inference_service.py
+          tests/test_trained_voice_runtime.py
+          tests/test_trained_voice_stream.py
+
   rust-connector-gateway:
     name: Rust connector gateway
     runs-on: ubuntu-latest
@@ -324,6 +361,7 @@ jobs:
           CURIE_DEVICE_RESOLVER: python
           CURIE_TASK_ENGINE: python
           CURIE_RUNTIME_KERNEL: python
+          CURIE_API_VOICE_RUNTIME: python
           CURIE_MODEL_SUPERVISOR: profiled
         run: pytest -q
 
@@ -396,6 +434,7 @@ jobs:
           cargo audit --file native/device_resolver/Cargo.lock
           cargo audit --file native/task_engine/Cargo.lock
           cargo audit --file native/runtime_kernel/Cargo.lock
+          cargo audit --file native/api_voice_runtime/Cargo.lock
       - name: Scan Python for high-severity findings
         run: >-
           bandit -q -r agent connectors evaluation llm memory scripts services utils
@@ -463,6 +502,7 @@ jobs:
       - rust-device-resolver
       - rust-task-engine
       - rust-runtime-kernel
+      - rust-api-voice-runtime
       - unit-tests
       - integration-tests
       - security-tests
@@ -482,6 +522,7 @@ jobs:
           RUST_DEVICE_RESOLVER: ${{ needs.rust-device-resolver.result }}
           RUST_TASK_ENGINE: ${{ needs.rust-task-engine.result }}
           RUST_RUNTIME_KERNEL: ${{ needs.rust-runtime-kernel.result }}
+          RUST_API_VOICE_RUNTIME: ${{ needs.rust-api-voice-runtime.result }}
           UNIT_TESTS: ${{ needs.unit-tests.result }}
           INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
           SECURITY_TESTS: ${{ needs.security-tests.result }}
@@ -498,6 +539,7 @@ jobs:
             "$RUST_DEVICE_RESOLVER" \
             "$RUST_TASK_ENGINE" \
             "$RUST_RUNTIME_KERNEL" \
+            "$RUST_API_VOICE_RUNTIME" \
             "$UNIT_TESTS" \
             "$INTEGRATION_TESTS" \
             "$SECURITY_TESTS" \

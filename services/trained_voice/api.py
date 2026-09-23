@@ -5,6 +5,7 @@ No tool router, task executor or outbound messaging connectors are loaded.
 
 import asyncio
 import collections
+from contextlib import asynccontextmanager
 import datetime
 import importlib.util
 import json
@@ -33,6 +34,7 @@ from .runtime import (
     trained_voice_stream_events,
 )
 from .voice_stream import until_disconnect
+from services.api_voice_runtime import decode, now_ms, voice_session_manager
 from utils.voice import (
     text_to_speech,
     get_voice_config_from_persona,
@@ -80,6 +82,7 @@ class Message(BaseModel):
     username: str | None = None
     dashboard: dict | None = None
     question: str | None = Field(default=None, max_length=2000)
+    session_id: str | None = None
 
 
 def voice_model(profile):
@@ -250,6 +253,9 @@ async def make_voice(text, profile, mode="professional"):
         }
         if not await text_to_speech(text, str(path), cfg):
             raise HTTPException(503, "Neural voice synthesis is unavailable")
+    sessions = voice_session_manager()
+    if sessions is not None:
+        sessions.register_artifact(name, now_ms(), 3_600_000)
     return "/audio/" + name
 
 
@@ -258,13 +264,69 @@ class Speech(BaseModel):
     voice_profile: str = Field(
         default="trained", pattern="^(trained|french|clear|custom)$"
     )
+    user_id: str = Field(default="dashboard", min_length=1, max_length=256)
+    session_id: str | None = None
+
+
+def _open_voice_session(
+    owner_id: str, *, requested_id: str | None = None, kind: str = "dashboard"
+) -> dict | None:
+    sessions = voice_session_manager()
+    if sessions is None:
+        return None
+    return decode(
+        sessions.open(
+            owner_id,
+            kind,
+            now_ms(),
+            int(os.getenv("CURIE_VOICE_SESSION_TTL_MS", "3600000")),
+            requested_id,
+            True,
+        )
+    )
+
+
+@asynccontextmanager
+async def _voice_operation(
+    owner_id: str,
+    operation: str,
+    *,
+    session_id: str | None = None,
+    kind: str = "dashboard",
+):
+    sessions = voice_session_manager()
+    if sessions is None:
+        if gate.locked():
+            raise HTTPException(429, "Curie is busy; try again shortly")
+        async with gate:
+            yield None, None
+        return
+    session = _open_voice_session(owner_id, requested_id=session_id, kind=kind)
+    started = decode(
+        sessions.start_operation(
+            session["session_id"],
+            operation,
+            now_ms(),
+            int(os.getenv("CURIE_VOICE_SESSION_TTL_MS", "3600000")),
+        )
+    )
+    if started["outcome"] != "started":
+        raise HTTPException(429, "Curie is busy with this live conversation")
+    token = int(started["token"])
+    try:
+        yield session["session_id"], token
+    except BaseException:
+        sessions.cancel_active(session["session_id"], now_ms())
+        raise
+    else:
+        sessions.finish_operation(session["session_id"], token, now_ms())
 
 
 @app.post("/speak")
 async def speak(req: Speech, request: Request):
-    if gate.locked():
-        raise HTTPException(429, "Curie is busy; try again shortly")
-    async with gate:
+    async with _voice_operation(
+        req.user_id, "synthesis", session_id=req.session_id
+    ) as (session_id, _):
         refresh_persona()
         status = voice_status()
         revision = str(status["revision"]) + ":" + status["personaRevision"]
@@ -274,12 +336,15 @@ async def speak(req: Speech, request: Request):
             ),
             "voice_profile": req.voice_profile,
             "voice_revision": revision,
+            "session_id": session_id,
         }
 
 
 @app.get("/health")
 async def health():
     refresh_persona()
+    sessions = voice_session_manager()
+    session_health = decode(sessions.snapshot(now_ms())) if sessions is not None else {}
     return {
         "status": "healthy",
         "workflow_initialized": True,
@@ -287,21 +352,66 @@ async def health():
         "transcription": VOICE_PYTHON.is_file(),
         "speech": True,
         "liveVoice": True,
-        "busy": gate.locked(),
+        "busy": bool(session_health.get("busy_sessions", gate.locked())),
+        "voiceSessions": session_health,
         "voice": voice_status(),
     }
+
+
+@app.post("/voice-sessions/{user_id}")
+async def open_voice_session(user_id: str):
+    session = _open_voice_session(user_id)
+    if session is None:
+        raise HTTPException(503, "Native live voice sessions are unavailable")
+    return session
+
+
+@app.get("/voice-sessions/session/{session_id}")
+async def inspect_voice_session(session_id: str):
+    sessions = voice_session_manager()
+    if sessions is None:
+        raise HTTPException(503, "Native live voice sessions are unavailable")
+    try:
+        return decode(sessions.inspect(session_id, now_ms()))
+    except KeyError as exc:
+        raise HTTPException(404, "Voice session not found") from exc
+
+
+@app.post("/voice-sessions/session/{session_id}/cancel")
+async def cancel_voice_session(session_id: str):
+    sessions = voice_session_manager()
+    if sessions is None:
+        raise HTTPException(503, "Native live voice sessions are unavailable")
+    try:
+        snapshot = decode(sessions.inspect(session_id, now_ms()))
+        active_token = snapshot.get("active_token")
+        if active_token is not None:
+            from llm.inference_service import get_inference_service
+
+            get_inference_service().cancel(f"voice:{session_id}:{active_token}")
+        return {"cancelled": sessions.cancel_active(session_id, now_ms())}
+    except KeyError as exc:
+        raise HTTPException(404, "Voice session not found") from exc
+
+
+@app.delete("/voice-sessions/session/{session_id}")
+async def close_voice_session(session_id: str):
+    sessions = voice_session_manager()
+    if sessions is None:
+        raise HTTPException(503, "Native live voice sessions are unavailable")
+    return {"closed": sessions.close(session_id)}
 
 
 @app.post("/speak-stream")
 async def speak_stream(req: Speech):
     if len(req.text) > 2000:
         raise HTTPException(400, "Live replies must be under 2,000 characters")
-    if gate.locked():
-        raise HTTPException(429, "Curie is busy; try again shortly")
 
     async def events():
-        async with gate:
-            yield json.dumps({"type": "ready"}) + "\n"
+        async with _voice_operation(
+            req.user_id, "synthesis", session_id=req.session_id
+        ) as (session_id, _):
+            yield json.dumps({"type": "ready", "session_id": session_id}) + "\n"
             try:
                 active = refresh_persona()
                 delivery = delivery_settings(active, "casual")
@@ -345,9 +455,10 @@ async def speak_stream(req: Speech):
 @app.post("/chat")
 async def chat(req: Message, request: Request):
     started = time.perf_counter()
-    if gate.locked():
-        raise HTTPException(429, "Curie is answering another dashboard question")
-    async with gate:
+    async with _voice_operation(req.user_id, "chat", session_id=req.session_id) as (
+        session_id,
+        session_token,
+    ):
         snapshot, sep, user = req.message.rpartition(
             "\nEND SNAPSHOT\nOwner's message: "
         )
@@ -359,7 +470,16 @@ async def chat(req: Message, request: Request):
                 req.dashboard, ensure_ascii=False, separators=(",", ":")
             )
             user = req.question or user
-        turns = [] if req.ephemeral else history.get(req.user_id, [])
+        sessions = voice_session_manager()
+        turns = (
+            []
+            if req.ephemeral
+            else (
+                decode(sessions.history(session_id))
+                if sessions is not None
+                else history.get(req.user_id, [])
+            )
+        )
         active = refresh_persona()
         personality = PersonalityContext(active)
         directives = (
@@ -397,7 +517,11 @@ async def chat(req: Message, request: Request):
                 user,
                 0.35,
                 owner_id="dashboard:" + req.user_id,
-                request_id=str(uuid.uuid4()),
+                request_id=(
+                    f"voice:{session_id}:{session_token}"
+                    if session_id is not None
+                    else str(uuid.uuid4())
+                ),
             ),
         )
         text = candidate.text or "No response was available."
@@ -408,13 +532,20 @@ async def chat(req: Message, request: Request):
             text = personality.apply_response_style(text, user, history=turns)
         if not req.ephemeral:
             turns = (turns + [{"user": user[:2000], "assistant": text[:3000]}])[-4:]
-            history[req.user_id] = turns
-            history.move_to_end(req.user_id)
-        while len(history) > 20:
-            history.popitem(last=False)
+            if sessions is not None:
+                sessions.append_history(session_id, user, text)
+            else:
+                history[req.user_id] = turns
+                history.move_to_end(req.user_id)
+                while len(history) > 20:
+                    history.popitem(last=False)
         voice_url = None
         if req.voice_response:
             try:
+                if sessions is not None:
+                    sessions.transition(
+                        session_id, session_token, "synthesizing", now_ms()
+                    )
                 voice_url = await until_disconnect(
                     request, make_voice(text[:24000], req.voice_profile, mode)
                 )
@@ -426,11 +557,20 @@ async def chat(req: Message, request: Request):
             "model_used": candidate.model_used,
             "processing_time_ms": round((time.perf_counter() - started) * 1000),
             "voice_url": voice_url,
+            "session_id": session_id,
         }
 
 
 @app.get("/audio/{name}")
 async def audio(name: str):
+    from services.api_voice_runtime import required_native
+
+    native = required_native()
+    if native is not None:
+        try:
+            native.validate_audio_artifact_name(name)
+        except ValueError as exc:
+            raise HTTPException(404) from exc
     if (
         not re.fullmatch(r"voice_[a-f0-9-]+\.(ogg|wav)", name)
         or not (audio_dir / name).is_file()
@@ -449,6 +589,7 @@ async def transcribe(
     file: UploadFile = File(...),
     user_id: str = Form("dashboard"),
     language: str = Form("en"),
+    session_id: str | None = Form(None),
 ):
     if not VOICE_PYTHON.is_file():
         raise HTTPException(503, "Install dashboard voice dependencies first")
@@ -461,34 +602,30 @@ async def transcribe(
     with tempfile.NamedTemporaryFile(suffix=suffix) as f:
         f.write(data)
         f.flush()
-        async with gate:
-            worker = await asyncio.create_subprocess_exec(
-                str(VOICE_PYTHON),
-                "-m",
-                "services.trained_voice.transcribe",
-                f.name,
-                language,
-                cwd=str(ROOT),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+        async with _voice_operation(
+            user_id, "transcription", session_id=session_id
+        ) as (active_session, _):
+            from services.speech_runtime import (
+                SpeechRecognitionError,
+                transcribe_audio_native,
             )
+
             try:
-                stdout, stderr = await until_disconnect(
-                    request, asyncio.wait_for(worker.communicate(), timeout=110)
+                result = await until_disconnect(
+                    request,
+                    transcribe_audio_native(
+                        f.name,
+                        language=language,
+                        auto_detect=False,
+                        root=ROOT,
+                    ),
                 )
-            except (asyncio.TimeoutError, asyncio.CancelledError) as error:
-                if worker.returncode is None:
-                    worker.kill()
-                await worker.wait()
-                if isinstance(error, asyncio.CancelledError):
-                    raise
-                raise HTTPException(504, "Speech recognition timed out")
-            if worker.returncode:
+            except SpeechRecognitionError as error:
                 raise HTTPException(
                     503,
                     "Speech recognition unavailable; check the local voice model installation",
-                )
-            return json.loads(stdout.decode().splitlines()[-1])
+                ) from error
+            return {**result, "session_id": active_session}
 
 
 if __name__ == "__main__":

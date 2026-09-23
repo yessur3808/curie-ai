@@ -29,6 +29,9 @@ async def until_disconnect(request, awaitable):
 
 async def worker_events(command, text, *, env=None, cwd=None, timeout=115):
     from services.media_transport import stream_process_lines
+    from services.api_voice_runtime import required_native
+
+    native = required_native()
 
     lines = stream_process_lines(
         command,
@@ -39,6 +42,11 @@ async def worker_events(command, text, *, env=None, cwd=None, timeout=115):
     )
     try:
         async for line in lines:
+            if native is not None:
+                encoded = native.parse_voice_event(line)
+                if encoded is not None:
+                    yield json.loads(encoded)
+                continue
             try:
                 event = json.loads(line)
             except (ValueError, UnicodeError):

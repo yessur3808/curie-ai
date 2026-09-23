@@ -31,7 +31,10 @@ class TrainedVoiceRuntimeTests(unittest.TestCase):
                     with self.assertRaises(TrainedVoiceBusy):
                         await _acquire_file_lock(lock, 0)
                 finally:
-                    os.close(first)
+                    if hasattr(first, "release"):
+                        first.release()
+                    else:
+                        os.close(first)
 
             asyncio.run(exercise())
 

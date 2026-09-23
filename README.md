@@ -797,6 +797,11 @@ Missing specialist files fall back to the next available local model. At most
 | `CURIE_MEMORY_KERNEL` | `auto` | `auto` prefers the native Rust ranker, `rust` requires it, and `python` is the audited rollback |
 | `CURIE_MEDIA_TRANSPORT` | `rust` | `rust` requires native bounded media transport; `auto` is compatibility mode and `python` is the audited emergency rollback |
 | `CURIE_MEDIA_MAX_OUTPUT_BYTES` | `268435456` | Maximum combined or encoded media output size |
+| `CURIE_API_VOICE_RUNTIME` | `rust` | Require native request admission, inference ordering, live voice sessions, speech-worker coordination, and trained-voice lifecycle |
+| `CURIE_API_REQUEST_CAPACITY` | `64` | Maximum admitted API requests across owners |
+| `CURIE_API_REQUESTS_PER_OWNER` | `2` | Maximum simultaneous API requests for one owner |
+| `CURIE_VOICE_SESSION_CAPACITY` | `128` | Maximum active native live-voice sessions |
+| `CURIE_VOICE_SESSION_TTL_MS` | `3600000` | Idle live-session lifetime before native expiry |
 | `CURIE_CONNECTOR_GATEWAY` | `rust` | Require native connector queue admission, ordering, deadlines, cancellation, and retry policy |
 | `CONNECTOR_DELIVERY_CONCURRENCY` | `4` | Maximum simultaneous outbound sends per connector within the bounded queue |
 | `CURIE_DEVICE_RESOLVER` | `rust` | Require native device/entity normalization, grouping, ambiguity detection, and ranking |
@@ -835,9 +840,18 @@ cannot pull a reply back to an old topic.
 Attachment inspection, file-signature validation, SHA-256 streaming, PCM/WAV
 concatenation, and trained-voice/FFmpeg subprocess supervision can run through
 Curie's second ABI3 Rust extension. Python continues to own speech and vision
-models, transcription, connector presentation, and personality decisions.
+model execution, connector presentation, and personality decisions.
 Build it with `make media-transport`; see
 [Rust media transport](docs/RUST_MEDIA_TRANSPORT.md).
+
+API admission, idempotent response replay, inference priority/cancellation,
+live-voice session fencing and bounded history, recognition-worker planning,
+and trained-speech configuration, locking, and output validation use a single
+coarse-grained ABI3 Rust runtime. Faster-Whisper and Chatterbox remain isolated
+Python model workers because their supported model stacks are PyTorch/Python;
+Rust owns their lifecycle, deadlines, process transport, and boundary checks.
+Build it with `make api-voice-runtime`; see
+[Rust API and voice runtime](docs/RUST_API_VOICE_RUNTIME.md).
 
 Connector queue admission and device/entity resolution also have dedicated
 ABI3 Rust kernels. The connector kernel handles bounded cross-event-loop

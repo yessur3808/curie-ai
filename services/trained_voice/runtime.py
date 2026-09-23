@@ -60,6 +60,13 @@ def _config(paths: VoicePaths) -> dict[str, Any]:
 def trained_voice_health(root: Path | None = None) -> dict[str, Any]:
     """Read readiness metadata without importing Torch or model packages."""
     paths = _paths(root)
+    from services.api_voice_runtime import required_native
+
+    native = required_native()
+    if native is not None:
+        return json.loads(
+            native.trained_voice_health(str(paths.home), str(paths.speech_python))
+        )
     config = _config(paths)
     ready = paths.ready()
     return {
@@ -99,8 +106,24 @@ def _lock_path(paths: VoicePaths) -> Path:
     return Path(configured).expanduser() if configured else paths.home / "runtime.lock"
 
 
-async def _acquire_file_lock(path: Path, wait_seconds: float) -> int:
+async def _acquire_file_lock(path: Path, wait_seconds: float):
     """Acquire one cross-process worker slot without blocking the event loop."""
+    from services.api_voice_runtime import required_native
+
+    native = required_native()
+    if native is not None:
+        try:
+            return await asyncio.to_thread(
+                native.acquire_voice_lease,
+                str(path),
+                max(0, round(wait_seconds * 1000)),
+                50,
+            )
+        except RuntimeError as exc:
+            if "trained_voice_busy" in str(exc):
+                raise TrainedVoiceBusy("trained_voice_busy") from exc
+            raise TrainedVoiceError(str(exc)) from exc
+
     import fcntl
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -122,17 +145,20 @@ async def _acquire_file_lock(path: Path, wait_seconds: float) -> int:
 async def trained_voice_lease(
     paths: VoicePaths | None = None,
 ) -> AsyncIterator[VoicePaths]:
-    import fcntl
-
     selected = paths or _paths()
-    if not selected.ready():
+    if not trained_voice_health(selected.root)["ready"]:
         raise TrainedVoiceError("trained_voice_unavailable")
-    descriptor = await _acquire_file_lock(_lock_path(selected), _queue_seconds())
+    lease = await _acquire_file_lock(_lock_path(selected), _queue_seconds())
     try:
         yield selected
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+        if hasattr(lease, "release"):
+            lease.release()
+        else:
+            import fcntl
+
+            fcntl.flock(lease, fcntl.LOCK_UN)
+            os.close(lease)
 
 
 def _command(
@@ -142,6 +168,21 @@ def _command(
     *,
     stream_dir: str | Path | None = None,
 ) -> list[str]:
+    from services.api_voice_runtime import required_native
+
+    native = required_native()
+    if native is not None:
+        plan = json.loads(
+            native.synthesis_plan(
+                str(paths.root),
+                str(paths.home),
+                str(paths.speech_python),
+                str(output),
+                json.dumps(dict(delivery), separators=(",", ":")),
+                None if stream_dir is None else str(stream_dir),
+            )
+        )
+        return list(plan["command"])
     command = [
         str(paths.speech_python),
         "-m",
@@ -159,6 +200,11 @@ def _command(
 
 
 def _safe_metrics(stdout: bytes) -> dict[str, Any]:
+    from services.api_voice_runtime import required_native
+
+    native = required_native()
+    if native is not None:
+        return json.loads(native.parse_voice_metrics(stdout))
     allowed = {
         "engine",
         "method",
@@ -188,7 +234,15 @@ async def synthesize_trained_voice(
     delivery: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Generate one WAV using only the trained worker or fail explicitly."""
-    if not str(text).strip() or len(text) > 24000:
+    from services.api_voice_runtime import required_native
+
+    native = required_native()
+    if native is not None:
+        try:
+            native.validate_synthesis_text(str(text), 24_000)
+        except ValueError as exc:
+            raise TrainedVoiceError(str(exc)) from exc
+    elif not str(text).strip() or len(text) > 24000:
         raise TrainedVoiceError("trained_voice_invalid_text")
     output_path = Path(output)
     paths = _paths()
