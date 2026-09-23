@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import builtins
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 import importlib.util
 import json
 from pathlib import Path
@@ -10,6 +11,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import zipfile
 
 import pytest
@@ -41,6 +43,55 @@ def test_status_and_deterministic_language_features(runtime):
     assert result["features"]["action"] == "turn"
     assert result["features"]["state"] == "off"
     assert result["features"]["quantifier"] == "all"
+
+
+def test_native_module_import_is_published_atomically(runtime, monkeypatch):
+    previous = (
+        runtime._NATIVE_MODULE,
+        runtime._NATIVE_IMPORT_ATTEMPTED,
+        runtime._NATIVE_IMPORT_ERROR,
+    )
+    original_import = builtins.__import__
+    import_started = threading.Event()
+    release_import = threading.Event()
+    second_started = threading.Event()
+    sentinel = object()
+
+    def delayed_import(name, *args, **kwargs):
+        if name == "_curie_runtime_kernel":
+            import_started.set()
+            assert release_import.wait(timeout=2)
+            return sentinel
+        return original_import(name, *args, **kwargs)
+
+    def load_second():
+        second_started.set()
+        return runtime._native_module()
+
+    runtime._NATIVE_MODULE = None
+    runtime._NATIVE_IMPORT_ATTEMPTED = False
+    runtime._NATIVE_IMPORT_ERROR = None
+    monkeypatch.setattr(builtins, "__import__", delayed_import)
+    pool = ThreadPoolExecutor(max_workers=2)
+    first = pool.submit(runtime._native_module)
+    second = None
+    try:
+        assert import_started.wait(timeout=2)
+        second = pool.submit(load_second)
+        assert second_started.wait(timeout=2)
+        with pytest.raises(FuturesTimeoutError):
+            second.result(timeout=0.1)
+        release_import.set()
+        assert first.result(timeout=2) is sentinel
+        assert second.result(timeout=2) is sentinel
+    finally:
+        release_import.set()
+        pool.shutdown(wait=True)
+        (
+            runtime._NATIVE_MODULE,
+            runtime._NATIVE_IMPORT_ATTEMPTED,
+            runtime._NATIVE_IMPORT_ERROR,
+        ) = previous
 
 
 def test_process_resident_store_transactions_and_event_dedup(runtime, tmp_path):

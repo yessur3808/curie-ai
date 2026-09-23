@@ -19,6 +19,7 @@ from typing import Any
 _NATIVE_MODULE = None
 _NATIVE_IMPORT_ATTEMPTED = False
 _NATIVE_IMPORT_ERROR: str | None = None
+_NATIVE_IMPORT_LOCK = threading.Lock()
 _LOCK = threading.RLock()
 _STORES: dict[str, Any] = {}
 _INGRESS: dict[str, Any] = {}
@@ -44,16 +45,19 @@ def _native_module():
     global _NATIVE_MODULE, _NATIVE_IMPORT_ATTEMPTED, _NATIVE_IMPORT_ERROR
     if _NATIVE_IMPORT_ATTEMPTED:
         return _NATIVE_MODULE
-    _NATIVE_IMPORT_ATTEMPTED = True
-    try:
-        import _curie_runtime_kernel as native
+    with _NATIVE_IMPORT_LOCK:
+        if _NATIVE_IMPORT_ATTEMPTED:
+            return _NATIVE_MODULE
+        try:
+            import _curie_runtime_kernel as native
 
-        _NATIVE_MODULE = native
-        _NATIVE_IMPORT_ERROR = None
-    except (ImportError, OSError) as exc:
-        _NATIVE_MODULE = None
-        _NATIVE_IMPORT_ERROR = type(exc).__name__
-    return _NATIVE_MODULE
+            _NATIVE_MODULE = native
+            _NATIVE_IMPORT_ERROR = None
+        except (ImportError, OSError) as exc:
+            _NATIVE_MODULE = None
+            _NATIVE_IMPORT_ERROR = type(exc).__name__
+        _NATIVE_IMPORT_ATTEMPTED = True
+        return _NATIVE_MODULE
 
 
 def runtime_kernel_status() -> dict:
