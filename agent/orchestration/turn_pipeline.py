@@ -577,7 +577,20 @@ class LegacyTurnPipelineAdapter:
 
     @staticmethod
     def _final_artifact(state: PipelineState) -> dict[str, Any]:
-        for stage in reversed(tuple(PipelineStage)):
+        # Only execution and response stages can produce a connector-facing
+        # response. Earlier artifacts contain the normalized inbound message,
+        # so scanning every stage after a failure can echo the user's request
+        # back as though it were Curie's answer.
+        response_stages = (
+            PipelineStage.RECORD_LEARNING,
+            PipelineStage.PERSIST,
+            PipelineStage.DELIVER,
+            PipelineStage.RENDER_RESPONSE,
+            PipelineStage.PLAN_RESPONSE,
+            PipelineStage.VERIFY,
+            PipelineStage.EXECUTE,
+        )
+        for stage in response_stages:
             value = state.artifact(stage)
             if isinstance(value, Mapping) and value.get("text") is not None:
                 return _mapping(value)

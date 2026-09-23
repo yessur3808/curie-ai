@@ -88,6 +88,21 @@ fn semantic_name(value: &str) -> String {
         .join(" ")
 }
 
+fn is_display_light_reference(value: &str) -> bool {
+    let tokens = semantic_tokens(value);
+    tokens.contains("light")
+        && ["tv", "television", "screen", "display", "monitor"]
+            .iter()
+            .any(|token| tokens.contains(*token))
+}
+
+fn is_display_light_device(device: &DeviceInput) -> bool {
+    device.capabilities.contains("light")
+        && ["sync box", "backlight", "tv light"]
+            .iter()
+            .any(|phrase| device.normalized_name.contains(phrase))
+}
+
 fn strip_trailing_number(value: &str) -> String {
     let words = ascii_words(value);
     if words.last().is_some_and(|word| word.parse::<u64>().is_ok()) {
@@ -404,6 +419,27 @@ fn resolve_core(
     }
     if token_matches.len() == 1 {
         return unique_resolution(&token_matches, 0.93, "unique_display_name_tokens");
+    }
+    if is_display_light_reference(&query) {
+        let display_lights: Vec<&DeviceInput> = devices
+            .iter()
+            .filter(|item| is_display_light_device(item))
+            .collect();
+        if display_lights.len() > 1 {
+            return (
+                "ambiguous".to_owned(),
+                Vec::new(),
+                0.96,
+                "multiple_display_lights".to_owned(),
+                display_lights
+                    .iter()
+                    .map(|item| item.display_name.clone())
+                    .collect(),
+            );
+        }
+        if display_lights.len() == 1 {
+            return unique_resolution(&display_lights, 0.96, "unique_display_light_semantics");
+        }
     }
     let compact_query = semantic_name(&query).replace(' ', "");
     let mut ranked: Vec<(f64, &DeviceInput)> = devices

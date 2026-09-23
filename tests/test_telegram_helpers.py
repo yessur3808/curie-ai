@@ -121,6 +121,38 @@ def test_proactive_send_uses_client_owned_by_calling_loop(monkeypatch):
         telegram._runtime.loop = previous_loop
 
 
+def test_telegram_shutdown_closes_intake_inference_and_application(monkeypatch):
+    events = []
+
+    class Updater:
+        running = True
+
+        async def stop(self):
+            events.append("updater")
+
+    class Application:
+        running = True
+        updater = Updater()
+
+        async def stop(self):
+            events.append("application")
+
+    async def close_inference():
+        events.append("inference")
+
+    monkeypatch.setattr(
+        "llm.inference_service.close_inference_service", close_inference
+    )
+    previous = telegram._runtime.application
+    telegram._runtime.application = Application()
+    try:
+        asyncio.run(telegram._shutdown_telegram_runtime())
+    finally:
+        telegram._runtime.application = previous
+
+    assert events == ["updater", "inference", "application"]
+
+
 def test_voice_off_command_has_dedicated_telegram_handler(tmp_path, monkeypatch):
     from memory import local_store
 

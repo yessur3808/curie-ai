@@ -138,83 +138,94 @@ struct PersistenceStore {
 impl PersistenceStore {
     #[new]
     #[pyo3(signature = (path, read_only=false))]
-    fn new(path: &str, read_only: bool) -> PyResult<Self> {
+    fn new(py: Python<'_>, path: &str, read_only: bool) -> PyResult<Self> {
         if path.trim().is_empty() {
             return Err(value_error("database path must not be empty"));
         }
+        let connection = py.detach(|| open_connection(path, read_only))?;
         Ok(Self {
             path: path.to_owned(),
-            connection: Mutex::new(open_connection(path, read_only)?),
+            connection: Mutex::new(connection),
         })
     }
 
-    fn begin(&self) -> PyResult<()> {
-        self.connection
-            .lock()
-            .map_err(|_| runtime_error("persistence lock poisoned"))?
-            .execute_batch("BEGIN IMMEDIATE")
-            .map_err(sqlite_error)
+    fn begin(&self, py: Python<'_>) -> PyResult<()> {
+        py.detach(|| {
+            self.connection
+                .lock()
+                .map_err(|_| runtime_error("persistence lock poisoned"))?
+                .execute_batch("BEGIN IMMEDIATE")
+                .map_err(sqlite_error)
+        })
     }
 
-    fn commit(&self) -> PyResult<()> {
-        self.connection
-            .lock()
-            .map_err(|_| runtime_error("persistence lock poisoned"))?
-            .execute_batch("COMMIT")
-            .map_err(sqlite_error)
+    fn commit(&self, py: Python<'_>) -> PyResult<()> {
+        py.detach(|| {
+            self.connection
+                .lock()
+                .map_err(|_| runtime_error("persistence lock poisoned"))?
+                .execute_batch("COMMIT")
+                .map_err(sqlite_error)
+        })
     }
 
-    fn rollback(&self) -> PyResult<()> {
-        self.connection
-            .lock()
-            .map_err(|_| runtime_error("persistence lock poisoned"))?
-            .execute_batch("ROLLBACK")
-            .map_err(sqlite_error)
+    fn rollback(&self, py: Python<'_>) -> PyResult<()> {
+        py.detach(|| {
+            self.connection
+                .lock()
+                .map_err(|_| runtime_error("persistence lock poisoned"))?
+                .execute_batch("ROLLBACK")
+                .map_err(sqlite_error)
+        })
     }
 
-    fn execute(&self, sql: &str, params_json: &str) -> PyResult<String> {
+    fn execute(&self, py: Python<'_>, sql: &str, params_json: &str) -> PyResult<String> {
         let values = parse_json(params_json, "SQL parameters")?;
         let items = values
             .as_array()
             .ok_or_else(|| value_error("SQL parameters must be a JSON array"))?;
         let parameters = items.iter().map(to_sql).collect::<PyResult<Vec<_>>>()?;
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| runtime_error("persistence lock poisoned"))?;
-        let mut statement = connection.prepare(sql).map_err(sqlite_error)?;
-        let column_count = statement.column_count();
-        if column_count == 0 {
-            let changed = statement
-                .execute(params_from_iter(parameters.iter()))
-                .map_err(sqlite_error)?;
-            return Ok(json!({"rows": [], "rowcount": changed}).to_string());
-        }
-        let names: Vec<String> = statement
-            .column_names()
-            .iter()
-            .map(|item| (*item).to_owned())
-            .collect();
-        let mut query = statement
-            .query(params_from_iter(parameters.iter()))
-            .map_err(sqlite_error)?;
-        let mut rows = Vec::new();
-        while let Some(row) = query.next().map_err(sqlite_error)? {
-            let mut object = Map::new();
-            for (index, name) in names.iter().enumerate() {
-                object.insert(
-                    name.clone(),
-                    from_sql(row.get_ref(index).map_err(sqlite_error)?),
-                );
+        py.detach(|| {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| runtime_error("persistence lock poisoned"))?;
+            let mut statement = connection.prepare(sql).map_err(sqlite_error)?;
+            let column_count = statement.column_count();
+            if column_count == 0 {
+                let changed = statement
+                    .execute(params_from_iter(parameters.iter()))
+                    .map_err(sqlite_error)?;
+                return Ok(json!({"rows": [], "rowcount": changed}).to_string());
             }
-            rows.push(Value::Object(object));
-        }
-        Ok(json!({"rowcount": rows.len(), "rows": rows}).to_string())
+            let names: Vec<String> = statement
+                .column_names()
+                .iter()
+                .map(|item| (*item).to_owned())
+                .collect();
+            let mut query = statement
+                .query(params_from_iter(parameters.iter()))
+                .map_err(sqlite_error)?;
+            let mut rows = Vec::new();
+            while let Some(row) = query.next().map_err(sqlite_error)? {
+                let mut object = Map::new();
+                for (index, name) in names.iter().enumerate() {
+                    object.insert(
+                        name.clone(),
+                        from_sql(row.get_ref(index).map_err(sqlite_error)?),
+                    );
+                }
+                rows.push(Value::Object(object));
+            }
+            Ok(json!({"rowcount": rows.len(), "rows": rows}).to_string())
+        })
     }
 
     #[pyo3(signature = (stream, event_type, owner_id, payload_json, created_at_ms, dedupe_key=None))]
+    #[allow(clippy::too_many_arguments)]
     fn append_event(
         &self,
+        py: Python<'_>,
         stream: &str,
         event_type: &str,
         owner_id: Option<&str>,
@@ -228,81 +239,95 @@ impl PersistenceStore {
         }
         let payload = serde_json::to_string(&payload)
             .map_err(|_| value_error("event payload serialization failed"))?;
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| runtime_error("persistence lock poisoned"))?;
-        let changed = connection
-            .execute(
-                "INSERT OR IGNORE INTO runtime_events(stream,event_type,owner_id,payload_json,created_at_ms,dedupe_key)
-                 VALUES(?1,?2,?3,?4,?5,?6)",
-                params![stream, event_type, owner_id, payload, created_at_ms, dedupe_key],
-            )
-            .map_err(sqlite_error)?;
-        if changed == 0 {
-            return connection
-                .query_row(
-                    "SELECT sequence FROM runtime_events WHERE stream=?1 AND dedupe_key=?2",
-                    params![stream, dedupe_key],
-                    |row| row.get(0),
+        py.detach(|| {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| runtime_error("persistence lock poisoned"))?;
+            let changed = connection
+                .execute(
+                    "INSERT OR IGNORE INTO runtime_events(stream,event_type,owner_id,payload_json,created_at_ms,dedupe_key)
+                     VALUES(?1,?2,?3,?4,?5,?6)",
+                    params![stream, event_type, owner_id, payload, created_at_ms, dedupe_key],
                 )
-                .map_err(sqlite_error);
-        }
-        Ok(connection.last_insert_rowid())
+                .map_err(sqlite_error)?;
+            if changed == 0 {
+                return connection
+                    .query_row(
+                        "SELECT sequence FROM runtime_events WHERE stream=?1 AND dedupe_key=?2",
+                        params![stream, dedupe_key],
+                        |row| row.get(0),
+                    )
+                    .map_err(sqlite_error);
+            }
+            Ok(connection.last_insert_rowid())
+        })
     }
 
     #[pyo3(signature = (stream, after_sequence=0, limit=100))]
-    fn read_events(&self, stream: &str, after_sequence: i64, limit: usize) -> PyResult<String> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| runtime_error("persistence lock poisoned"))?;
-        let mut statement = connection
-            .prepare(
-                "SELECT sequence,event_type,owner_id,payload_json,created_at_ms,dedupe_key
-                 FROM runtime_events WHERE stream=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3",
-            )
-            .map_err(sqlite_error)?;
-        let mapped = statement
-            .query_map(params![stream, after_sequence, limit.clamp(1, 10_000)], |row| {
-                Ok(json!({
-                    "sequence": row.get::<_, i64>(0)?,
-                    "event_type": row.get::<_, String>(1)?,
-                    "owner_id": row.get::<_, Option<String>>(2)?,
-                    "payload": serde_json::from_str::<Value>(&row.get::<_, String>(3)?).unwrap_or(Value::Null),
-                    "created_at_ms": row.get::<_, i64>(4)?,
-                    "dedupe_key": row.get::<_, Option<String>>(5)?,
-                }))
-            })
-            .map_err(sqlite_error)?;
-        let rows = mapped
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sqlite_error)?;
-        Ok(Value::Array(rows).to_string())
+    fn read_events(
+        &self,
+        py: Python<'_>,
+        stream: &str,
+        after_sequence: i64,
+        limit: usize,
+    ) -> PyResult<String> {
+        py.detach(|| {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| runtime_error("persistence lock poisoned"))?;
+            let mut statement = connection
+                .prepare(
+                    "SELECT sequence,event_type,owner_id,payload_json,created_at_ms,dedupe_key
+                     FROM runtime_events WHERE stream=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3",
+                )
+                .map_err(sqlite_error)?;
+            let mapped = statement
+                .query_map(params![stream, after_sequence, limit.clamp(1, 10_000)], |row| {
+                    Ok(json!({
+                        "sequence": row.get::<_, i64>(0)?,
+                        "event_type": row.get::<_, String>(1)?,
+                        "owner_id": row.get::<_, Option<String>>(2)?,
+                        "payload": serde_json::from_str::<Value>(&row.get::<_, String>(3)?).unwrap_or(Value::Null),
+                        "created_at_ms": row.get::<_, i64>(4)?,
+                        "dedupe_key": row.get::<_, Option<String>>(5)?,
+                    }))
+                })
+                .map_err(sqlite_error)?;
+            let rows = mapped
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sqlite_error)?;
+            Ok(Value::Array(rows).to_string())
+        })
     }
 
-    fn quick_check(&self) -> PyResult<String> {
-        self.connection
-            .lock()
-            .map_err(|_| runtime_error("persistence lock poisoned"))?
-            .query_row("PRAGMA quick_check", [], |row| row.get(0))
-            .map_err(sqlite_error)
+    fn quick_check(&self, py: Python<'_>) -> PyResult<String> {
+        py.detach(|| {
+            self.connection
+                .lock()
+                .map_err(|_| runtime_error("persistence lock poisoned"))?
+                .query_row("PRAGMA quick_check", [], |row| row.get(0))
+                .map_err(sqlite_error)
+        })
     }
 
-    fn snapshot(&self) -> PyResult<String> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| runtime_error("persistence lock poisoned"))?;
-        let events: i64 = connection
-            .query_row("SELECT COUNT(*) FROM runtime_events", [], |row| row.get(0))
-            .map_err(sqlite_error)?;
-        let ingress: i64 = connection
-            .query_row("SELECT COUNT(*) FROM connector_ingress", [], |row| {
-                row.get(0)
-            })
-            .map_err(sqlite_error)?;
-        Ok(json!({"path": self.path, "events": events, "ingress": ingress}).to_string())
+    fn snapshot(&self, py: Python<'_>) -> PyResult<String> {
+        py.detach(|| {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| runtime_error("persistence lock poisoned"))?;
+            let events: i64 = connection
+                .query_row("SELECT COUNT(*) FROM runtime_events", [], |row| row.get(0))
+                .map_err(sqlite_error)?;
+            let ingress: i64 = connection
+                .query_row("SELECT COUNT(*) FROM connector_ingress", [], |row| {
+                    row.get(0)
+                })
+                .map_err(sqlite_error)?;
+            Ok(json!({"path": self.path, "events": events, "ingress": ingress}).to_string())
+        })
     }
 }
 
@@ -409,90 +434,102 @@ struct IngressGateway {
 impl IngressGateway {
     #[new]
     #[pyo3(signature = (path, ttl_ms=600_000, max_entries=50_000))]
-    fn new(path: &str, ttl_ms: i64, max_entries: usize) -> PyResult<Self> {
+    fn new(py: Python<'_>, path: &str, ttl_ms: i64, max_entries: usize) -> PyResult<Self> {
         Ok(Self {
-            store: PersistenceStore::new(path, false)?,
+            store: PersistenceStore::new(py, path, false)?,
             ttl_ms: ttl_ms.clamp(1_000, 86_400_000),
             max_entries: max_entries.clamp(100, 1_000_000),
         })
     }
 
-    fn admit(&self, connector: &str, dedupe_key: &str, now_ms: i64) -> PyResult<bool> {
+    fn admit(
+        &self,
+        py: Python<'_>,
+        connector: &str,
+        dedupe_key: &str,
+        now_ms: i64,
+    ) -> PyResult<bool> {
         if connector.trim().is_empty() || dedupe_key.trim().is_empty() {
             return Err(value_error("connector and dedupe key are required"));
         }
-        let connection = self
-            .store
-            .connection
-            .lock()
-            .map_err(|_| runtime_error("ingress lock poisoned"))?;
-        connection
-            .execute(
-                "DELETE FROM connector_ingress WHERE expires_at_ms<=?1",
-                params![now_ms],
-            )
-            .map_err(sqlite_error)?;
-        let changed = connection
-            .execute(
-                "INSERT OR IGNORE INTO connector_ingress(dedupe_key,connector,received_at_ms,expires_at_ms,state)
-                 VALUES(?1,?2,?3,?4,'accepted')",
-                params![dedupe_key, connector, now_ms, now_ms.saturating_add(self.ttl_ms)],
-            )
-            .map_err(sqlite_error)?;
-        if changed == 1 {
-            let count: i64 = connection
-                .query_row("SELECT COUNT(*) FROM connector_ingress", [], |row| {
-                    row.get(0)
-                })
+        py.detach(|| {
+            let connection = self
+                .store
+                .connection
+                .lock()
+                .map_err(|_| runtime_error("ingress lock poisoned"))?;
+            connection
+                .execute(
+                    "DELETE FROM connector_ingress WHERE expires_at_ms<=?1",
+                    params![now_ms],
+                )
                 .map_err(sqlite_error)?;
-            if count > self.max_entries as i64 {
-                connection
-                    .execute(
-                        "DELETE FROM connector_ingress WHERE dedupe_key IN (
-                           SELECT dedupe_key FROM connector_ingress ORDER BY received_at_ms
-                           LIMIT ?1
-                         )",
-                        params![count - self.max_entries as i64],
-                    )
+            let changed = connection
+                .execute(
+                    "INSERT OR IGNORE INTO connector_ingress(dedupe_key,connector,received_at_ms,expires_at_ms,state)
+                     VALUES(?1,?2,?3,?4,'accepted')",
+                    params![dedupe_key, connector, now_ms, now_ms.saturating_add(self.ttl_ms)],
+                )
+                .map_err(sqlite_error)?;
+            if changed == 1 {
+                let count: i64 = connection
+                    .query_row("SELECT COUNT(*) FROM connector_ingress", [], |row| {
+                        row.get(0)
+                    })
                     .map_err(sqlite_error)?;
+                if count > self.max_entries as i64 {
+                    connection
+                        .execute(
+                            "DELETE FROM connector_ingress WHERE dedupe_key IN (
+                               SELECT dedupe_key FROM connector_ingress ORDER BY received_at_ms
+                               LIMIT ?1
+                             )",
+                            params![count - self.max_entries as i64],
+                        )
+                        .map_err(sqlite_error)?;
+                }
             }
-        }
-        Ok(changed == 1)
+            Ok(changed == 1)
+        })
     }
 
-    fn store_response(&self, dedupe_key: &str, response: &str) -> PyResult<bool> {
-        let changed = self
-            .store
-            .connection
-            .lock()
-            .map_err(|_| runtime_error("ingress lock poisoned"))?
-            .execute(
-                "UPDATE connector_ingress SET state='completed',response=?1 WHERE dedupe_key=?2",
-                params![response, dedupe_key],
-            )
-            .map_err(sqlite_error)?;
-        Ok(changed == 1)
+    fn store_response(&self, py: Python<'_>, dedupe_key: &str, response: &str) -> PyResult<bool> {
+        py.detach(|| {
+            let changed = self
+                .store
+                .connection
+                .lock()
+                .map_err(|_| runtime_error("ingress lock poisoned"))?
+                .execute(
+                    "UPDATE connector_ingress SET state='completed',response=?1 WHERE dedupe_key=?2",
+                    params![response, dedupe_key],
+                )
+                .map_err(sqlite_error)?;
+            Ok(changed == 1)
+        })
     }
 
-    fn response(&self, dedupe_key: &str, now_ms: i64) -> PyResult<Option<String>> {
-        let connection = self
-            .store
-            .connection
-            .lock()
-            .map_err(|_| runtime_error("ingress lock poisoned"))?;
-        let mut statement = connection
-            .prepare(
-                "SELECT response FROM connector_ingress
-                 WHERE dedupe_key=?1 AND expires_at_ms>?2 AND state='completed'",
-            )
-            .map_err(sqlite_error)?;
-        let mut rows = statement
-            .query(params![dedupe_key, now_ms])
-            .map_err(sqlite_error)?;
-        Ok(rows
-            .next()
-            .map_err(sqlite_error)?
-            .and_then(|row| row.get::<_, Option<String>>(0).ok().flatten()))
+    fn response(&self, py: Python<'_>, dedupe_key: &str, now_ms: i64) -> PyResult<Option<String>> {
+        py.detach(|| {
+            let connection = self
+                .store
+                .connection
+                .lock()
+                .map_err(|_| runtime_error("ingress lock poisoned"))?;
+            let mut statement = connection
+                .prepare(
+                    "SELECT response FROM connector_ingress
+                     WHERE dedupe_key=?1 AND expires_at_ms>?2 AND state='completed'",
+                )
+                .map_err(sqlite_error)?;
+            let mut rows = statement
+                .query(params![dedupe_key, now_ms])
+                .map_err(sqlite_error)?;
+            Ok(rows
+                .next()
+                .map_err(sqlite_error)?
+                .and_then(|row| row.get::<_, Option<String>>(0).ok().flatten()))
+        })
     }
 }
 

@@ -124,7 +124,12 @@ class SmartHomeHub:
         return list(snapshot.devices), list(snapshot.issues)
 
     async def status(
-        self, owner_id: str, target: str | None = None, provider: str | None = None
+        self,
+        owner_id: str,
+        target: str | None = None,
+        provider: str | None = None,
+        *,
+        match_only: bool = False,
     ) -> tuple[str, dict[str, Any]]:
         canonical, issues = await self.canonical_inventory(owner_id, provider)
         devices = [item.to_snapshot() for item in canonical]
@@ -166,6 +171,11 @@ class SmartHomeHub:
             return text, self._data(devices, issues)
         shown = matches if target else devices
         data = self._data(shown, issues)
+        if resolution:
+            data["resolution"] = {
+                "confidence": resolution.confidence,
+                "reason": resolution.reason,
+            }
         if not shown:
             missing = ", ".join(
                 issue.provider for issue in issues if not issue.configured
@@ -174,6 +184,21 @@ class SmartHomeHub:
             if missing:
                 text += f" Configure at least one provider ({missing}); see docs/SMART_HOME_INTEGRATIONS.md."
             return text, data
+        if match_only and target:
+            if len(shown) == 1:
+                device = shown[0]
+                text = f"{target!r} matches {device.name}."
+                if device.online is False:
+                    text += " It's currently offline."
+                elif device.power in {"on", "off"}:
+                    text += f" It's currently {device.power}."
+                return text, data
+            return (
+                f"{target!r} matches {len(shown)} devices: "
+                + _join_names([item.name for item in shown])
+                + ".",
+                data,
+            )
         return self._format_summary(shown, issues, scoped=bool(target)), data
 
     async def control(

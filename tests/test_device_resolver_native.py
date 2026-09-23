@@ -125,6 +125,17 @@ def test_alias_tombstone_canonical_id_and_close_wording_follow_strict_order():
     assert resolver.resolve("dremview", [dream, sync]).devices == (dream,)
 
 
+def test_unique_display_light_semantics_resolve_without_an_explicit_alias():
+    sync = _device("AI Sync Box strip", "sync")
+    floor = _device("Floor Lamp 2", "floor")
+
+    result = DeviceResolver().resolve("tv light", [sync, floor])
+
+    assert result.devices == (sync,)
+    assert result.reason == "unique_display_light_semantics"
+    assert result.confidence == pytest.approx(0.96)
+
+
 def test_close_candidates_are_ambiguous_and_recent_plural_reference_is_stable():
     one = _device("Floor Lamp One", "one")
     two = _device("Floor Lamp Two", "two")
@@ -155,6 +166,7 @@ def test_rust_matches_python_rollback_for_existing_resolution_contract(monkeypat
         ("all of the lights", {}),
         ("all online lights", {}),
         ("all switches", {}),
+        ("tv light", {}),
         ("missing mystery", {"consequential": False}),
     ]
     resolver = DeviceResolver()

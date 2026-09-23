@@ -32,6 +32,7 @@ class HomeStatusTool:
                 context.internal_id,
                 str(params.get("target") or "") or None,
                 str(params.get("provider") or "") or None,
+                match_only=bool(params.get("match_only", False)),
             )
         except (ValueError, LookupError) as exc:
             raise ToolExecutionError(

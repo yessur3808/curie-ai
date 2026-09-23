@@ -432,14 +432,6 @@ def start_background_preload() -> Thread:
     return t
 
 
-# ---------------------------------------------------------------------------
-# Response quality helpers (ML enhancement: detect poor output, enable retry)
-# ---------------------------------------------------------------------------
-
-# Minimum word count for a response to be considered non-trivial quality.
-_QUALITY_MIN_WORDS = 4
-
-
 def _apply_generation_controls(prompt: str, model_name: str = "") -> str:
     """Apply model controls that keep private reasoning out of responses."""
     # /no_think is a Qwen-specific switch. Other families use their native
@@ -485,18 +477,52 @@ def _response_quality_ok(response: str) -> bool:
 
     A failed check triggers a quality-retry in ``ask_llm`` with a higher
     temperature, giving the model a second chance to produce useful output.
-    Checks performed:
-    - Non-empty and at least ``_QUALITY_MIN_WORDS`` words
-    - Does not start with an error sentinel
-    - Is not just a sanity-filter apology with no real content
+    Deliberately brief replies such as "Yes." or "Salut." are valid; response
+    length belongs to the caller's conversation policy, not this low-level
+    transport. Retrying those answers doubles latency and can make them worse.
     """
-    if not response or len(response.strip()) < 5:
+    if not response or not response.strip():
         return False
     if response.startswith("[Error"):
         return False
     words = response.split()
-    if len(words) < _QUALITY_MIN_WORDS:
+    if not any(character.isalnum() for character in response):
         return False
+    stripped = response.strip()
+    normalized = re.sub(r"[^a-z0-9]+", " ", stripped.casefold()).strip()
+    incomplete_openers = {
+        "here",
+        "here are",
+        "here is",
+        "here are three",
+        "sure here",
+        "okay here",
+        "certainly here",
+        "of course here",
+        "let me",
+    }
+    if normalized in incomplete_openers or stripped.endswith((":", "-")):
+        return False
+    if len(words) <= 3 and stripped[-1] not in ".!?":
+        valid_bare_reply = normalized in {
+            "yes",
+            "no",
+            "okay",
+            "ok",
+            "done",
+            "sure",
+            "thanks",
+            "thank you",
+            "anytime",
+            "hello",
+            "hi",
+            "salut",
+            "bonjour",
+            "welcome",
+            "understood",
+        }
+        if not valid_bare_reply:
+            return False
     # Sanity filter produces short apology strings when output is garbled
     if response.startswith("I apologize") and len(words) < 20:
         return False
@@ -551,8 +577,12 @@ def ask_llm(
 
             if str(role).lower() == "npu" or should_use_npu(prompt):
                 npu_response = ask_npu(prompt, temperature, max_tokens)
-                if npu_response:
+                if npu_response and _response_quality_ok(npu_response):
                     return npu_response
+                if npu_response:
+                    logger.info(
+                        "NPU response quality check failed; falling back to the general model"
+                    )
         except Exception as accelerator_exc:
             logger.warning("NPU path unavailable; falling back: %s", accelerator_exc)
 

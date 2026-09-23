@@ -277,10 +277,11 @@ class MessageDedupeCache:
             if response is not None:
                 self.hits += 1
                 return response
-        except RuntimeError:
-            raise
         except Exception as exc:
-            logger.debug("Native ingress response lookup failed: %s", exc)
+            logger.warning(
+                "Native ingress response lookup failed; using process-local cache: %s",
+                exc,
+            )
         with self.lock:
             self._cleanup_expired()
             if key in self.cache:
@@ -299,10 +300,14 @@ class MessageDedupeCache:
             from services.runtime_kernel import store_ingress_response
 
             store_ingress_response(local_store._PATH, key, response)
-        except RuntimeError:
-            raise
         except Exception as exc:
-            logger.debug("Native ingress response persistence failed: %s", exc)
+            # A completed answer must not be replaced by a storage error. The
+            # bounded process-local cache still protects immediate replays and
+            # the persistent gateway can recover independently.
+            logger.warning(
+                "Native ingress response persistence failed; using process-local cache: %s",
+                exc,
+            )
         with self.lock:
             self.cache[key] = (time.time(), response)
             # FIFO eviction when cache exceeds max_size
@@ -866,8 +871,18 @@ class ChatWorkflow:
                     "model_used": "ingress_gateway",
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                 }
-        except RuntimeError:
-            raise
+        except RuntimeError as exc:
+            logger.error("Native ingress admission failed safely: %s", exc)
+            return {
+                "text": (
+                    "I hit a storage problem, so I stopped before doing anything. "
+                    "Please try that once more."
+                ),
+                "timestamp": datetime.now(timezone.utc),
+                "model_used": "ingress_gateway_error",
+                "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                "verification_status": "failed",
+            }
         except Exception as exc:
             logger.debug("Native ingress admission failed: %s", exc)
 

@@ -206,13 +206,24 @@ class ManagedInferenceService:
         return len(jobs)
 
     async def close(self) -> None:
-        for job in list(self._jobs.values()):
+        jobs = list(self._jobs.values())
+        for job in jobs:
             job.cancelled.set()
+            if not job.future.done():
+                job.future.cancel()
+            job.token_queue.put_nowait(None)
+            if self._native is not None:
+                try:
+                    self._native.cancel(job.request_id)
+                except RuntimeError:
+                    pass
         for task in self._worker_tasks:
             task.cancel()
         if self._worker_tasks:
             await asyncio.gather(*self._worker_tasks, return_exceptions=True)
         self._worker_tasks.clear()
+        self._jobs.clear()
+        self._running.clear()
 
     async def _worker(self) -> None:
         while True:
@@ -320,3 +331,15 @@ def get_inference_service() -> ManagedInferenceService:
 def reset_inference_service() -> None:
     global _service
     _service = None
+
+
+async def close_inference_service() -> None:
+    """Close the process singleton on its owning event loop, if it exists."""
+    global _service
+    service = _service
+    if service is None:
+        return
+    try:
+        await service.close()
+    finally:
+        _service = None

@@ -144,6 +144,14 @@ def test_non_action_chat_never_calls_intent_model(monkeypatch):
     assert asyncio.run(resolve_request("Hello, how are you?")) is None
 
 
+def test_conversational_live_test_never_calls_intent_model(monkeypatch):
+    async def fail(*args, **kwargs):
+        raise AssertionError("intent model should not be called")
+
+    monkeypatch.setattr("agent.intent_router._ask_intent_model", fail)
+    assert asyncio.run(resolve_request("Quick live test: say hello casually.")) is None
+
+
 def test_formatting_request_with_inline_url_never_calls_intent_model(monkeypatch):
     async def fail(*args, **kwargs):
         raise AssertionError("intent model should not be called")

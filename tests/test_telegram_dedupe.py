@@ -36,6 +36,34 @@ def test_cache_hit_after_set():
     assert result == "Hello!"
 
 
+def test_native_write_failure_keeps_the_completed_response_in_process_cache():
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=100)
+
+    with patch(
+        "services.runtime_kernel.store_ingress_response",
+        side_effect=RuntimeError("disk I/O error"),
+    ):
+        cache.set("telegram", "chat_1", "msg_1", "Hello!")
+
+    with patch("services.runtime_kernel.ingress_response", return_value=None):
+        assert cache.get("telegram", "chat_1", "msg_1") == "Hello!"
+
+
+def test_native_read_failure_falls_back_to_process_cache():
+    cache = MessageDedupeCache(ttl_seconds=60, max_size=100)
+    key = "telegram:chat_1:msg_1"
+    cache.cache[key] = (1_000_000.0, "Cached reply")
+
+    with (
+        patch(
+            "services.runtime_kernel.ingress_response",
+            side_effect=RuntimeError("disk I/O error"),
+        ),
+        patch("agent.chat_workflow.time.time", return_value=1_000_001.0),
+    ):
+        assert cache.get("telegram", "chat_1", "msg_1") == "Cached reply"
+
+
 def test_different_message_ids_are_independent():
     """Two messages with different IDs on the same chat must not collide."""
     cache = MessageDedupeCache(ttl_seconds=60, max_size=100)

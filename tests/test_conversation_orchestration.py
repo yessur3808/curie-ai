@@ -82,7 +82,85 @@ def test_response_policy_removes_decorative_french_suffix():
             "Understood. The lights can stay off, *ça va*.",
             "I don't need the lights on",
         )
-        == "Understood. The lights can stay off"
+        == "Understood. The lights can stay off."
+    )
+
+
+def test_response_policy_preserves_punctuation_when_removing_formal_address():
+    class Personality:
+        def apply_response_style(
+            self, response, user_text, user_profile=None, history=None
+        ):
+            return response
+
+    policy = ResponsePolicy({"name": "Curie"}, Personality())
+
+    assert (
+        policy.finalize(
+            "The AI Sync Box strip is already off, monsieur.",
+            "Turn off the TV light",
+        )
+        == "The AI Sync Box strip is already off."
+    )
+
+
+def test_response_policy_removes_unasked_follow_up_when_user_requests_briefness():
+    class Personality:
+        def apply_response_style(
+            self, response, user_text, user_profile=None, history=None
+        ):
+            return response
+
+    policy = ResponsePolicy({"name": "Curie"}, Personality())
+
+    assert (
+        policy.finalize(
+            "- Tea\n- Music\n- Read\n\nWhich one sounds easiest tonight?",
+            "Give me three ideas. Keep it brief.",
+        )
+        == "- Tea\n- Music\n- Read"
+    )
+
+
+def test_brief_follow_up_cleanup_does_not_truncate_here_are_answer():
+    class Personality:
+        def apply_response_style(
+            self, response, user_text, user_profile=None, history=None
+        ):
+            return response
+
+    policy = ResponsePolicy({"name": "Curie"}, Personality())
+    response = (
+        "Here are three low-effort ways to unwind: * **Change the air**: "
+        "Open a window. * **Warm drink**: Make tea. * **Easy reading**: "
+        "Flip through a familiar book. Which one sounds easiest tonight?"
+    )
+
+    assert policy.finalize(
+        response,
+        "Give me three low-effort ways to unwind tonight. Keep it brief.",
+    ) == (
+        "Here are three low-effort ways to unwind: * **Change the air**: "
+        "Open a window. * **Warm drink**: Make tea. * **Easy reading**: "
+        "Flip through a familiar book."
+    )
+
+
+def test_response_policy_removes_forced_italicized_french_aside():
+    class Personality:
+        def apply_response_style(
+            self, response, user_text, user_profile=None, history=None
+        ):
+            return response
+
+    policy = ResponsePolicy({"name": "Curie"}, Personality())
+
+    assert (
+        policy.finalize(
+            "You asked how I was doing, keeping it casual and short. *Oui, that is the spirit.*",
+            "What did I just ask?",
+        )
+        == "You asked how I was doing, keeping it casual and short."
     )
 
 

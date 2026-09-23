@@ -141,8 +141,13 @@ def test_explicit_tv_light_alias_resolves_only_for_its_owner(tmp_path, monkeypat
 
     hub = SmartHomeHub([provider])
     asyncio.run(hub.learn_alias("owner", "AI Sync Box strip", "tv light"))
+    match_text, match_data = asyncio.run(
+        hub.status("owner", "tv light", match_only=True)
+    )
     text, _ = asyncio.run(hub.control("owner", "tv light", "off"))
 
+    assert match_text == "'tv light' matches AI Sync Box strip. It's currently on."
+    assert match_data["resolution"]["reason"] == "confirmed_owner_alias"
     assert text == "Done. AI Sync Box strip is now off."
     assert provider.controls == [("owner", "sync", "off")]
 
@@ -163,6 +168,29 @@ def test_dreamview_does_not_implicitly_resolve_ai_sync_box():
         asyncio.run(SmartHomeHub([provider]).control("owner", "DreamView", "off"))
 
     assert provider.controls == []
+
+
+def test_tv_light_naturally_correlates_to_the_unique_display_light():
+    provider = FakeProvider(
+        [
+            DeviceSnapshot(
+                "fake", "sync", "AI Sync Box strip", "light", True, "on", True, True
+            ),
+            DeviceSnapshot(
+                "fake", "floor", "Floor Lamp 2", "light", True, "off", False, True
+            ),
+        ]
+    )
+
+    text, data = asyncio.run(
+        SmartHomeHub([provider]).status("owner", "tv light", match_only=True)
+    )
+
+    assert text == "'tv light' matches AI Sync Box strip. It's currently on."
+    assert data["resolution"] == {
+        "confidence": pytest.approx(0.96),
+        "reason": "unique_display_light_semantics",
+    }
 
 
 def test_batch_control_resolves_every_target_before_running_once():
@@ -358,6 +386,32 @@ def test_offline_device_reports_the_blocker_without_claiming_success():
     [
         ("What's running at home?", "home_status", "", None),
         ("Is the bedroom lamp on?", "home_status", "bedroom lamp", None),
+        (
+            "What controllable lights can you currently see?",
+            "home_status",
+            "all lights",
+            None,
+        ),
+        (
+            "List all controllable lights and their current on/off state. Don't change anything.",
+            "home_status",
+            "all lights",
+            None,
+        ),
+        ("Are all the lights off now?", "home_status", "all lights", None),
+        (
+            "Are both controllable lights still on? Don't change anything.",
+            "home_status",
+            "all lights",
+            None,
+        ),
+        (
+            "Are both of the smart lamps currently off right now?",
+            "home_status",
+            "all lights",
+            None,
+        ),
+        ("Is the TV light still on right now?", "home_status", "TV light", None),
         ("Turn off the desk plug", "home_control", "desk plug", "off"),
         ("Turn off all lights", "home_control", "all lights", "off"),
         (
@@ -382,6 +436,22 @@ def test_pronoun_control_asks_for_a_device_name():
     request = classify_request("Turn it off")
     assert request.action == "clarify"
     assert "which home device" in request.params["message"].lower()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Which device would you match 'TV light' to? Don't change anything.",
+        "What device does DreamView refer to?",
+    ],
+)
+def test_device_correlation_questions_are_read_only(text):
+    request = classify_request(text)
+
+    assert request.action == "home_status"
+    assert request.params["match_only"] is True
+    assert request.params["target"] in {"TV light", "DreamView"}
+    assert request.needs_approval is False
 
 
 def test_pronoun_control_uses_recent_explicit_home_target():

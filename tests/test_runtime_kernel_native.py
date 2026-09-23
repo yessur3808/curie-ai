@@ -6,6 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+import sqlite3
+import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -72,6 +76,84 @@ def test_concurrent_ingress_admits_one_delivery_and_replays_response(runtime, tm
     assert outcomes.count(False) == 31
     assert runtime.store_ingress_response(path, "telegram:chat:message", "Done.")
     assert runtime.ingress_response(path, "telegram:chat:message") == "Done."
+
+
+def test_native_sqlite_uses_the_process_shared_library():
+    """Keep Python and Rust on one SQLite lock manager in WAL mode."""
+    if not sys.platform.startswith("linux") or shutil.which("ldd") is None:
+        pytest.skip("shared-library inspection is Linux-specific")
+    for module_name in (
+        "_curie_runtime_kernel._curie_runtime_kernel",
+        "_curie_task_engine._curie_task_engine",
+    ):
+        spec = importlib.util.find_spec(module_name)
+        assert spec is not None and spec.origin
+        dependencies = subprocess.run(
+            ["ldd", spec.origin],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert "libsqlite3.so" in dependencies, (
+            f"{module_name} must dynamically link the process-shared SQLite library; "
+            "a bundled copy can corrupt WAL databases used by Python sqlite3"
+        )
+
+
+def test_mixed_python_and_native_wal_writes_preserve_integrity(runtime, tmp_path):
+    path = tmp_path / "mixed.sqlite3"
+    with sqlite3.connect(path, timeout=10) as connection:
+        connection.executescript(
+            "PRAGMA journal_mode=WAL;"
+            "CREATE TABLE python_writes(id INTEGER PRIMARY KEY,value TEXT);"
+            "CREATE TABLE native_writes(id INTEGER PRIMARY KEY,value TEXT);"
+        )
+
+    def python_writer():
+        with sqlite3.connect(path, timeout=10) as connection:
+            connection.execute("PRAGMA busy_timeout=10000")
+            for index in range(150):
+                connection.execute(
+                    "INSERT OR REPLACE INTO python_writes VALUES(?,?)",
+                    (index, f"python-{index}"),
+                )
+                connection.commit()
+
+    def native_writer():
+        connection = runtime.persistence_connection(path)
+        for index in range(150):
+            with connection:
+                connection.execute(
+                    "INSERT OR REPLACE INTO native_writes VALUES(?,?)",
+                    (index, f"native-{index}"),
+                )
+
+    def ingress_writer():
+        for index in range(150):
+            key = f"telegram:mixed:{index}"
+            assert runtime.admit_ingress(path, "telegram", key, now_ms=index + 1)
+            assert runtime.store_ingress_response(path, key, "ok")
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [
+            pool.submit(python_writer),
+            pool.submit(native_writer),
+            pool.submit(ingress_writer),
+        ]
+        for future in futures:
+            future.result()
+
+    runtime.reset_persistence(path)
+    with sqlite3.connect(path, timeout=10) as connection:
+        assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        assert (
+            connection.execute("SELECT count(*) FROM python_writes").fetchone()[0]
+            == 150
+        )
+        assert (
+            connection.execute("SELECT count(*) FROM native_writes").fetchone()[0]
+            == 150
+        )
 
 
 def test_redaction_and_native_jsonl_pipeline(runtime, tmp_path):

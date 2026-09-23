@@ -44,6 +44,12 @@ def test_capability_health_publishes_independent_degradation(monkeypatch):
     assert "- ⚠️ **Text:** Degraded" in message
     assert "- ✅ **Database:** Ready" in message
     assert "- ✅ **Capacity:** Available" in message
+    assert (
+        handle_health_command(
+            "Show your current health as a clean bullet list.", workflow_ready=False
+        )
+        == message
+    )
 
 
 @pytest.mark.asyncio

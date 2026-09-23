@@ -20,6 +20,10 @@ CANNED_FRENCH_SUFFIX_PATTERN = re.compile(
     r"(?:,?\s*(?:oui|non))?[?!.]*\s*$",
     re.I,
 )
+CANNED_FRENCH_ASIDE_PATTERN = re.compile(
+    r"\s*\*(?:oui|non|bonjour|merci|voilà|d['’]accord|bien\s+sûr)\b[^*\n]{0,80}\*\s*$",
+    re.I,
+)
 CANNED_ADDRESS_SUFFIX_PATTERN = re.compile(
     r"(?:,\s*|\s+)(?:monsieur|madame|mon ami)[?!.]*\s*$", re.I
 )
@@ -30,6 +34,20 @@ DEPENDENCY_PATTERN = re.compile(
     r"don't leave me|never leave me|I get jealous|choose me over)\b",
     re.I,
 )
+
+
+def _remove_suffix_preserving_punctuation(text: str, pattern: re.Pattern) -> str:
+    match = pattern.search(text)
+    if not match:
+        return text
+    suffix = match.group(0)
+    punctuation = next((mark for mark in "?!" if mark in suffix), "")
+    if not punctuation and "." in suffix:
+        punctuation = "."
+    stem = text[: match.start()].rstrip()
+    if punctuation and stem and stem[-1] not in ".!?":
+        stem += punctuation
+    return stem
 
 
 def naturalize_prose_punctuation(text: str) -> str:
@@ -65,11 +83,16 @@ class ResponsePolicy:
         response = ACTION_PATTERN.sub("", response).strip()
         response = DEPENDENCY_PATTERN.sub("I’m here to help", response).strip()
         if (self.persona.get("name") or "").strip().lower() == "curie":
-            response = CANNED_FRENCH_SUFFIX_PATTERN.sub("", response).rstrip()
+            response = _remove_suffix_preserving_punctuation(
+                response, CANNED_FRENCH_SUFFIX_PATTERN
+            )
+            response = CANNED_FRENCH_ASIDE_PATTERN.sub("", response).rstrip()
             # A French address can be charming when context earns it.  Appending
             # one to every answer is mechanical and makes command replies sound
             # formal, so the shared boundary removes only canned end tags.
-            response = CANNED_ADDRESS_SUFFIX_PATTERN.sub("", response).rstrip()
+            response = _remove_suffix_preserving_punctuation(
+                response, CANNED_ADDRESS_SUFFIX_PATTERN
+            )
             response = naturalize_prose_punctuation(response)
         if not self.minimal_sanitization:
             response = CODE_BLOCK_PATTERN.sub("", response).strip()
@@ -82,6 +105,23 @@ class ResponsePolicy:
         self, response: str, user_text: str, profile=None, history=None
     ) -> str:
         sanitized = self.sanitize(response)
-        return self.personality_context.apply_response_style(
+        styled = self.personality_context.apply_response_style(
             sanitized, user_text, user_profile=profile, history=history
         )
+        if re.search(
+            r"\b(?:keep\s+it\s+brief|be\s+brief|brief\s+answer|no\s+follow[- ]?up)\b",
+            str(user_text or ""),
+            re.I,
+        ):
+            # Remove only an appended question sentence.  The earlier pattern
+            # could begin at any matching auxiliary verb, so a response such
+            # as ``Here are three ideas: ... Which one?`` was reduced to
+            # ``Here`` because ``are`` matched near the start of the answer.
+            styled = re.sub(
+                r"(?:\n+|(?<=[.!])\s+)(?:which|would|do|does|is|are|what|how|can|could|should)\b"
+                r"[^?\n]*\?\s*$",
+                "",
+                styled,
+                flags=re.I,
+            ).rstrip()
+        return styled

@@ -13,7 +13,9 @@ crate-type = ["cdylib"]
 [dependencies]
 chrono = { version = "0.4.42", default-features = false, features = ["std"] }
 pyo3 = { version = "0.29.2", features = ["extension-module", "abi3-py310"] }
-rusqlite = { version = "0.37.0", features = ["bundled"] }
+# Share the host SQLite library with Python and the runtime kernel. Loading
+# multiple bundled SQLite copies in one process makes WAL locking unsafe.
+rusqlite = "0.37.0"
 serde_json = "1.0.145"
 sha2 = "0.10.9"
 

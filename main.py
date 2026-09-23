@@ -49,6 +49,7 @@ try:
         send_message as send_telegram_message,
         set_workflow as set_telegram_workflow,
         is_ready as telegram_is_ready,
+        stop_telegram_bot,
     )
     from connectors.lifecycle import ConnectorApplication, ConnectorRegistry
     from connectors.api import app as fastapi_app, set_workflow as set_api_workflow
@@ -840,6 +841,7 @@ def main():
             "telegram",
             run_telegram,
             send_fn=send_telegram_message,
+            stop_fn=stop_telegram_bot,
             ready_probe=telegram_is_ready,
             queue_capacity=int(os.getenv("CONNECTOR_OUTBOUND_QUEUE_SIZE", "64")),
         )

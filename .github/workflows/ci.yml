@@ -262,7 +262,10 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install Python and native build dependencies
-        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libsqlite3-dev
+          pip install -r requirements-ci.txt -r requirements-rust.txt
       - name: Check Rust formatting, lints, and unit tests
         run: |
           cargo fmt --manifest-path native/task_engine/Cargo.toml -- --check
@@ -301,7 +304,10 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install Python and native build dependencies
-        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libsqlite3-dev
+          pip install -r requirements-ci.txt -r requirements-rust.txt
       - name: Check Rust formatting, lints, and unit tests
         run: |
           cargo fmt --manifest-path native/runtime_kernel/Cargo.toml -- --check

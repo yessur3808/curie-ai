@@ -13,9 +13,25 @@ from utils.formatting import (
     strip_markdown,
     format_for_platform,
     MARKDOWN_SKILL_MODELS,
+    normalize_markdown_layout,
     rich_format_preview_request,
     telegram_html,
 )  # noqa: E402
+
+
+def test_inline_bold_label_list_is_restored_without_damaging_italics():
+    source = (
+        "Three ideas: * **Fresh air**: Open a window. *Un peu d'air frais*. "
+        "* **Warm drink**: Make tea. * **Read**: Pick a book."
+    )
+
+    normalized = normalize_markdown_layout(source)
+    rendered = telegram_html(source)
+
+    assert normalized.count("\n- **") == 3
+    assert "*Un peu d'air frais*" in normalized
+    assert rendered.count("\n• <b>") == 3
+    assert "<i>Un peu d&#x27;air frais</i>" in rendered
 
 
 def test_telegram_html_supports_rich_text_and_safe_links():

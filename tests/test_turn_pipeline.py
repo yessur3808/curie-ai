@@ -97,6 +97,60 @@ async def test_context_failure_degrades_safely_and_later_stages_continue():
 
 
 @pytest.mark.asyncio
+async def test_execute_failure_never_echoes_the_inbound_message():
+    handlers = _passing_handlers()
+
+    async def fail_execute(_state):
+        raise RuntimeError("database disk image is malformed")
+
+    handlers[PipelineStage.EXECUTE] = fail_execute
+    inbound = "Second live test: reply with one casual hello sentence."
+    state = await TurnPipeline(handlers).run(
+        {
+            "platform": "telegram",
+            "external_user_id": "1",
+            "external_chat_id": "2",
+            "text": inbound,
+        },
+        mode=PipelineMode.ACTIVE,
+    )
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
+
+    with patch("agent.orchestration.turn_pipeline.turn_event_writer.record_pipeline"):
+        result = workflow.turn_pipeline.finalize_active_result(state)
+
+    assert result["pipeline"]["failed_stage"] == "execute"
+    assert result["model_used"] == "turn_pipeline_error"
+    assert result["text"] != inbound
+    assert "process that request safely" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_ingress_storage_failure_stops_safely_with_a_natural_reply():
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
+    workflow.dedupe_cache.get = MagicMock(return_value=None)
+    normalized = {
+        "platform": "telegram",
+        "external_user_id": "1",
+        "external_chat_id": "2",
+        "message_id": "storage-failure",
+        "text": "Turn off all lights",
+        "internal_id": "owner",
+    }
+
+    with patch(
+        "services.runtime_kernel.admit_ingress",
+        side_effect=RuntimeError("disk I/O error"),
+    ):
+        result = await workflow._process_message_core(normalized)
+
+    assert result["model_used"] == "ingress_gateway_error"
+    assert result["verification_status"] == "failed"
+    assert "stopped before doing anything" in result["text"]
+    assert "[Error" not in result["text"]
+
+
+@pytest.mark.asyncio
 async def test_cancellation_after_authorization_never_enters_mutating_execute():
     handlers = _passing_handlers()
     cancelled = asyncio.Event()

@@ -13,7 +13,10 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.29.2", features = ["extension-module", "abi3-py310"] }
 regex = "1.12.2"
-rusqlite = { version = "0.37.0", features = ["bundled"] }
+# Link the host SQLite shared library. Curie also uses Python's sqlite3 module
+# against this database in the same process; statically embedding a second
+# SQLite copy breaks SQLite's process-local WAL locking and can corrupt pages.
+rusqlite = "0.37.0"
 serde_json = "1.0.145"
 unicode-normalization = "0.1.25"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }

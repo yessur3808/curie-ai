@@ -116,6 +116,44 @@ def is_ready() -> bool:
     return _runtime.ready
 
 
+async def _shutdown_telegram_runtime() -> None:
+    """Stop intake and close event-loop-owned workers before polling exits."""
+    application = _runtime.application
+    if application is None:
+        return
+    updater = getattr(application, "updater", None)
+    if updater is not None and getattr(updater, "running", False):
+        await updater.stop()
+
+    from llm.inference_service import close_inference_service
+
+    await close_inference_service()
+    if getattr(application, "running", False):
+        await application.stop()
+
+
+def stop_telegram_bot(timeout: float = 5.0) -> None:
+    """Request graceful shutdown from the polling loop's owning thread."""
+    loop = _runtime.loop
+    if loop is None or not loop.is_running():
+        return
+    finished = threading.Event()
+
+    async def shutdown_then_stop() -> None:
+        try:
+            await _shutdown_telegram_runtime()
+        except Exception:
+            logger.exception("Telegram graceful shutdown failed")
+        finally:
+            finished.set()
+            loop.stop()
+
+    loop.call_soon_threadsafe(lambda: asyncio.create_task(shutdown_then_stop()))
+    if not finished.wait(max(0.1, timeout)):
+        logger.warning("Telegram graceful shutdown timed out; stopping its event loop")
+        loop.call_soon_threadsafe(loop.stop)
+
+
 async def send_message(
     external_user_id: str,
     message: str,
@@ -1169,4 +1207,8 @@ def start_telegram_bot(workflow: ChatWorkflow):
     print("🤖 Telegram bot is running...")
     # main.py may run this connector in a worker thread alongside proactive
     # delivery. Signal handlers can only be installed from Python's main thread.
-    app.run_polling(drop_pending_updates=True, stop_signals=None)
+    try:
+        app.run_polling(drop_pending_updates=True, stop_signals=None)
+    finally:
+        _runtime.application = None
+        _runtime.loop = None

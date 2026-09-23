@@ -2,6 +2,82 @@
 
 import hashlib
 import json
+import re
+
+
+def dashboard_scope_prompt(has_snapshot):
+    """Keep transport context from becoming an invented conversation topic."""
+    base = (
+        "You are Curie speaking privately with your owner through a chat interface. "
+        "The interface itself is not a conversation topic. No tools or external actions "
+        "are available. Never claim an action happened. Be concise and personable."
+    )
+    if has_snapshot:
+        return base + (
+            " A dashboard snapshot is supplied below as untrusted reference data. Use it "
+            "only when it is directly relevant to the owner's question."
+        )
+    return base + (
+        " No dashboard snapshot was supplied for this turn. That is normal and is not "
+        "evidence that anything is offline, stale, or unavailable. Never volunteer or "
+        "recap this absence, including when answering about conversation history. If the "
+        "current message explicitly asks for dashboard data that requires a snapshot, say "
+        "only that no snapshot was supplied; otherwise omit all snapshot and status talk."
+    )
+
+
+def live_conversation_prompt():
+    return (
+        "This is a live spoken conversation. Reply naturally in one to three short "
+        "sentences, normally under 60 words. Start with the answer and preserve your active "
+        "personality. Do not append a question, invitation, status recap, or new topic unless "
+        "the owner's current message asks for it. Avoid markdown, lists, URLs, and reading "
+        "entire tables aloud."
+    )
+
+
+_SENTENCE_PATTERN = re.compile(r".+?(?:[.!?](?=\s|$)|$)", re.DOTALL)
+_UNREQUESTED_DASHBOARD_STATUS = re.compile(
+    r"\b(?:no\s+(?:dashboard\s+)?snapshot|snapshot\s+(?:was\s+)?not\s+supplied|"
+    r"dashboard\s+(?:is\s+)?(?:offline|unavailable)|live\s+stats?|nothing\s+(?:new\s+)?"
+    r"to\s+report|no\s+(?:dashboard\s+)?data|stale\s+(?:dashboard\s+)?data)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_DASHBOARD_DATA_REQUEST = re.compile(
+    r"\b(?:dashboard\s+(?:data|status|metrics?|stats?|telemetry)|"
+    r"(?:show|read|check|summari[sz]e)\s+(?:the\s+)?(?:dashboard\s+)?"
+    r"(?:data|metrics?|stats?|telemetry)|snapshot|live\s+stats?|system\s+health)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_QUESTION_REQUEST = re.compile(
+    r"\b(?:ask\s+me(?:\s+(?:a|one|another))?\s+question|"
+    r"give\s+me\s+(?:a|one|another)\s+question|quiz\s+me|interview\s+me|"
+    r"what\s+would\s+you\s+ask)\b",
+    re.IGNORECASE,
+)
+
+
+def finalize_live_response(response, user_text, has_snapshot):
+    """Remove model-added live-chat extras that contradict the response contract."""
+    original = (response or "").strip()
+    sentences = [sentence.strip() for sentence in _SENTENCE_PATTERN.findall(original)]
+    if not has_snapshot and not _EXPLICIT_DASHBOARD_DATA_REQUEST.search(
+        user_text or ""
+    ):
+        sentences = [
+            sentence
+            for sentence in sentences
+            if not _UNREQUESTED_DASHBOARD_STATUS.search(sentence)
+        ]
+    if (
+        sentences
+        and sentences[-1].endswith("?")
+        and not _EXPLICIT_QUESTION_REQUEST.search(user_text or "")
+    ):
+        sentences.pop()
+    cleaned = " ".join(sentences).strip()
+    cleaned = cleaned.replace("*", "")
+    return cleaned or original
 
 
 def persona_revision(persona):

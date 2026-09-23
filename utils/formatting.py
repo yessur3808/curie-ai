@@ -29,6 +29,24 @@ MARKDOWN_SKILL_MODELS = frozenset(
 )
 
 
+def normalize_markdown_layout(text: str) -> str:
+    """Recover compact inline lists that local models occasionally emit."""
+    source = str(text or "").replace("\r\n", "\n")
+    # Only promote markers followed by a bold label and colon, so ordinary
+    # italic phrases remain untouched.
+    source = re.sub(
+        r"[ \t]+\*[ \t]+(?=\*\*[^*\n]+\*\*[ \t]*:)",
+        "\n- ",
+        source,
+    )
+    return re.sub(
+        r"^\s*\*\s+(?=\*\*[^*\n]+\*\*\s*:)",
+        "- ",
+        source,
+        flags=re.M,
+    )
+
+
 def rich_format_preview_request(text: str) -> str | None:
     """Return a stable rich-text preview for an explicit formatting test."""
     if not re.search(
@@ -93,7 +111,7 @@ def telegram_html(text: str) -> str:
     links, block quotes, and preformatted blocks. All other HTML is escaped.
     ``++text++`` is Curie's portable source syntax for underline.
     """
-    source = str(text or "").replace("\r\n", "\n")
+    source = normalize_markdown_layout(text)
     protected: list[str] = []
 
     def token(rendered: str) -> str:

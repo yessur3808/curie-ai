@@ -116,7 +116,7 @@ def test_curie_policy_removes_mechanical_french_address_suffix():
     policy = ResponsePolicy({"name": "Curie"}, Passthrough())
 
     assert policy.finalize("The lamp is already off, monsieur.", "Turn it off") == (
-        "The lamp is already off"
+        "The lamp is already off."
     )
 
 

@@ -154,10 +154,11 @@ TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
         validators=(("request", _NONEMPTY), ("path", _PATH), ("run_tests", _BOOL)),
     ),
     "home_status": ParameterSpec(
-        defaults=(("target", ""), ("provider", "")),
+        defaults=(("target", ""), ("provider", ""), ("match_only", False)),
         validators=(
             ("target", lambda value: isinstance(value, str)),
             ("provider", lambda value: isinstance(value, str)),
+            ("match_only", _BOOL),
         ),
     ),
     "home_control": ParameterSpec(
@@ -203,7 +204,7 @@ _EMERGENCY_STOP = re.compile(
     re.I,
 )
 _ACTION_HINT = re.compile(
-    r"\b(?:files?|folder|directory|project|repo|repository|tests?|weather|forecast|"
+    r"\b(?:files?|folder|directory|project|repo|repository|weather|forecast|"
     r"rain|ram|memory|hardware|computer|internet|network|speed|latency|ping|email|gmail|twitter|tweet|\bx\b|direct message|research|sources?|investigate|look up|"
     r"home|house|device|light|lamp|plug|switch|air conditioner|ac|tapo|nanoleaf|smartthings|petlibro|govee|mi home|xiaomi|thinq|"
     r"create|make|run|inspect|analy[sz]e|fix|implement|generate|modify|refactor|turn on|turn off)\b",
@@ -281,7 +282,7 @@ def _home_target(value: str) -> str:
     )
     if named:
         target = named.group(1)
-    return target.strip(" \t.,!?")
+    return target.strip(" \t.,!?\"'“”‘’")
 
 
 def _is_home_group_target(value: str) -> bool:
@@ -292,6 +293,20 @@ def _is_home_group_target(value: str) -> bool:
         if word not in {"all", "every", "each", "both", "the", "my", "our"}
     ]
     return words in (["light"], ["lights"], ["lamp"], ["lamps"], ["bulb"], ["bulbs"])
+
+
+def _home_status_target(value: str) -> str:
+    """Normalize natural whole-light phrases for a live inventory read."""
+    target = _home_target(value)
+    if re.fullmatch(
+        r"(?:both(?:\s+of)?|all|every|each)\s+(?:(?:the|my|our)\s+)?"
+        r"(?:(?:controllable|connected|available|known|smart)\s+)?"
+        r"(?:lights?|lamps?|bulbs?)",
+        target,
+        re.I,
+    ):
+        return "all lights"
+    return target
 
 
 def _split_home_targets(value: str) -> list[str]:
@@ -675,6 +690,39 @@ def classify_request(
         re.I,
     ):
         return ToolRequest("home_status", {"target": "", "provider": ""})
+    correlation_match = re.fullmatch(
+        r"(?:which|what)\s+(?:smart[- ]?home\s+)?device\s+"
+        r"(?:would\s+you\s+)?(?:match|map)\s+(.+?)\s+to\s*[?!.]?"
+        r"(?:\s*(?:please\s+)?(?:do\s+not|don't)\s+change\s+anything[.!?]?)?|"
+        r"(?:which|what)\s+(?:smart[- ]?home\s+)?device\s+does\s+(.+?)\s+"
+        r"refer\s+to\s*[?!.]?",
+        command,
+        re.I | re.S,
+    )
+    if correlation_match:
+        target = _home_target(
+            correlation_match.group(1) or correlation_match.group(2) or ""
+        )
+        return ToolRequest(
+            "home_status",
+            {"target": target, "provider": "", "match_only": True},
+        )
+    inventory_match = re.search(
+        r"\b(?:list|show|which|what)\b.{0,60}\b"
+        r"(?:controllable|connected|available|known|smart)\s+"
+        r"(?P<kind>lights?|lamps?|devices?)\b|"
+        r"\b(?:list|show|which|what)\b.{0,50}\b"
+        r"(?P<state_kind>lights?|lamps?|devices?)\b.{0,50}\b"
+        r"(?:status|state|on\s*/?\s*off|online|offline)\b",
+        command,
+        re.I | re.S,
+    )
+    if inventory_match:
+        kind = (
+            inventory_match.group("kind") or inventory_match.group("state_kind")
+        ).casefold()
+        target = "all lights" if kind.startswith(("light", "lamp")) else ""
+        return ToolRequest("home_status", {"target": target, "provider": ""})
     match = re.fullmatch(
         r"(?:please\s+)?(?:check|show|get|what(?:'s| is))\s+(?:the\s+)?(?:status\s+(?:of|for)\s+)?(.+?)(?:\s+status)?[.!?]?",
         command,
@@ -689,12 +737,16 @@ def classify_request(
             "home_status", {"target": _home_target(match.group(1)), "provider": ""}
         )
     match = re.fullmatch(
-        r"(?:is|are)\s+(?:the\s+|my\s+)?(.+?)\s+(?:on|off|running|online|offline)[?!.]?",
+        r"(?:is|are)\s+(?:the\s+|my\s+)?(.+?)\s+"
+        r"(?:(?:still|currently)\s+)?(?:on|off|running|online|offline)"
+        r"(?:\s+(?:now|currently|right\s+now))?[?!.]?"
+        r"(?:\s+(?:please\s+)?(?:do\s+not|don't)\s+"
+        r"(?:change|control|switch|turn)\s+anything[.!?]?)?",
         command,
         re.I | re.S,
     )
     if match:
-        target = _home_target(match.group(1))
+        target = _home_status_target(match.group(1))
         conversational = {
             "meeting",
             "party",

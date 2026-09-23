@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from llm import inference_service
 from llm.inference_service import InferenceOverloaded, ManagedInferenceService
 
 pytestmark = pytest.mark.integration
@@ -98,3 +99,22 @@ async def test_streaming_records_real_first_token_and_throughput():
     assert received == ["hello ", "world"]
     assert service.snapshot()["completed"] == 1
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_close_inference_singleton_cancels_jobs_and_workers(monkeypatch):
+    service = ManagedInferenceService(capacity=2, workers=1)
+    monkeypatch.setattr(inference_service, "_service", service)
+    gate = asyncio.Event()
+    pending = asyncio.create_task(
+        service.submit(operation("pending", [], gate=gate), owner_id="owner")
+    )
+    await asyncio.sleep(0)
+
+    await inference_service.close_inference_service()
+    await asyncio.sleep(0)
+
+    assert pending.cancelled()
+    assert service._worker_tasks == []
+    assert service._jobs == {}
+    assert inference_service._service is None

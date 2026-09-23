@@ -151,6 +151,20 @@ def _semantic_name(value: str) -> str:
     )
 
 
+def _is_display_light_reference(value: str) -> bool:
+    tokens = _semantic_tokens(value)
+    return "light" in tokens and bool(
+        tokens & {"tv", "television", "screen", "display", "monitor"}
+    )
+
+
+def _is_display_light_device(device: CanonicalDevice) -> bool:
+    name = device.normalized_name
+    return "light" in device.capabilities and any(
+        phrase in name for phrase in ("sync box", "backlight", "tv light")
+    )
+
+
 def _group_spec(target: str) -> tuple[str, str | None, bool] | None:
     words = normalize_alias(target).split()
     online_only = False
@@ -460,6 +474,31 @@ class DeviceResolver:
                 "unique_display_name_tokens",
                 target,
             )
+
+        # A TV/screen light is a functional description, not necessarily a
+        # product name. Resolve it only when the inventory has one clear
+        # display-light controller; multiple candidates remain ambiguous.
+        if _is_display_light_reference(query):
+            display_lights = [
+                item for item in devices if _is_display_light_device(item)
+            ]
+            if len(display_lights) > 1:
+                return DeviceResolution(
+                    ResolutionStatus.AMBIGUOUS,
+                    (),
+                    0.96,
+                    "multiple_display_lights",
+                    target,
+                    tuple(item.display_name for item in display_lights),
+                )
+            if len(display_lights) == 1:
+                return DeviceResolution(
+                    ResolutionStatus.RESOLVED,
+                    tuple(display_lights),
+                    0.96,
+                    "unique_display_light_semantics",
+                    target,
+                )
 
         # 7. Strong fuzzy display-name match. Aliases and product families are
         # intentionally excluded from fuzzy matching.

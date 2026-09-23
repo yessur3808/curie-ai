@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 
@@ -173,7 +174,19 @@ def capability_health(workflow_ready: bool = True) -> dict:
 
 
 def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
-    if text.strip().casefold() not in {"/health", "/readiness"}:
+    cleaned = text.strip()
+    explicit = cleaned.casefold() in {"/health", "/readiness"}
+    natural = bool(
+        re.search(
+            r"\b(?:your|curie(?:'s)?|system(?:s)?)\s+"
+            r"(?:current\s+)?(?:health|readiness|status)\b|"
+            r"\b(?:health|readiness)\s+(?:of\s+)?(?:curie|the\s+system)\b|"
+            r"\bare\s+(?:all\s+)?(?:your\s+)?systems?\s+(?:ready|healthy|online)\b",
+            cleaned,
+            re.I,
+        )
+    )
+    if not explicit and not natural:
         return None
     health = capability_health(workflow_ready)
     capabilities = health["capabilities"]
