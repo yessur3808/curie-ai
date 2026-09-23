@@ -16,6 +16,7 @@ import os
 import random
 import re
 import threading
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -246,6 +247,7 @@ class ProactiveMessagingService:
             1.0, max(0.0, float(os.getenv("PROACTIVE_MESSAGE_PROBABILITY", "1.0")))
         )
         self._stop_event = threading.Event()
+        self._worker_id = f"proactive-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
         # Tracking when we last messaged each user
         # Note: In production, this should be persisted to database
@@ -314,8 +316,21 @@ class ProactiveMessagingService:
             except Exception as e:
                 logger.error(f"Error in proactive messaging loop: {e}", exc_info=True)
 
+            delay = float(self.check_interval)
+            try:
+                from agent.task_engine import next_due, use_native
+
+                if use_native():
+                    candidates = [next_due("reminder"), next_due("proactive")]
+                    due = min(item for item in candidates if item is not None)
+                    delay = min(
+                        delay,
+                        max(0.25, (due - datetime.now(timezone.utc)).total_seconds()),
+                    )
+            except (ValueError, RuntimeError):
+                pass
             # Wait interruptibly so shutdown never blocks for a full interval.
-            if self._stop_event.wait(self.check_interval):
+            if self._stop_event.wait(delay):
                 break
 
     async def _check_and_send_messages(self):
@@ -330,6 +345,80 @@ class ProactiveMessagingService:
             # Get all users who have the proactive_messaging preference enabled
             # For now, we'll check users from recent conversations
             users = self._get_eligible_users()
+
+            from agent.task_engine import (
+                claim_scheduled,
+                complete_scheduled,
+                upsert_scheduled,
+                use_native,
+            )
+
+            if use_native():
+                now = datetime.now(timezone.utc)
+                for user_info in users:
+                    internal_id = str(user_info.get("internal_id") or "")
+                    platform = str(user_info.get("platform") or "")
+                    if not internal_id or not platform:
+                        continue
+                    upsert_scheduled(
+                        {
+                            "id": f"proactive:{internal_id}:{platform}",
+                            "owner_id": internal_id,
+                            "kind": "proactive",
+                            "schedule_type": "once",
+                            "due_at_ms": int(now.timestamp() * 1000),
+                            "payload": user_info,
+                            "max_attempts": 3,
+                        }
+                    )
+                claimed = claim_scheduled(
+                    worker_id=self._worker_id,
+                    kind="proactive",
+                    lease_ms=120_000,
+                    limit=100,
+                )
+                for work in claimed:
+                    user_info = dict(work.get("payload") or {})
+                    try:
+                        await self._maybe_send_proactive_message(user_info)
+                        complete_scheduled(
+                            work["id"],
+                            worker_id=self._worker_id,
+                            lease_token=work["lease_token"],
+                            success=True,
+                        )
+                        interval = max(
+                            1.0,
+                            float(user_info.get("proactive_interval_hours", 24)),
+                        )
+                        due = datetime.now(timezone.utc) + timedelta(hours=interval)
+                        upsert_scheduled(
+                            {
+                                "id": work["id"],
+                                "owner_id": str(user_info.get("internal_id")),
+                                "kind": "proactive",
+                                "schedule_type": "once",
+                                "due_at_ms": int(due.timestamp() * 1000),
+                                "payload": user_info,
+                                "max_attempts": 3,
+                            }
+                        )
+                    except Exception as exc:
+                        complete_scheduled(
+                            work["id"],
+                            worker_id=self._worker_id,
+                            lease_token=work["lease_token"],
+                            success=False,
+                            error=str(exc),
+                            retry_delay_ms=300_000,
+                        )
+                        logger.error(
+                            "Error sending proactive message to user %s: %s",
+                            user_info.get("internal_id"),
+                            exc,
+                            exc_info=True,
+                        )
+                return
 
             for user_info in users:
                 try:

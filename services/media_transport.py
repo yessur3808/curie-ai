@@ -533,6 +533,55 @@ async def supervise_process(
     return ProcessResult(int(return_code), bytes(stdout), float(duration_ms), "rust")
 
 
+def supervise_process_sync(
+    command: Sequence[str],
+    stdin_data: bytes = b"",
+    *,
+    cwd: str | None = None,
+    environment: Mapping[str, str] | None = None,
+    timeout: float = 120.0,
+    max_stdout_bytes: int = 1024 * 1024,
+) -> ProcessResult:
+    """Synchronous bounded worker path for document extraction callers."""
+    native = _required_native()
+    selected_env = _restricted_environment(environment)
+    _record(processes=1)
+    if native is None:
+        import subprocess
+
+        completed = subprocess.run(  # noqa: S603 - command is an internal argv list
+            list(command),
+            input=bytes(stdin_data),
+            cwd=cwd,
+            env=selected_env,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        if len(completed.stdout) > max_stdout_bytes:
+            raise MediaTransportError("media_worker_stdout_limit")
+        _record(python_operations=1)
+        return ProcessResult(completed.returncode, completed.stdout, 0.0, "python")
+    values = native.run_supervised(
+        [str(value) for value in command],
+        bytes(stdin_data),
+        cwd=cwd,
+        environment=list(selected_env.items()),
+        timeout_ms=max(1, int(timeout * 1000)),
+        max_stdout_bytes=max(1, int(max_stdout_bytes)),
+        cancellation=native.CancellationToken(),
+    )
+    return_code, stdout, timed_out, cancelled, truncated, duration_ms = values
+    _record(native_operations=1, total_latency_ms=float(duration_ms))
+    if cancelled:
+        raise MediaTransportError("media_worker_wait_failed")
+    if timed_out:
+        raise TimeoutError("media worker timed out")
+    if truncated:
+        raise MediaTransportError("media_worker_stdout_limit")
+    return ProcessResult(int(return_code), bytes(stdout), float(duration_ms), "rust")
+
+
 async def stream_process_lines(
     command: Sequence[str],
     stdin_data: bytes = b"",

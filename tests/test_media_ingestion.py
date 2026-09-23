@@ -66,14 +66,14 @@ def test_pdf_page_selection_builds_bounded_command(tmp_path, monkeypatch):
     observed = {}
 
     class Completed:
-        returncode = 0
-        stdout = "Selected page text"
+        return_code = 0
+        stdout = b"Selected page text"
 
     def fake_run(command, **kwargs):
         observed["command"] = command
         return Completed()
 
-    monkeypatch.setattr("services.media_ingestion.subprocess.run", fake_run)
+    monkeypatch.setattr("services.media_transport.supervise_process_sync", fake_run)
     assert extract_document(str(path), path.name, 2, 3) == "Selected page text"
     assert observed["command"][:6] == ["pdftotext", "-layout", "-f", "2", "-l", "3"]
 

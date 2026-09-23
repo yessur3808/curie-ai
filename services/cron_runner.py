@@ -50,7 +50,6 @@ import logging
 import os
 import re
 import threading
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -327,11 +326,14 @@ class CronRunner:
         self.running = False
         self._thread: Optional[threading.Thread] = None
         self._reboot_jobs_fired = False
+        self._stop_event = threading.Event()
+        self._worker_id = f"cron-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
     def start(self) -> None:
         if self.running:
             return
         self.running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._loop, name="curie-cron-runner", daemon=True
         )
@@ -340,6 +342,7 @@ class CronRunner:
 
     def stop(self) -> None:
         self.running = False
+        self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=_CHECK_INTERVAL + 5)
             if self._thread.is_alive():
@@ -421,7 +424,24 @@ class CronRunner:
                 logger.error(
                     "CronRunner: unexpected error in tick: %s", e, exc_info=True
                 )
-            time.sleep(_CHECK_INTERVAL)
+            delay = float(_CHECK_INTERVAL)
+            try:
+                from agent.task_engine import next_due, use_native
+
+                if use_native():
+                    due = next_due("cron")
+                    if due is not None:
+                        delay = min(
+                            delay,
+                            max(
+                                0.25,
+                                (due - datetime.now(timezone.utc)).total_seconds(),
+                            ),
+                        )
+            except Exception:
+                pass
+            if self._stop_event.wait(delay):
+                break
 
     def _tick(self) -> None:
         """One check cycle: load jobs, find due ones, fire them."""
@@ -431,6 +451,89 @@ class CronRunner:
         now = datetime.now(timezone.utc)
         jobs = _load()
         master_id, master_platform, master_ext = self._master_info()
+
+        from agent.task_engine import (
+            claim_scheduled,
+            complete_scheduled,
+            next_scheduled_at,
+            upsert_scheduled,
+            use_native,
+        )
+
+        if use_native():
+            jobs_by_id = {str(job.get("id")): job for job in jobs}
+            for job_id, job in jobs_by_id.items():
+                schedule = str(job.get("schedule") or "")
+                if schedule.casefold() == "@reboot":
+                    continue
+                due = (
+                    now.replace(second=0, microsecond=0)
+                    if _is_due(job, now)
+                    else next_scheduled_at(schedule, now)
+                )
+                upsert_scheduled(
+                    {
+                        "id": f"cron:{job_id}",
+                        "owner_id": master_id or "system",
+                        "kind": "cron",
+                        "schedule_type": "cron",
+                        "schedule": schedule,
+                        "due_at_ms": int(due.timestamp() * 1000),
+                        "payload": {"job_id": job_id},
+                        "enabled": bool(job.get("enabled", True)),
+                        "max_attempts": int(job.get("max_attempts", 3)),
+                    }
+                )
+            claimed = claim_scheduled(
+                worker_id=self._worker_id,
+                kind="cron",
+                lease_ms=max(60_000, _CHECK_INTERVAL * 4_000),
+                limit=32,
+            )
+            fired_any = False
+            for work in claimed:
+                job_id = str(work.get("payload", {}).get("job_id") or "")
+                job = jobs_by_id.get(job_id)
+                if job is None or not job.get("enabled", True):
+                    complete_scheduled(
+                        work["id"],
+                        worker_id=self._worker_id,
+                        lease_token=work["lease_token"],
+                        success=False,
+                        error="cron definition unavailable",
+                    )
+                    continue
+                try:
+                    asyncio.run(
+                        _run_job(
+                            job,
+                            self.workflow,
+                            self.connectors,
+                            master_id,
+                            master_platform,
+                            master_ext,
+                        )
+                    )
+                    complete_scheduled(
+                        work["id"],
+                        worker_id=self._worker_id,
+                        lease_token=work["lease_token"],
+                        success=True,
+                    )
+                    job["last_run"] = now.isoformat()
+                    fired_any = True
+                except Exception as exc:
+                    complete_scheduled(
+                        work["id"],
+                        worker_id=self._worker_id,
+                        lease_token=work["lease_token"],
+                        success=False,
+                        error=str(exc),
+                    )
+                    logger.error("CronRunner: error running job %r: %s", job_id, exc)
+            if fired_any:
+                _save(jobs)
+            return
 
         fired_any = False
         for job in jobs:

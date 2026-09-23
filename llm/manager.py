@@ -105,6 +105,14 @@ def _cleanup_excess_models():
     if len(llama_models_cache) > MAX_MODELS_IN_CACHE:
         while len(llama_models_cache) > MAX_MODELS_IN_CACHE:
             model_name, _ = llama_models_cache.popitem(last=False)
+            try:
+                from services.runtime_kernel import model_supervisor
+
+                supervisor = model_supervisor()
+                if supervisor is not None:
+                    supervisor.remove(model_name, False)
+            except Exception:
+                pass
             logger.info(f"Unloading excess model from cache: {model_name}")
         gc.collect()
         _trigger_garbage_collection()
@@ -246,6 +254,33 @@ def _load_model_with_fallback(
             logger.warning(f"Model file not found: {model_path}")
             continue
 
+        supervisor = None
+        try:
+            from services.runtime_kernel import model_supervisor
+
+            supervisor = model_supervisor()
+            if supervisor is not None:
+                decision = __import__("json").loads(
+                    supervisor.request_load(
+                        model_name,
+                        os.path.getsize(model_path),
+                        int(time.time() * 1000),
+                    )
+                )
+                if not decision.get("admitted"):
+                    logger.warning(
+                        "Model supervisor deferred %s: %s",
+                        model_name,
+                        decision.get("reason", "capacity"),
+                    )
+                    continue
+                for evicted in decision.get("evict", []):
+                    llama_models_cache.pop(str(evicted), None)
+                    _model_inference_locks.pop(str(evicted), None)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.warning("Model supervisor admission failed: %s", exc)
         layer_attempts = [n_gpu_layers]
         if n_gpu_layers != 0:
             layer_attempts.append(0)
@@ -263,6 +298,12 @@ def _load_model_with_fallback(
                 logger.info(
                     "Successfully loaded model %s using %s", model_name, backend
                 )
+                if supervisor is not None:
+                    supervisor.loaded(
+                        model_name,
+                        os.path.getsize(model_path),
+                        int(time.time() * 1000),
+                    )
                 try:
                     from llm.inference_service import get_inference_service
 
@@ -272,6 +313,8 @@ def _load_model_with_fallback(
                 return model, model_name
             except Exception as e:
                 logger.error("Failed to load %s using %s: %s", model_name, backend, e)
+        if supervisor is not None:
+            supervisor.load_failed(model_name)
         continue
 
     logger.error("All model loading attempts failed")
@@ -671,6 +714,21 @@ def ask_llm(
                     raw = str(result)
             return _sanity_filter_response(raw)
 
+        supervisor = None
+        supervisor_acquired = False
+        try:
+            from services.runtime_kernel import model_supervisor
+
+            supervisor = model_supervisor()
+            if supervisor is not None and selected_model:
+                supervisor_acquired = bool(
+                    supervisor.acquire(selected_model, int(time.time() * 1000))
+                )
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.debug("Model supervisor lease failed: %s", exc)
+
         try:
             inference_lock = _model_inference_locks.setdefault(selected_model, Lock())
             with inference_lock:
@@ -704,6 +762,12 @@ def ask_llm(
             return response
         except Exception as e:
             return f"[Error during inference: {e}]"
+        finally:
+            if supervisor is not None and supervisor_acquired and selected_model:
+                try:
+                    supervisor.release(selected_model, int(time.time() * 1000))
+                except Exception:
+                    pass
     else:
         return "[Error: Unsupported LLM provider]"
 

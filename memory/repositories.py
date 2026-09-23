@@ -179,12 +179,41 @@ class SQLiteAuditRepository:
 
 
 class SQLiteReminderRepository:
+    def __init__(self):
+        import os
+        import uuid
+
+        self._worker_id = f"reminders-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        self._leases: dict[str, dict] = {}
+
     def create(
         self, internal_id: str, platform: str, message: str, due_at: datetime
     ) -> Any:
         from memory.local_store import create_reminder
 
-        return create_reminder(internal_id, platform, message, due_at)
+        reminder_id = create_reminder(internal_id, platform, message, due_at)
+        from agent.task_engine import upsert_scheduled, use_native
+
+        if use_native():
+            aware = due_at if due_at.tzinfo else due_at.replace(tzinfo=timezone.utc)
+            upsert_scheduled(
+                {
+                    "id": f"reminder:{reminder_id}",
+                    "owner_id": str(internal_id),
+                    "kind": "reminder",
+                    "schedule_type": "once",
+                    "due_at_ms": int(aware.timestamp() * 1000),
+                    "payload": {
+                        "reminder_id": reminder_id,
+                        "internal_id": str(internal_id),
+                        "platform": str(platform),
+                        "message": str(message),
+                        "due_at": aware.isoformat(),
+                    },
+                    "max_attempts": 5,
+                }
+            )
+        return reminder_id
 
     def upcoming(self, internal_id: str, now: datetime) -> list[dict]:
         from memory.local_store import list_reminders
@@ -194,10 +223,70 @@ class SQLiteReminderRepository:
     def delete(self, internal_id: str, reminder_id: Any | None = None) -> int:
         from memory.local_store import delete_reminder
 
+        if reminder_id is not None:
+            from agent.task_engine import cancel_scheduled, use_native
+
+            if use_native():
+                cancel_scheduled(str(internal_id), f"reminder:{reminder_id}")
+
         return delete_reminder(internal_id, reminder_id)
 
     def due(self, now: datetime) -> list[dict]:
         from memory.local_store import due_reminders
+
+        from agent.task_engine import claim_scheduled, complete_scheduled, use_native
+
+        if use_native():
+            rows = {str(item["_id"]): item for item in due_reminders(now)}
+            # One-time compatibility backfill for reminders created before the
+            # native scheduler was installed.
+            from agent.task_engine import upsert_scheduled
+
+            for reminder_id, item in rows.items():
+                due_at = item.get("due_at") or now
+                if isinstance(due_at, str):
+                    due_at = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
+                if due_at.tzinfo is None:
+                    due_at = due_at.replace(tzinfo=timezone.utc)
+                upsert_scheduled(
+                    {
+                        "id": f"reminder:{reminder_id}",
+                        "owner_id": str(item.get("internal_id") or "system"),
+                        "kind": "reminder",
+                        "schedule_type": "once",
+                        "due_at_ms": int(due_at.timestamp() * 1000),
+                        "payload": {
+                            "reminder_id": reminder_id,
+                            "internal_id": str(item.get("internal_id") or ""),
+                            "platform": str(item.get("platform") or ""),
+                            "message": str(item.get("message") or ""),
+                            "due_at": due_at.isoformat(),
+                        },
+                        "max_attempts": 5,
+                    }
+                )
+            claimed = claim_scheduled(
+                worker_id=self._worker_id,
+                kind="reminder",
+                lease_ms=120_000,
+                limit=100,
+            )
+            result = []
+            for work in claimed:
+                reminder_id = str(work.get("payload", {}).get("reminder_id") or "")
+                document = rows.get(reminder_id)
+                if document is None:
+                    complete_scheduled(
+                        work["id"],
+                        worker_id=self._worker_id,
+                        lease_token=work["lease_token"],
+                        success=True,
+                    )
+                    continue
+                document["attempt_count"] = max(0, int(work.get("attempts", 1)) - 1)
+                self._leases[reminder_id] = work
+                result.append(document)
+            return result
 
         return due_reminders(now)
 
@@ -205,11 +294,34 @@ class SQLiteReminderRepository:
         from memory.local_store import mark_reminder
 
         mark_reminder(str(reminder_id), fired=True, failed=failed)
+        work = self._leases.pop(str(reminder_id), None)
+        if work:
+            from agent.task_engine import complete_scheduled
+
+            complete_scheduled(
+                work["id"],
+                worker_id=self._worker_id,
+                lease_token=work["lease_token"],
+                success=True,
+                error="delivery attempts exhausted" if failed else None,
+            )
 
     def record_attempt(self, reminder_id: Any, now: datetime) -> None:
         from memory.local_store import mark_reminder
 
         mark_reminder(str(reminder_id), attempted_at=now)
+        work = self._leases.pop(str(reminder_id), None)
+        if work:
+            from agent.task_engine import complete_scheduled
+
+            complete_scheduled(
+                work["id"],
+                worker_id=self._worker_id,
+                lease_token=work["lease_token"],
+                success=False,
+                error="delivery unavailable",
+                retry_delay_ms=30_000,
+            )
 
 
 class ExternalIdentityRepository:

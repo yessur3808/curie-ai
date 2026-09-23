@@ -20,6 +20,7 @@ _METRICS = {
     "claims": 0,
     "reconciliations": 0,
     "stale_lease_rejections": 0,
+    "scheduled_claims": 0,
 }
 
 
@@ -211,6 +212,115 @@ def _now_values() -> tuple[int, str]:
     return int(now.timestamp() * 1000), now.isoformat()
 
 
+def cron_matches_at(schedule: str, when: datetime) -> bool:
+    if use_native():
+        _record("native_operations")
+        aware = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+        return bool(
+            _native().cron_matches(str(schedule), int(aware.timestamp() * 1000))
+        )
+    from services.cron_runner import cron_matches
+
+    _record("python_operations")
+    return cron_matches(schedule, when)
+
+
+def next_scheduled_at(schedule: str, after: datetime) -> datetime:
+    if not use_native():
+        # Compatibility-only scan; production strict mode never enters it.
+        from datetime import timedelta
+
+        candidate = after.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        for _ in range(366 * 24 * 60):
+            if cron_matches_at(schedule, candidate):
+                return candidate
+            candidate += timedelta(minutes=1)
+        raise ValueError("schedule has no occurrence within one year")
+    aware = after if after.tzinfo else after.replace(tzinfo=timezone.utc)
+    epoch_ms = int(_native().next_scheduled_at(schedule, int(aware.timestamp() * 1000)))
+    _record("native_operations")
+    return datetime.fromtimestamp(epoch_ms / 1000, timezone.utc)
+
+
+def upsert_scheduled(document: dict) -> dict:
+    if not use_native():
+        _record("python_operations")
+        return dict(document)
+    now_ms, _ = _now_values()
+    raw = _native().upsert_scheduled_work(
+        _prepare_store(), _canonical_json(document), now_ms
+    )
+    _record("native_operations")
+    return json.loads(raw)
+
+
+def claim_scheduled(
+    *, worker_id: str, kind: str | None = None, lease_ms: int = 120_000, limit: int = 32
+) -> list[dict]:
+    if not use_native():
+        return []
+    now_ms, _ = _now_values()
+    rows = _native().claim_scheduled_work(
+        _prepare_store(),
+        str(worker_id),
+        now_ms,
+        int(lease_ms),
+        int(limit),
+        kind,
+    )
+    _record("native_operations")
+    for _ in rows:
+        _record("scheduled_claims")
+    return [json.loads(item) for item in rows]
+
+
+def complete_scheduled(
+    work_id: str,
+    *,
+    worker_id: str,
+    lease_token: int,
+    success: bool,
+    error: str | None = None,
+    retry_delay_ms: int = 30_000,
+) -> dict:
+    if not use_native():
+        return {"id": work_id, "status": "completed" if success else "retry"}
+    now_ms, _ = _now_values()
+    raw = _native().complete_scheduled_work(
+        _prepare_store(),
+        str(work_id),
+        str(worker_id),
+        int(lease_token),
+        bool(success),
+        now_ms,
+        int(retry_delay_ms),
+        error,
+    )
+    _record("native_operations")
+    return json.loads(raw)
+
+
+def cancel_scheduled(owner_id: str, work_id: str) -> bool:
+    if not use_native():
+        return False
+    now_ms, _ = _now_values()
+    result = _native().cancel_scheduled_work(
+        _prepare_store(), str(owner_id), str(work_id), now_ms
+    )
+    _record("native_operations")
+    return bool(result)
+
+
+def next_due(kind: str | None = None) -> datetime | None:
+    if not use_native():
+        return None
+    value = _native().next_due_work(_prepare_store(), kind)
+    _record("native_operations")
+    if value is None:
+        return None
+    return datetime.fromtimestamp(int(value) / 1000, timezone.utc)
+
+
 def create_or_get(document: dict) -> tuple[dict, bool]:
     if not use_native():
         from memory.local_store import get_durable_task_by_key, save_durable_task
@@ -235,6 +345,18 @@ def create_or_get(document: dict) -> tuple[dict, bool]:
     if replay:
         _record("idempotent_replays")
     return json.loads(raw), bool(replay)
+
+
+def replace_snapshot(document: dict) -> dict:
+    """Replace an existing native task snapshot after validating immutable identity."""
+    if not use_native():
+        raise RuntimeError("Task snapshot replacement requires the native task engine")
+    _, now_iso = _now_values()
+    raw = _native().replace_task_snapshot(
+        _prepare_store(), _canonical_json(document), now_iso
+    )
+    _record("native_operations")
+    return json.loads(raw)
 
 
 def load(owner_id: str, task_id: str) -> dict:

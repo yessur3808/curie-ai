@@ -251,6 +251,49 @@ jobs:
           python -m scripts.benchmark_task_engine
           --iterations 100 --mode rust
 
+  rust-runtime-kernel:
+    name: Rust unified runtime kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python and native build dependencies
+        run: pip install -r requirements-ci.txt -r requirements-rust.txt
+      - name: Check Rust formatting, lints, and unit tests
+        run: |
+          cargo fmt --manifest-path native/runtime_kernel/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path native/runtime_kernel/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path native/runtime_kernel/Cargo.toml
+      - name: Build and install unified runtime and scheduler extensions
+        run: |
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/runtime_kernel/Cargo.toml
+          maturin build --release --locked --out dist/native \
+            --manifest-path native/task_engine/Cargo.toml
+          pip install dist/native/curie_runtime_kernel-*.whl
+          pip install dist/native/curie_task_engine-*.whl
+      - name: Require native persistence, ingress, language, telemetry, documents, and scheduling
+        env:
+          CURIE_RUNTIME_KERNEL: rust
+          CURIE_TASK_ENGINE: rust
+          CURIE_MODEL_SUPERVISOR: rust
+        run: >-
+          pytest -q tests/test_runtime_kernel_native.py
+          tests/test_task_engine_native.py
+          tests/test_persistence_repositories.py
+          tests/test_media_ingestion.py
+          tests/test_observability.py
+      - name: Run bounded native profile smoke test
+        env:
+          CURIE_TASK_ENGINE: rust
+        run: python -m scripts.profile_runtime_kernel --mode rust --iterations 100
+
   unit-tests:
     name: Offline unit tests
     runs-on: ubuntu-latest
@@ -280,6 +323,8 @@ jobs:
           CURIE_CONNECTOR_GATEWAY: python
           CURIE_DEVICE_RESOLVER: python
           CURIE_TASK_ENGINE: python
+          CURIE_RUNTIME_KERNEL: python
+          CURIE_MODEL_SUPERVISOR: profiled
         run: pytest -q
 
   integration-tests:
@@ -350,6 +395,7 @@ jobs:
           cargo audit --file native/connector_gateway/Cargo.lock
           cargo audit --file native/device_resolver/Cargo.lock
           cargo audit --file native/task_engine/Cargo.lock
+          cargo audit --file native/runtime_kernel/Cargo.lock
       - name: Scan Python for high-severity findings
         run: >-
           bandit -q -r agent connectors evaluation llm memory scripts services utils
@@ -416,6 +462,7 @@ jobs:
       - rust-connector-gateway
       - rust-device-resolver
       - rust-task-engine
+      - rust-runtime-kernel
       - unit-tests
       - integration-tests
       - security-tests
@@ -434,6 +481,7 @@ jobs:
           RUST_CONNECTOR_GATEWAY: ${{ needs.rust-connector-gateway.result }}
           RUST_DEVICE_RESOLVER: ${{ needs.rust-device-resolver.result }}
           RUST_TASK_ENGINE: ${{ needs.rust-task-engine.result }}
+          RUST_RUNTIME_KERNEL: ${{ needs.rust-runtime-kernel.result }}
           UNIT_TESTS: ${{ needs.unit-tests.result }}
           INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
           SECURITY_TESTS: ${{ needs.security-tests.result }}
@@ -449,6 +497,7 @@ jobs:
             "$RUST_CONNECTOR_GATEWAY" \
             "$RUST_DEVICE_RESOLVER" \
             "$RUST_TASK_ENGINE" \
+            "$RUST_RUNTIME_KERNEL" \
             "$UNIT_TESTS" \
             "$INTEGRATION_TESTS" \
             "$SECURITY_TESTS" \

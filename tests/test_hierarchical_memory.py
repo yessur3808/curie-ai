@@ -194,6 +194,7 @@ def test_recall_suppresses_duplicate_long_memory_values():
 
 
 def test_local_store_managed_connection_always_closes(monkeypatch):
+    monkeypatch.setenv("CURIE_RUNTIME_KERNEL", "python")
     connection = MagicMock()
     connection.__enter__.return_value = connection
     monkeypatch.setattr(local_store, "_connect", lambda: connection)

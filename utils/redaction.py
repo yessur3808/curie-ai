@@ -94,6 +94,19 @@ def redact_text(value: str) -> str:
 
 def redact_secrets(value: Any, key: str = "") -> Any:
     """Recursively redact sensitive fields and token-shaped string values."""
+    if not key:
+        try:
+            from services.runtime_kernel import redact_native
+
+            native = redact_native(value)
+            if native is not None:
+                return native
+        except RuntimeError:
+            raise
+        except Exception:
+            # Redaction is a safety boundary, so the complete Python path is
+            # retained as an independent rollback implementation.
+            pass
     if key and _is_sensitive_field(key):
         return REDACTED
     if isinstance(value, Mapping):

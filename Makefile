@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: install install-optional memory-kernel memory-kernel-check media-transport media-transport-check connector-gateway connector-gateway-check device-resolver device-resolver-check task-engine task-engine-check run start test migrate migrate-down lint format check install-hooks shell verify help
+.PHONY: install install-optional memory-kernel memory-kernel-check media-transport media-transport-check connector-gateway connector-gateway-check device-resolver device-resolver-check task-engine task-engine-check runtime-kernel runtime-kernel-check run start test migrate migrate-down lint format check install-hooks shell verify help
 .PHONY: db-start db-stop db-restart db-status setup-db
 .PHONY: run-telegram run-discord run-whatsapp run-api run-all
 .PHONY: check-ports test-imports clean sync-env sync-env-add sync-env-clean sync-env-backup restart-clean
@@ -61,6 +61,17 @@ task-engine-check:  ## Check Rust task formatting, lints, tests, and recovery
 	cargo clippy --locked --manifest-path native/task_engine/Cargo.toml --all-targets -- -D warnings
 	cargo test --locked --manifest-path native/task_engine/Cargo.toml
 	CURIE_TASK_ENGINE=rust .venv/bin/pytest -q tests/test_task_engine_native.py tests/test_task_runtime.py tests/test_planning_execution.py
+
+runtime-kernel:  ## Build and install Curie's unified Rust runtime kernel
+	.venv/bin/pip install -r requirements-rust.txt
+	.venv/bin/maturin develop --release --manifest-path native/runtime_kernel/Cargo.toml
+
+runtime-kernel-check:  ## Check Rust persistence, ingress, language, telemetry, and document runtime
+	cargo fmt --manifest-path native/runtime_kernel/Cargo.toml -- --check
+	cargo clippy --locked --manifest-path native/runtime_kernel/Cargo.toml --all-targets -- -D warnings
+	cargo test --locked --manifest-path native/runtime_kernel/Cargo.toml
+	CURIE_RUNTIME_KERNEL=rust CURIE_TASK_ENGINE=rust .venv/bin/pytest -q tests/test_runtime_kernel_native.py tests/test_task_engine_native.py tests/test_persistence_repositories.py tests/test_media_ingestion.py tests/test_observability.py
+	CURIE_TASK_ENGINE=rust .venv/bin/python -m scripts.profile_runtime_kernel --mode rust --iterations 100
 
 verify:  ## Verify setup and dependencies
 	python scripts/verify_setup.py

@@ -803,6 +803,11 @@ Missing specialist files fall back to the next available local model. At most
 | `CURIE_TASK_ENGINE` | `rust` | Require native atomic task/idempotency transactions, leases, fencing, retries, and recovery |
 | `CURIE_TASK_LEASE_MS` | `30000` | Durable step lease duration; heartbeats renew long-running claims |
 | `CURIE_TASK_RETRY_BASE_MS` | `100` | Base persisted backoff for safe read-only task retries |
+| `CURIE_RUNTIME_KERNEL` | `rust` | Require the unified native persistence/event, ingress, language, telemetry/redaction, and document runtime |
+| `CURIE_MODEL_SUPERVISOR` | `profiled` | Keep the native model supervisor inactive until live profiling justifies `rust` |
+| `CURIE_INGRESS_TTL_MS` | `600000` | Durable inbound idempotency window in milliseconds |
+| `CURIE_INGRESS_MAX_ENTRIES` | `50000` | Bound for admitted inbound connector events |
+| `CURIE_TELEMETRY_BUFFER_SIZE` | `4096` | Bound for redacted telemetry awaiting native JSONL flush |
 | `MEMORY_RELEVANCE_MIN_SCORE` | `0.28` | Minimum hybrid relevance required before a memory enters the prompt |
 | `MEMORY_CONTEXT_CHAR_BUDGET` | `1600` | Maximum long-term-memory characters injected into one request |
 | `MEMORY_MAX_CANDIDATES` | `500` | Maximum owner-filtered records ranked during one recall |

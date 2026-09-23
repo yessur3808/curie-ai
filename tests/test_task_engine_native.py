@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
+import tempfile
 
 import pytest
 
@@ -56,6 +58,60 @@ def test_native_status_and_stable_hash_parity(monkeypatch):
         task_engine.hash_payload(payload)
         == hashlib.sha256(canonical.encode()).hexdigest()
     )
+
+
+def test_native_cron_parser_and_next_occurrence(monkeypatch):
+    monkeypatch.setenv("CURIE_TASK_ENGINE", "rust")
+    monday = datetime.fromisoformat("2026-09-21T09:00:00+00:00")
+    assert task_engine.cron_matches_at("0 9 * * 1-5", monday)
+    assert not task_engine.cron_matches_at("0 9 * * 1-5", monday.replace(hour=10))
+    assert task_engine.next_scheduled_at("@hourly", monday).isoformat() == (
+        "2026-09-21T10:00:00+00:00"
+    )
+
+
+def test_scheduled_work_has_atomic_claims_leases_and_recurrence(monkeypatch):
+    monkeypatch.setenv("CURIE_TASK_ENGINE", "rust")
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "tasks.sqlite3"
+        monkeypatch.setattr(local_store, "_PATH", path)
+        local_store._NATIVE_SCHEMA_READY.clear()
+        task_engine.upsert_scheduled(
+            {
+                "id": "cron:one",
+                "owner_id": "owner",
+                "kind": "cron",
+                "schedule_type": "cron",
+                "schedule": "* * * * *",
+                "due_at_ms": 1,
+                "payload": {"job_id": "one"},
+            }
+        )
+
+        def claim(worker):
+            return task_engine.claim_scheduled(worker_id=worker, kind="cron", limit=1)
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            claims = list(pool.map(claim, [f"worker-{i}" for i in range(8)]))
+        winners = [item[0] for item in claims if item]
+        assert len(winners) == 1
+        winner = winners[0]
+        worker = next(f"worker-{i}" for i, item in enumerate(claims) if item)
+        result = task_engine.complete_scheduled(
+            winner["id"],
+            worker_id=worker,
+            lease_token=winner["lease_token"],
+            success=True,
+        )
+        assert result["status"] == "pending"
+        assert result["due_at_ms"] > int(datetime.now(timezone.utc).timestamp() * 1000)
+        with pytest.raises(PermissionError, match="stale"):
+            task_engine.complete_scheduled(
+                winner["id"],
+                worker_id="wrong",
+                lease_token=winner["lease_token"],
+                success=True,
+            )
 
 
 def test_atomic_create_or_replay_under_thread_contention(native_registry):

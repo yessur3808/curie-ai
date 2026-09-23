@@ -86,6 +86,13 @@ def restore_backup(source: str | Path, *, expected_sha256: str | None = None) ->
     live = Path(local_store._PATH).resolve()
     verified = verify_backup(source, expected_sha256)
     digest = verified["sha256"]
+    try:
+        from services.runtime_kernel import reset_persistence
+
+        reset_persistence(live)
+        local_store._NATIVE_SCHEMA_READY.discard(str(live))
+    except Exception:
+        pass
     rollback = live.with_name(
         f"{live.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     )

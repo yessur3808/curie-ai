@@ -63,6 +63,34 @@ _EXCESS_BLANK_LINES = re.compile(r"\n{4,}")
 _SAFE_CONNECTOR = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 
 
+def preprocess_message_text(value: object) -> dict[str, Any]:
+    """Return normalized text plus deterministic, non-semantic route hints."""
+    if not isinstance(value, str):
+        raise InboundEventError("text_must_be_string", quarantine=True)
+    if "\x00" in value:
+        raise InboundEventError("text_contains_nul", quarantine=True)
+    try:
+        from services.runtime_kernel import preprocess_text
+
+        native = preprocess_text(value)
+        if native is not None:
+            return native
+    except ValueError as exc:
+        raise InboundEventError(str(exc), quarantine=True) from exc
+
+    text = unicodedata.normalize("NFC", value)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = _ZERO_WIDTH.sub("", text).translate(_PUNCTUATION_TRANSLATION)
+    text = "\n".join(
+        _HORIZONTAL_SPACE.sub(" ", line).strip() for line in text.split("\n")
+    )
+    return {
+        "normalized": _EXCESS_BLANK_LINES.sub("\n\n\n", text).strip(),
+        "tokens": [],
+        "features": {},
+    }
+
+
 def normalize_message_text(value: object) -> str:
     """Normalize parsing differences while preserving names and diacritics.
 
@@ -70,17 +98,7 @@ def normalize_message_text(value: object) -> str:
     retained separately on ``InboundEvent`` for exact references and citations.
     """
 
-    if not isinstance(value, str):
-        raise InboundEventError("text_must_be_string", quarantine=True)
-    if "\x00" in value:
-        raise InboundEventError("text_contains_nul", quarantine=True)
-    text = unicodedata.normalize("NFC", value)
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = _ZERO_WIDTH.sub("", text).translate(_PUNCTUATION_TRANSLATION)
-    text = "\n".join(
-        _HORIZONTAL_SPACE.sub(" ", line).strip() for line in text.split("\n")
-    )
-    return _EXCESS_BLANK_LINES.sub("\n\n\n", text).strip()
+    return str(preprocess_message_text(value)["normalized"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,7 +232,8 @@ class InboundEvent:
             raise InboundEventError("event_identity_too_large", quarantine=True)
 
         original_text = value.get("text", "")
-        normalized_text = normalize_message_text(original_text)
+        language = preprocess_message_text(original_text)
+        normalized_text = str(language["normalized"])
         attachment_values = value.get("attachments") or ()
         if isinstance(attachment_values, (str, bytes, Mapping)):
             attachment_values = (attachment_values,)
@@ -292,6 +311,7 @@ class InboundEvent:
                 "internal_id",
             }
         }
+        passthrough["_language_features"] = dict(language.get("features") or {})
         return cls(
             connector=connector,
             connector_account_id=connector_account_id,

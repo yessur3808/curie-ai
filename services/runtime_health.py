@@ -48,6 +48,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
     from services.backpressure import runtime_backpressure
     from services.media_ingestion import media_backpressure_snapshot
     from services.media_transport import media_transport_status
+    from services.runtime_kernel import model_supervisor_status, runtime_kernel_status
     from services.security import security_status
     from services.voice_delivery import voice_health
 
@@ -84,6 +85,16 @@ def capability_health(workflow_ready: bool = True) -> dict:
     task_engine = task_engine_status()
     task_engine["ready"] = not (
         task_engine["mode"] == "rust" and task_engine["active"] != "rust"
+    )
+    runtime_kernel = runtime_kernel_status()
+    runtime_kernel["ready"] = not (
+        runtime_kernel["mode"] == "rust" and runtime_kernel["active"] != "rust"
+    )
+    model_lifecycle = model_supervisor_status()
+    model_lifecycle["resident_count"] = (
+        (model_lifecycle.get("snapshot") or {}).get("resident_count", 0)
+        if model_lifecycle["active"] == "rust"
+        else len(manager.llama_models_cache)
     )
     database = _database_health()
     disk = shutil.disk_usage(Path.cwd())
@@ -129,6 +140,8 @@ def capability_health(workflow_ready: bool = True) -> dict:
         "connector_gateway": connector_gateway,
         "device_resolver": device_resolver,
         "task_engine": task_engine,
+        "runtime_kernel": runtime_kernel,
+        "model_lifecycle": model_lifecycle,
         "database": database,
         "disk": disk_health,
         "security": security_status(),
@@ -146,6 +159,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         connector_gateway["ready"],
         device_resolver["ready"],
         task_engine["ready"],
+        runtime_kernel["ready"],
         not backpressure["saturated"],
     )
     return {
@@ -170,6 +184,7 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         "connector_gateway",
         "device_resolver",
         "task_engine",
+        "runtime_kernel",
         "database",
         "disk",
     ):

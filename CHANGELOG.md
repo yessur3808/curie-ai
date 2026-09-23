@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.09-rust-unified-runtime
+
+- Added one coarse-grained PyO3 ABI3 runtime kernel for process-resident SQLite
+  transactions, append-only events, durable inbound admission/deduplication,
+  deterministic language preprocessing, redaction and JSONL telemetry, bounded
+  archive/document extraction, and model-residency leases.
+- Extended the Rust durable task engine with cron parsing, next-occurrence
+  calculation, persistent scheduled work, atomic leases, fencing, retries, and
+  recurrence; reminders, cron jobs, and proactive checks now share that engine.
+- Routed PDF subprocess bytes through the existing Rust media worker and moved
+  safe text, DOCX, and ODT expansion into Rust with traversal, member-count,
+  source-size, expanded-size, and output bounds.
+- Added strict native modes, audited Python rollback, health reporting,
+  concurrency/security tests, a comparative runtime profiler, dependency audit,
+  and blocking CI. The model supervisor is built but remains profile-gated
+  because the stopped production process had no resident models to evaluate.
+
 ## 2026.09-rust-durable-task-engine
 
 - Replaced Curie's durable task coordination and deterministic idempotency hot

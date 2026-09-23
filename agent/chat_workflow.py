@@ -269,6 +269,18 @@ class MessageDedupeCache:
     ) -> Optional[str]:
         """Get cached response if message was already processed. Returns None if not found or expired."""
         key = f"{platform}:{external_chat_id}:{message_id}"
+        try:
+            from memory import local_store
+            from services.runtime_kernel import ingress_response
+
+            response = ingress_response(local_store._PATH, key)
+            if response is not None:
+                self.hits += 1
+                return response
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.debug("Native ingress response lookup failed: %s", exc)
         with self.lock:
             self._cleanup_expired()
             if key in self.cache:
@@ -282,6 +294,15 @@ class MessageDedupeCache:
     def set(self, platform: str, external_chat_id: str, message_id: str, response: str):
         """Store a processed message and its response."""
         key = f"{platform}:{external_chat_id}:{message_id}"
+        try:
+            from memory import local_store
+            from services.runtime_kernel import store_ingress_response
+
+            store_ingress_response(local_store._PATH, key, response)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.debug("Native ingress response persistence failed: %s", exc)
         with self.lock:
             self.cache[key] = (time.time(), response)
             # FIFO eviction when cache exceeds max_size
@@ -828,6 +849,27 @@ class ChatWorkflow:
                 "model_used": "dedupe_cache",
                 "processing_time_ms": round(processing_time, 2),
             }
+
+        # Rust atomically admits each connector event before memory, routing,
+        # tools, or model work. A duplicate that is still in flight is not
+        # allowed to execute side effects a second time.
+        try:
+            from memory import local_store
+            from services.runtime_kernel import admit_ingress
+
+            ingress_key = f"{platform}:{external_chat_id}:{dedupe_message_id}"
+            admitted = admit_ingress(local_store._PATH, platform, ingress_key)
+            if admitted is False:
+                return {
+                    "text": "I’m already handling that request.",
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "ingress_gateway",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                }
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.debug("Native ingress admission failed: %s", exc)
 
         # Persist real interaction time so a daemon restart never causes an
         # immediate unsolicited check-in right after the user has messaged.

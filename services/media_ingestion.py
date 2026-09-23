@@ -99,8 +99,31 @@ def extract_document(
     suffix = Path(filename or source.name).suffix.casefold()
     if source.stat().st_size > MAX_ATTACHMENT_BYTES:
         raise ValueError("Attachment exceeds the configured size limit")
-    if suffix in _TEXT_SUFFIXES:
-        text = source.read_text(encoding="utf-8", errors="replace")
+    if suffix in _TEXT_SUFFIXES or suffix in {".docx", ".odt"}:
+        from services.runtime_kernel import extract_document_native
+
+        text = extract_document_native(
+            str(source),
+            suffix,
+            max_source_bytes=MAX_ATTACHMENT_BYTES,
+            max_expanded_bytes=MAX_ATTACHMENT_BYTES,
+            max_chars=MAX_EXTRACTED_CHARS,
+        )
+        if text is not None:
+            return text
+        if suffix in _TEXT_SUFFIXES:
+            text = source.read_text(encoding="utf-8", errors="replace")
+        else:
+            member = "word/document.xml" if suffix == ".docx" else "content.xml"
+            with zipfile.ZipFile(source) as archive:
+                info = archive.getinfo(member)
+                if info.file_size > MAX_ATTACHMENT_BYTES:
+                    raise ValueError(
+                        "Expanded document exceeds the configured size limit"
+                    )
+                text = _clean_xml_text(
+                    archive.read(info).decode("utf-8", errors="replace")
+                )
     elif suffix == ".pdf":
         command = ["pdftotext", "-layout"]
         if page_start is not None:
@@ -108,23 +131,14 @@ def extract_document(
         if page_end is not None:
             command.extend(["-l", str(max(page_start or 1, page_end))])
         command.extend([str(source), "-"])
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
+        from services.media_transport import supervise_process_sync
+
+        completed = supervise_process_sync(
+            command, timeout=30, max_stdout_bytes=MAX_ATTACHMENT_BYTES
         )
-        if completed.returncode:
+        if completed.return_code:
             raise ValueError("Could not extract text from this PDF")
-        text = completed.stdout
-    elif suffix in {".docx", ".odt"}:
-        member = "word/document.xml" if suffix == ".docx" else "content.xml"
-        with zipfile.ZipFile(source) as archive:
-            info = archive.getinfo(member)
-            if info.file_size > MAX_ATTACHMENT_BYTES:
-                raise ValueError("Expanded document exceeds the configured size limit")
-            text = _clean_xml_text(archive.read(info).decode("utf-8", errors="replace"))
+        text = completed.stdout.decode("utf-8", errors="replace")
     else:
         guessed = mimetypes.guess_type(filename or source.name)[0] or "unknown"
         raise ValueError(f"Unsupported document type: {guessed}")

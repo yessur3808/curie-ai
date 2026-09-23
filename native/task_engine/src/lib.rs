@@ -6,7 +6,7 @@
 //! create-or-replay, lease fencing, retry scheduling, cancellation, and task
 //! state reconciliation.
 
-use chrono::DateTime;
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use pyo3::exceptions::{PyKeyError, PyPermissionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-const ENGINE_VERSION: &str = "rust-task-engine-v1";
+const ENGINE_VERSION: &str = "rust-task-engine-v2";
 const TERMINAL: [&str; 4] = ["completed", "failed", "cancelled", "expired"];
 
 fn value_error(message: impl Into<String>) -> PyErr {
@@ -71,7 +71,27 @@ fn open_store(path: &str) -> PyResult<Connection> {
                PRIMARY KEY(task_id, step_id)
              );
              CREATE INDEX IF NOT EXISTS idx_durable_task_leases_active
-               ON durable_task_leases(active, lease_expires_at_ms);",
+               ON durable_task_leases(active, lease_expires_at_ms);
+             CREATE TABLE IF NOT EXISTS scheduled_work (
+               id TEXT PRIMARY KEY,
+               owner_id TEXT NOT NULL,
+               kind TEXT NOT NULL,
+               schedule_type TEXT NOT NULL,
+               schedule TEXT,
+               due_at_ms INTEGER NOT NULL,
+               payload_json TEXT NOT NULL,
+               enabled INTEGER NOT NULL DEFAULT 1,
+               status TEXT NOT NULL DEFAULT 'pending',
+               lease_token INTEGER NOT NULL DEFAULT 0,
+               worker_id TEXT,
+               lease_expires_at_ms INTEGER,
+               attempts INTEGER NOT NULL DEFAULT 0,
+               max_attempts INTEGER NOT NULL DEFAULT 5,
+               last_error TEXT,
+               updated_at_ms INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_scheduled_work_due
+               ON scheduled_work(enabled,status,due_at_ms,lease_expires_at_ms);",
         )
         .map_err(sqlite_error)?;
     Ok(connection)
@@ -464,6 +484,40 @@ fn load_task(db_path: &str, owner_id: &str, task_id: &str) -> PyResult<String> {
     let mut connection = open_store(db_path)?;
     let tx = transaction(&mut connection)?;
     let document = load_owned(&tx, owner_id, task_id)?;
+    tx.commit().map_err(sqlite_error)?;
+    serde_json::to_string(&document).map_err(|_| runtime_error("task serialization failed"))
+}
+
+#[pyfunction]
+fn replace_task_snapshot(db_path: &str, document_json: &str, now_iso: &str) -> PyResult<String> {
+    let mut document = parse_json(document_json, "task")?;
+    let task_id = required_string(&document, "id")?.to_owned();
+    let owner_id = required_string(&document, "owner_id")?.to_owned();
+    let idempotency_key = required_string(&document, "idempotency_key")?.to_owned();
+    let graph_hash = required_string(&document, "graph_hash")?.to_owned();
+    let mut connection = open_store(db_path)?;
+    let tx = transaction(&mut connection)?;
+    let existing = load_owned(&tx, &owner_id, &task_id)?;
+    if existing.get("idempotency_key").and_then(Value::as_str) != Some(&idempotency_key)
+        || existing.get("graph_hash").and_then(Value::as_str) != Some(&graph_hash)
+    {
+        return Err(value_error(
+            "Task identity, idempotency key, and graph are immutable",
+        ));
+    }
+    let existing_revision = existing
+        .get("revision")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let incoming_revision = document
+        .get("revision")
+        .and_then(Value::as_u64)
+        .unwrap_or(existing_revision);
+    if incoming_revision < existing_revision {
+        return Err(value_error("Task snapshot revision is stale"));
+    }
+    object_mut(&mut document, "task")?.insert("updated_at".to_owned(), json!(now_iso));
+    persist(&tx, &document, now_iso)?;
     tx.commit().map_err(sqlite_error)?;
     serde_json::to_string(&document).map_err(|_| runtime_error("task serialization failed"))
 }
@@ -988,6 +1042,349 @@ fn finalize_task(
     serde_json::to_string(&document).map_err(|_| runtime_error("task serialization failed"))
 }
 
+fn expand_cron(schedule: &str) -> PyResult<String> {
+    let clean = schedule.trim().to_lowercase();
+    let named = match clean.as_str() {
+        "@hourly" => Some("0 * * * *"),
+        "@daily" | "@midnight" => Some("0 0 * * *"),
+        "@weekly" => Some("0 0 * * 0"),
+        "@monthly" => Some("0 0 1 * *"),
+        "@yearly" | "@annually" => Some("0 0 1 1 *"),
+        _ => None,
+    };
+    if let Some(value) = named {
+        return Ok(value.to_owned());
+    }
+    if let Some(interval) = clean.strip_prefix("@every_") {
+        let split = interval
+            .find(|character: char| !character.is_ascii_digit())
+            .ok_or_else(|| value_error("invalid interval schedule"))?;
+        let count: u32 = interval[..split]
+            .parse()
+            .map_err(|_| value_error("invalid interval schedule"))?;
+        let unit = &interval[split..];
+        return match unit.chars().next() {
+            Some('m') if (1..=59).contains(&count) => Ok(format!("*/{count} * * * *")),
+            Some('h') if (1..=23).contains(&count) => Ok(format!("0 */{count} * * *")),
+            Some('d') if count >= 1 => Ok(format!("0 0 */{count} * *")),
+            _ => Err(value_error("invalid interval schedule")),
+        };
+    }
+    if clean.split_whitespace().count() != 5 {
+        return Err(value_error("cron schedule must have five fields"));
+    }
+    Ok(clean)
+}
+
+fn parse_cron_field(field: &str, minimum: u32, maximum: u32) -> PyResult<HashSet<u32>> {
+    let mut result = HashSet::new();
+    if field == "*" {
+        result.extend(minimum..=maximum);
+        return Ok(result);
+    }
+    for part in field.split(',') {
+        let (range, step) = if let Some((range, step)) = part.split_once('/') {
+            let step: u32 = step.parse().map_err(|_| value_error("invalid cron step"))?;
+            if step == 0 {
+                return Err(value_error("cron step must be positive"));
+            }
+            (range, step)
+        } else {
+            (part, 1)
+        };
+        let (start, end) = if range == "*" {
+            (minimum, maximum)
+        } else if let Some((start, end)) = range.split_once('-') {
+            (
+                start
+                    .parse()
+                    .map_err(|_| value_error("invalid cron range"))?,
+                end.parse().map_err(|_| value_error("invalid cron range"))?,
+            )
+        } else {
+            let value = range
+                .parse()
+                .map_err(|_| value_error("invalid cron value"))?;
+            (value, value)
+        };
+        if start < minimum || end > maximum || start > end {
+            return Err(value_error("cron field is out of range"));
+        }
+        result.extend((start..=end).step_by(step as usize));
+    }
+    Ok(result)
+}
+
+fn cron_matches_datetime(schedule: &str, date: DateTime<Utc>) -> PyResult<bool> {
+    if schedule.trim().eq_ignore_ascii_case("@reboot") {
+        return Ok(false);
+    }
+    let expanded = expand_cron(schedule)?;
+    let parts: Vec<&str> = expanded.split_whitespace().collect();
+    let minutes = parse_cron_field(parts[0], 0, 59)?;
+    let hours = parse_cron_field(parts[1], 0, 23)?;
+    let days = parse_cron_field(parts[2], 1, 31)?;
+    let months = parse_cron_field(parts[3], 1, 12)?;
+    let weekdays = parse_cron_field(parts[4], 0, 6)?;
+    let cron_weekday = date.weekday().num_days_from_sunday();
+    let day_match = if parts[2] != "*" && parts[4] != "*" {
+        days.contains(&date.day()) || weekdays.contains(&cron_weekday)
+    } else {
+        days.contains(&date.day()) && weekdays.contains(&cron_weekday)
+    };
+    Ok(minutes.contains(&date.minute())
+        && hours.contains(&date.hour())
+        && months.contains(&date.month())
+        && day_match)
+}
+
+fn next_cron_due(schedule: &str, after_ms: i64) -> PyResult<i64> {
+    let minute = 60_000_i64;
+    let start = after_ms
+        .saturating_div(minute)
+        .saturating_add(1)
+        .saturating_mul(minute);
+    for offset in 0..=527_040_i64 {
+        let candidate = start.saturating_add(offset.saturating_mul(minute));
+        let date = DateTime::<Utc>::from_timestamp_millis(candidate)
+            .ok_or_else(|| value_error("schedule timestamp is out of range"))?;
+        if cron_matches_datetime(schedule, date)? {
+            return Ok(candidate);
+        }
+    }
+    Err(value_error("schedule has no occurrence within one year"))
+}
+
+#[pyfunction]
+fn cron_matches(schedule: &str, epoch_ms: i64) -> PyResult<bool> {
+    let date = DateTime::<Utc>::from_timestamp_millis(epoch_ms)
+        .ok_or_else(|| value_error("schedule timestamp is out of range"))?;
+    cron_matches_datetime(schedule, date)
+}
+
+#[pyfunction]
+fn next_scheduled_at(schedule: &str, after_ms: i64) -> PyResult<i64> {
+    next_cron_due(schedule, after_ms)
+}
+
+#[pyfunction]
+fn upsert_scheduled_work(db_path: &str, document_json: &str, now_ms: i64) -> PyResult<String> {
+    let document = parse_json(document_json, "scheduled work")?;
+    let id = required_string(&document, "id")?;
+    let owner_id = required_string(&document, "owner_id")?;
+    let kind = required_string(&document, "kind")?;
+    let schedule_type = required_string(&document, "schedule_type")?;
+    if !matches!(schedule_type, "once" | "cron") {
+        return Err(value_error("schedule_type must be once or cron"));
+    }
+    let schedule = document.get("schedule").and_then(Value::as_str);
+    if schedule_type == "cron" {
+        expand_cron(schedule.ok_or_else(|| value_error("cron schedule is required"))?)?;
+    }
+    let due_at_ms = document
+        .get("due_at_ms")
+        .and_then(Value::as_i64)
+        .or_else(|| schedule.and_then(|value| next_cron_due(value, now_ms).ok()))
+        .ok_or_else(|| value_error("due_at_ms is required"))?;
+    let payload = document
+        .get("payload")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let payload = serde_json::to_string(&payload)
+        .map_err(|_| value_error("scheduled payload serialization failed"))?;
+    let enabled = document
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let max_attempts = document
+        .get("max_attempts")
+        .and_then(Value::as_i64)
+        .unwrap_or(5)
+        .clamp(1, 100);
+    let connection = open_store(db_path)?;
+    connection
+        .execute(
+            "INSERT INTO scheduled_work(id,owner_id,kind,schedule_type,schedule,due_at_ms,payload_json,enabled,status,max_attempts,updated_at_ms)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+             ON CONFLICT(id) DO UPDATE SET owner_id=excluded.owner_id,kind=excluded.kind,
+               schedule_type=excluded.schedule_type,schedule=excluded.schedule,
+               due_at_ms=CASE
+                 WHEN scheduled_work.schedule_type=excluded.schedule_type
+                  AND COALESCE(scheduled_work.schedule,'')=COALESCE(excluded.schedule,'')
+                  AND scheduled_work.status IN ('pending','retry','leased')
+                 THEN scheduled_work.due_at_ms ELSE excluded.due_at_ms END,
+               payload_json=excluded.payload_json,enabled=excluded.enabled,
+               status=CASE WHEN scheduled_work.status='leased' THEN scheduled_work.status ELSE excluded.status END,
+               max_attempts=excluded.max_attempts,updated_at_ms=excluded.updated_at_ms",
+            params![id, owner_id, kind, schedule_type, schedule, due_at_ms, payload,
+                    i64::from(enabled), if enabled { "pending" } else { "cancelled" }, max_attempts, now_ms],
+        )
+        .map_err(sqlite_error)?;
+    Ok(json!({"id": id, "owner_id": owner_id, "kind": kind, "schedule_type": schedule_type,
+        "schedule": schedule, "due_at_ms": due_at_ms, "payload": document.get("payload").cloned().unwrap_or_else(|| json!({})),
+        "enabled": enabled, "status": if enabled { "pending" } else { "cancelled" }, "max_attempts": max_attempts}).to_string())
+}
+
+#[pyfunction]
+fn claim_scheduled_work(
+    db_path: &str,
+    worker_id: &str,
+    now_ms: i64,
+    lease_ms: i64,
+    limit: usize,
+    kind: Option<&str>,
+) -> PyResult<Vec<String>> {
+    let mut connection = open_store(db_path)?;
+    let tx = transaction(&mut connection)?;
+    let mut query = String::from(
+        "SELECT id FROM scheduled_work WHERE enabled=1 AND due_at_ms<=?1
+         AND (status IN ('pending','retry') OR (status='leased' AND lease_expires_at_ms<=?1))",
+    );
+    if kind.is_some() {
+        query.push_str(" AND kind=?2");
+    }
+    query.push_str(" ORDER BY due_at_ms,id LIMIT ?3");
+    let ids = {
+        let mut statement = tx.prepare(&query).map_err(sqlite_error)?;
+        let mapped = statement
+            .query_map(params![now_ms, kind, limit.clamp(1, 1_000)], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(sqlite_error)?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sqlite_error)?
+    };
+    let mut claimed = Vec::new();
+    for id in ids {
+        let changed = tx
+            .execute(
+                "UPDATE scheduled_work SET status='leased',worker_id=?1,
+                   lease_token=lease_token+1,lease_expires_at_ms=?2,attempts=attempts+1,updated_at_ms=?3
+                 WHERE id=?4 AND enabled=1 AND (status IN ('pending','retry') OR
+                   (status='leased' AND lease_expires_at_ms<=?3))",
+                params![worker_id, now_ms.saturating_add(lease_ms.clamp(1_000, 3_600_000)), now_ms, id],
+            )
+            .map_err(sqlite_error)?;
+        if changed == 0 {
+            continue;
+        }
+        let raw: String = tx
+            .query_row(
+                "SELECT json_object('id',id,'owner_id',owner_id,'kind',kind,
+                   'schedule_type',schedule_type,'schedule',schedule,'due_at_ms',due_at_ms,
+                   'payload',json(payload_json),'lease_token',lease_token,'attempts',attempts,
+                   'max_attempts',max_attempts,'lease_expires_at_ms',lease_expires_at_ms)
+                 FROM scheduled_work WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)?;
+        claimed.push(raw);
+    }
+    tx.commit().map_err(sqlite_error)?;
+    Ok(claimed)
+}
+
+#[pyfunction]
+#[pyo3(signature = (db_path, work_id, worker_id, lease_token, success, now_ms, retry_delay_ms=30_000, error=None))]
+#[allow(clippy::too_many_arguments)]
+fn complete_scheduled_work(
+    db_path: &str,
+    work_id: &str,
+    worker_id: &str,
+    lease_token: i64,
+    success: bool,
+    now_ms: i64,
+    retry_delay_ms: i64,
+    error: Option<&str>,
+) -> PyResult<String> {
+    let mut connection = open_store(db_path)?;
+    let tx = transaction(&mut connection)?;
+    let row: Option<(String, Option<String>, i64, i64)> = tx
+        .query_row(
+            "SELECT schedule_type,schedule,attempts,max_attempts FROM scheduled_work
+             WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND status='leased'",
+            params![work_id, worker_id, lease_token],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let (schedule_type, schedule, attempts, max_attempts) =
+        row.ok_or_else(|| PyPermissionError::new_err("scheduled-work lease is stale"))?;
+    let (status, due_at_ms) = if success && schedule_type == "cron" {
+        (
+            "pending",
+            next_cron_due(schedule.as_deref().unwrap_or(""), now_ms)?,
+        )
+    } else if success {
+        ("completed", now_ms)
+    } else if attempts < max_attempts {
+        (
+            "retry",
+            now_ms.saturating_add(retry_delay_ms.clamp(1_000, 3_600_000)),
+        )
+    } else {
+        ("failed", now_ms)
+    };
+    tx.execute(
+        "UPDATE scheduled_work SET status=?1,due_at_ms=?2,worker_id=NULL,
+           lease_expires_at_ms=NULL,last_error=?3,updated_at_ms=?4 WHERE id=?5",
+        params![
+            status,
+            due_at_ms,
+            error.map(|item| item.chars().take(500).collect::<String>()),
+            now_ms,
+            work_id
+        ],
+    )
+    .map_err(sqlite_error)?;
+    tx.commit().map_err(sqlite_error)?;
+    Ok(
+        json!({"id": work_id, "status": status, "due_at_ms": due_at_ms,
+        "attempts": attempts, "max_attempts": max_attempts})
+        .to_string(),
+    )
+}
+
+#[pyfunction]
+fn cancel_scheduled_work(
+    db_path: &str,
+    owner_id: &str,
+    work_id: &str,
+    now_ms: i64,
+) -> PyResult<bool> {
+    let connection = open_store(db_path)?;
+    let changed = connection
+        .execute(
+            "UPDATE scheduled_work SET enabled=0,status='cancelled',worker_id=NULL,
+             lease_expires_at_ms=NULL,updated_at_ms=?1 WHERE id=?2 AND owner_id=?3",
+            params![now_ms, work_id, owner_id],
+        )
+        .map_err(sqlite_error)?;
+    Ok(changed == 1)
+}
+
+#[pyfunction]
+fn next_due_work(db_path: &str, kind: Option<&str>) -> PyResult<Option<i64>> {
+    let connection = open_store(db_path)?;
+    let mut query = String::from(
+        "SELECT MIN(due_at_ms) FROM scheduled_work WHERE enabled=1 AND status IN ('pending','retry')",
+    );
+    if kind.is_some() {
+        query.push_str(" AND kind=?1");
+    }
+    if let Some(kind) = kind {
+        connection
+            .query_row(&query, params![kind], |row| row.get(0))
+            .map_err(sqlite_error)
+    } else {
+        connection
+            .query_row(&query, [], |row| row.get(0))
+            .map_err(sqlite_error)
+    }
+}
+
 #[pymodule]
 fn _curie_task_engine(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(engine_version, module)?)?;
@@ -996,6 +1393,7 @@ fn _curie_task_engine(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(decide_retry, module)?)?;
     module.add_function(wrap_pyfunction!(create_or_get, module)?)?;
     module.add_function(wrap_pyfunction!(load_task, module)?)?;
+    module.add_function(wrap_pyfunction!(replace_task_snapshot, module)?)?;
     module.add_function(wrap_pyfunction!(list_tasks, module)?)?;
     module.add_function(wrap_pyfunction!(reconcile_task, module)?)?;
     module.add_function(wrap_pyfunction!(claim_step, module)?)?;
@@ -1005,6 +1403,13 @@ fn _curie_task_engine(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(set_waiting_approval, module)?)?;
     module.add_function(wrap_pyfunction!(request_cancel, module)?)?;
     module.add_function(wrap_pyfunction!(finalize_task, module)?)?;
+    module.add_function(wrap_pyfunction!(cron_matches, module)?)?;
+    module.add_function(wrap_pyfunction!(next_scheduled_at, module)?)?;
+    module.add_function(wrap_pyfunction!(upsert_scheduled_work, module)?)?;
+    module.add_function(wrap_pyfunction!(claim_scheduled_work, module)?)?;
+    module.add_function(wrap_pyfunction!(complete_scheduled_work, module)?)?;
+    module.add_function(wrap_pyfunction!(cancel_scheduled_work, module)?)?;
+    module.add_function(wrap_pyfunction!(next_due_work, module)?)?;
     Ok(())
 }
 

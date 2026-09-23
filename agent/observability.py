@@ -233,6 +233,18 @@ class TurnEventWriter:
             pass
 
     def _append(self, event: Mapping[str, Any]) -> None:
+        try:
+            from services.runtime_kernel import flush_telemetry, record_telemetry
+
+            if record_telemetry(dict(event)):
+                with self._lock:
+                    flush_telemetry(self.path, max_bytes=self.max_bytes)
+                return
+        except RuntimeError:
+            raise
+        except Exception:
+            # Observability failures cannot alter a conversational outcome.
+            pass
         encoded = json.dumps(
             redact_secrets(event), separators=(",", ":"), sort_keys=True
         )

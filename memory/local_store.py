@@ -13,6 +13,7 @@ import uuid
 
 _PATH = Path(os.getenv("CURIE_LOCAL_MEMORY_DB", ".curie_memory.sqlite3"))
 _LOCK = threading.RLock()
+_NATIVE_SCHEMA_READY: set[str] = set()
 
 
 def _connect() -> sqlite3.Connection:
@@ -147,6 +148,21 @@ def _connect() -> sqlite3.Connection:
 @contextmanager
 def _managed_connection():
     """Commit/rollback like sqlite's context manager, then always close."""
+    from services.runtime_kernel import persistence_connection, use_native
+
+    if use_native():
+        # Python migrations remain the compatibility authority. They run once
+        # before Rust takes ownership of the process-resident connection.
+        schema_path = str(_PATH.resolve())
+        if schema_path not in _NATIVE_SCHEMA_READY:
+            bootstrap = _connect()
+            bootstrap.commit()
+            bootstrap.close()
+            _NATIVE_SCHEMA_READY.add(schema_path)
+        connection = persistence_connection(_PATH)
+        with connection:
+            yield connection
+        return
     connection = _connect()
     try:
         with connection:
@@ -258,9 +274,7 @@ def get_profile(internal_id: str) -> dict:
 
 
 def update_profile(internal_id: str, facts: dict, conn=None) -> None:
-    owns = conn is None
-    connection = conn or _connect()
-    try:
+    def apply(connection) -> None:
         row = connection.execute(
             "SELECT facts_json FROM profiles WHERE internal_id=?", (str(internal_id),)
         ).fetchone()
@@ -276,10 +290,12 @@ def update_profile(internal_id: str, facts: dict, conn=None) -> None:
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
-        connection.commit()
-    finally:
-        if owns:
-            connection.close()
+
+    if conn is not None:
+        apply(conn)
+        return
+    with _LOCK, _managed_connection() as connection:
+        apply(connection)
 
 
 def delete_profile_facts(
@@ -948,6 +964,11 @@ def finish_mutation_attempt(
 
 
 def save_durable_task(document: dict) -> None:
+    from agent import task_engine
+
+    if task_engine.use_native():
+        task_engine.replace_snapshot(document)
+        return
     with _LOCK, _managed_connection() as conn:
         conn.execute(
             "INSERT INTO durable_tasks(id,internal_id,idempotency_key,status,document_json,updated_at) "
