@@ -101,8 +101,9 @@ def discover_capabilities(*, include_unavailable: bool = False) -> dict[str, Any
 
 
 _GENERAL_CAPABILITY_QUESTION = re.compile(
-    r"^(?:what (?:can|are) you (?:do|capable of)|"
-    r"what (?:useful )?(?:things )?can you help me with|"
+    r"^(?:what (?:can|are) you (?:actually )?(?:do|capable of)|"
+    r"what (?:useful )?(?:things )?can you (?:actually )?help me with"
+    r"(?: from here)?|"
     r"what are your (?:current )?capabilities|"
     r"what (?:tools|skills|abilities) (?:do you have|are available|are active)|"
     r"(?:show|list) (?:me )?(?:your )?(?:current )?(?:capabilities|tools|skills)|"
@@ -110,7 +111,40 @@ _GENERAL_CAPABILITY_QUESTION = re.compile(
     r"[?.! ]*$",
     re.I,
 )
-_CAPABILITY_FORMAT_SUFFIX = re.compile(r"\s+(?:give|show|format|keep)\b.{0,120}$", re.I)
+_CAPABILITY_FORMAT_SUFFIX = re.compile(
+    r"\s+(?:give|show|format|keep|not the marketing version)\b.{0,160}$", re.I
+)
+_ONE_CAPABILITY_QUESTION = re.compile(
+    r"^(?:interrupt that[.! ]+)?(?:name|give me|tell me) one "
+    r"(?:specific )?(?:capability|thing) you (?:genuinely |actually |currently )?"
+    r"(?:have|can do)(?: now)?(?: that .+)?[?.! ]*$",
+    re.I,
+)
+_SAFETY_LIMIT_QUESTION = re.compile(
+    r"^(?:and )?(?:name|give me|tell me)?\s*(?:one )?(?:thing|action)?\s*"
+    r"you cannot safely do without me[?.! ]*$",
+    re.I,
+)
+_LOW_CONFIDENCE_DEVICE_QUESTION = re.compile(
+    r"\b(?:confidence|confident)\b.{0,80}\bdevice match\b|"
+    r"\bdevice match\b.{0,80}\b(?:confidence|confident)\b",
+    re.I,
+)
+_MISSING_DEVICE_QUESTION = re.compile(
+    r"\bno device (?:had|has|with|called)\b.{0,100}\b(?:what should you do|"
+    r"how would you handle|what would you do)\b",
+    re.I,
+)
+_PLURAL_DEVICE_REASONING_QUESTION = re.compile(
+    r"\bturn off (?:both|those|these|all) (?:the )?(?:lights|devices)\b.{0,180}"
+    r"\b(?:how would you|how do you|work out|figure out|know which)\b|"
+    r"\bturn (?:both|those|these|all)(?: (?:the )?(?:lights|devices))? off\b.{0,180}"
+    r"\b(?:what does|how would you|how do you|work out|figure out|know which|refuse to guess)\b|"
+    r"\b(?:how would you|how do you|work out|figure out|know which)\b.{0,180}"
+    r"\b(?:turn off (?:both|those|these|all) (?:the )?(?:lights|devices)|"
+    r"turn (?:both|those|these|all)(?: (?:the )?(?:lights|devices))? off)\b",
+    re.I,
+)
 _FOCUSED_CAPABILITY_QUESTION = re.compile(
     r"^(?:(?:can|could|do) you (?:currently |still |directly )?"
     r"(?:access|use|read|check|control|track|find|send|reply (?:with|using))|"
@@ -183,6 +217,91 @@ def _natural_capability_summary(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _practical_capability_summary(report: dict[str, Any]) -> str:
+    """Return a compact, availability-backed answer for practical wording."""
+
+    items = report["capabilities"]
+    active = {str(item.get("name")) for item in items if item.get("available")}
+    lines = ["**What is genuinely useful right now**"]
+    groups = (
+        (
+            {"calendar_list", "calendar_create", "reminder_create"},
+            "- Review your calendar and prepare events or reminders for approval",
+        ),
+        (
+            {"flight_track", "navigation_skill", "places_search"},
+            "- Track flights, plan routes, and find useful nearby places",
+        ),
+        (
+            {"home_control", "home_status", "home_alias"},
+            "- Resolve natural device names, control the right device, and verify its state",
+        ),
+        (
+            {"research", "weather"},
+            "- Research current information and compare reliable sources",
+        ),
+        (
+            {"dashboard_snapshot", "hardware", "network_speed"},
+            "- Read Curie's dashboard and diagnose health, latency, hardware, or network issues",
+        ),
+        (
+            {"inspect_project", "project_change", "run_tests", "organize_files"},
+            "- Inspect projects or files and prepare reviewable changes with tests",
+        ),
+    )
+    lines.extend(label for names, label in groups if active & names)
+    unavailable = [
+        str(item.get("display_name")) for item in items if not item.get("available")
+    ]
+    if unavailable:
+        lines.append("- Not ready: " + ", ".join(unavailable[:3]))
+    return "\n".join(lines)
+
+
+def _one_capability_answer(report: dict[str, Any]) -> str:
+    active = {
+        str(item.get("name")): item
+        for item in report["capabilities"]
+        if item.get("available")
+    }
+    preferred = (
+        (
+            "calendar_create",
+            "I can review your connected calendar, find a workable time, and prepare an event for your approval.",
+        ),
+        (
+            "home_control",
+            "I can resolve natural device names, control the unique match, and verify its resulting state.",
+        ),
+        (
+            "flight_track",
+            "I can track a flight's schedule, delay, terminal, gate, and live position when the provider supplies it.",
+        ),
+        (
+            "research",
+            "I can research a current question, compare reliable sources, and return a source-linked summary.",
+        ),
+        (
+            "inspect_project",
+            "I can inspect a software project, trace a problem, and prepare a reviewable change with tests.",
+        ),
+    )
+    for name, answer in preferred:
+        if name in active:
+            return answer
+    if active:
+        item = next(iter(active.values()))
+        description = str(item.get("description") or item.get("display_name")).rstrip(
+            "."
+        )
+        return (
+            f"{description}."
+            if description.casefold().startswith("i can ")
+            else f"I can {description[:1].lower() + description[1:]}."
+        )
+    return "I do not currently have a verified optional capability available."
+
+
 def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
     lowered = subject.casefold()
     if "voice" in lowered or "audio" in lowered:
@@ -235,20 +354,61 @@ def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
 def handle_capabilities_command(text: str) -> str | None:
     cleaned = text.strip()
     command = cleaned.casefold()
+    if _LOW_CONFIDENCE_DEVICE_QUESTION.search(cleaned):
+        return (
+            "I would not execute the command. A 72% device match is below the 90% "
+            "threshold for a consequential action, so I would show the likely matches "
+            "and ask one focused clarification."
+        )
+    if _MISSING_DEVICE_QUESTION.search(cleaned):
+        return (
+            "I would check the live device inventory and trusted aliases. If there is no "
+            "unique high-confidence match, I would say so, list the closest controllable "
+            "choices, and leave every device unchanged."
+        )
+    if _PLURAL_DEVICE_REASONING_QUESTION.search(cleaned):
+        return (
+            "I would use the most recent verified device set in this conversation, then "
+            "confirm those devices still exist in the live inventory. If two devices are "
+            "not uniquely established, I would ask which ones instead of guessing."
+        )
+    if _SAFETY_LIMIT_QUESTION.fullmatch(cleaned):
+        return (
+            "I cannot safely make a consequential external change when the target, scope, "
+            "or required approval is unclear. That ambiguity must be resolved first."
+        )
     query = _CAPABILITY_FORMAT_SUFFIX.sub("", cleaned).rstrip()
+    query = re.sub(
+        r"^(?:(?:ha[, ]+)?(?:good|okay|ok|right|fine)[.! ]+)+",
+        "",
+        query,
+        flags=re.I,
+    )
     focused = _FOCUSED_CAPABILITY_QUESTION.fullmatch(query)
     general = _GENERAL_CAPABILITY_QUESTION.fullmatch(query)
+    one_capability = _ONE_CAPABILITY_QUESTION.fullmatch(cleaned)
     if (
         command not in {"/capabilities", "/capabilities all"}
         and not focused
         and not general
+        and not one_capability
     ):
         return None
-    include_unavailable = command.endswith(" all") or bool(focused or general)
+    include_unavailable = command.endswith(" all") or bool(
+        focused or general or one_capability
+    )
     report = discover_capabilities(include_unavailable=include_unavailable)
+    if one_capability:
+        return _one_capability_answer(report)
     if focused:
         return _focused_capability_answer(focused.group("subject"), report)
     if general:
+        if re.search(
+            r"\b(?:not the marketing version|genuinely useful|from here)\b",
+            cleaned,
+            re.I,
+        ):
+            return _practical_capability_summary(report)
         return _natural_capability_summary(report)
     items = report["capabilities"]
     if not items:

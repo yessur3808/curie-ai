@@ -51,6 +51,8 @@ def _capability_report():
         "What are your current capabilities?",
         "What can you do?",
         "What useful things can you help me with? Give me a short, clean list.",
+        "What can you actually help me with from here? Not the marketing version, just the useful version.",
+        "Ha, good. What can you actually help me with from here? Not the marketing version, just what is genuinely useful.",
         "Are all your tools still active?",
     ],
 )
@@ -59,9 +61,67 @@ def test_natural_capability_questions_use_authoritative_discovery(text):
         "contracts.catalog.discover_capabilities", return_value=_capability_report()
     ):
         answer = handle_capabilities_command(text)
-    assert "Current capabilities" in answer
+    assert any(
+        heading in answer
+        for heading in ("Current capabilities", "What is genuinely useful right now")
+    )
     assert "dashboard" in answer.casefold()
     assert "Calendar List" in answer
+
+
+def test_practical_capability_wording_returns_a_compact_useful_subset():
+    with patch(
+        "contracts.catalog.discover_capabilities", return_value=_capability_report()
+    ):
+        answer = handle_capabilities_command(
+            "Ha, good. What can you actually help me with from here? Not the marketing version, just what is genuinely useful."
+        )
+
+    assert "59 active" not in answer
+    assert "diagnose health" in answer
+    assert "Calendar List" in answer
+
+
+def test_one_capability_and_safety_limit_use_authoritative_grounding():
+    with patch(
+        "contracts.catalog.discover_capabilities", return_value=_capability_report()
+    ):
+        capability = handle_capabilities_command(
+            "Name one capability you genuinely have now that could save me time today."
+        )
+    limitation = handle_capabilities_command(
+        "And one thing you cannot safely do without me?"
+    )
+
+    assert capability == "I can read the live Curie dashboard directly."
+    assert "consequential external change" in limitation
+    assert "approval" in limitation
+
+
+def test_device_reasoning_explanations_never_authorize_a_guess():
+    plural = handle_capabilities_command(
+        "Suppose I said, 'turn off both lights.' How would you work out which two I meant?"
+    )
+    missing = handle_capabilities_command(
+        "If no device had that exact name, what should you do?"
+    )
+    low_confidence = handle_capabilities_command(
+        "If your confidence in a device match were 72 percent, what would you do?"
+    )
+
+    assert "instead of guessing" in plural
+    assert "leave every device unchanged" in missing
+    assert "would not execute" in low_confidence
+    assert "90%" in low_confidence
+
+
+def test_natural_postposed_device_pronoun_is_treated_as_ambiguous_reasoning():
+    response = handle_capabilities_command(
+        "Suppose I say 'turn those off.' What does 'those' refer to, and when should you refuse to guess?"
+    )
+
+    assert "most recent verified device set" in response
+    assert "instead of guessing" in response
 
 
 def test_focused_capability_answers_are_truthful_and_direct():
