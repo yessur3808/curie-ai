@@ -1,4 +1,5 @@
 from evaluation.runner import evaluate_case, evaluate_suite, summarize_results
+from evaluation.conversation_flow_suite import run as run_conversation_flow
 
 
 def test_brevity_personality_and_hidden_reasoning_pass():
@@ -160,3 +161,11 @@ def test_typed_execution_and_message_delivery_are_evaluated():
     }
 
     assert evaluate_case(case, response).passed is True
+
+
+def test_conversation_flow_regressions_are_release_blocking():
+    result = run_conversation_flow()
+
+    assert result["pass_rate"] == 1.0
+    assert result["passed"] == result["total"]
+    assert all(result["checks"].values())

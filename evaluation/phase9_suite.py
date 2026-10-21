@@ -11,6 +11,7 @@ from agent.kernel.understanding import analyze_turn
 from agent.response_composer import build_response_plan, render_response
 from agent.understanding.recognizers import recognize_deterministic
 from evaluation.contracts import catalog_summary, load_catalog
+from evaluation.conversation_flow_suite import run as run_conversation_flow
 from evaluation.home_assistant_simulator import HomeAssistantSimulator, SimulatedEntity
 from evaluation.phase2_suite import _evaluate as evaluate_phase2
 from evaluation.phase345_suite import run as run_phase345
@@ -197,6 +198,7 @@ def run(root: str | Path = ROOT) -> dict:
     simulator = _simulator_metrics()
     connector = _connector_metrics()
     connector_e2e = _end_to_end_connector_metrics()
+    conversation_flow = run_conversation_flow()
     latency = _latency_metrics()
     catalog = catalog_summary(load_catalog(root / "evaluation/datasets"))
 
@@ -209,13 +211,15 @@ def run(root: str | Path = ROOT) -> dict:
         *phase10["checks"].values(),
         *connector["checks"].values(),
         *connector_e2e["checks"].values(),
+        *conversation_flow["checks"].values(),
         simulator["tool_simulation_pass_rate"] == 1.0,
     ]
-    known_regression_expected = len(phase2_cases) + 3
+    known_regression_expected = len(phase2_cases) + 3 + conversation_flow["total"]
     known_regression_passed = phase2_passed
     known_regression_passed += int(phase345["group_accuracy"] >= 0.99)
     known_regression_passed += int(phase345["wrong_fuzzy_mutations"] == 0)
     known_regression_passed += int(connector["connector_conformance_pass_rate"] == 1.0)
+    known_regression_passed += conversation_flow["passed"]
 
     planning_shape_accuracy = min(
         _ratio(phase345["compound_passed"], phase345["compound_examples"]),
@@ -292,6 +296,7 @@ def run(root: str | Path = ROOT) -> dict:
             "tool_simulation": simulator,
             "delivery": connector,
             "connector_end_to_end": connector_e2e,
+            "conversation_flow": conversation_flow,
             "latency": latency,
             "operational_hardening": phase10,
             "rollout_stabilization": phase11,
