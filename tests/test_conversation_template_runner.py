@@ -56,6 +56,7 @@ def test_stored_templates_are_valid_and_unique():
 
     assert set(catalog) >= {
         "dedsec_mission_banter",
+        "inventor_friday_banter",
         "natural_conversation",
         "operator_assistant",
     }
