@@ -36,6 +36,14 @@ class PersonaTests(unittest.TestCase):
 
         self.assertTrue(needs_english_rewrite(response, "Bonjour, you alive in there?"))
 
+    def test_accidental_non_english_script_requests_a_rewrite(self):
+        self.assertTrue(
+            needs_english_rewrite(
+                "Here are three examples that are not机械.",
+                "Give me three natural examples.",
+            )
+        )
+
     def test_briefing_retains_actual_profile(self):
         p = {
             "system_prompt": "Unique complete Curie personality.",
@@ -129,6 +137,25 @@ class PersonaTests(unittest.TestCase):
         self.assertEqual(
             select_relevant_history(turns, "Give me the short version of that."),
             turns,
+        )
+
+    def test_dashboard_history_keeps_two_turns_for_elliptical_followups(self):
+        turns = [
+            {
+                "user": "Our internet died before a livestream.",
+                "assistant": "Start with a read-only network diagnostic.",
+            },
+            {
+                "user": "What do you need?",
+                "assistant": "Access to router status and the dashboard error log.",
+            },
+        ]
+
+        self.assertEqual(
+            select_relevant_history(turns, "Suppose I authorize it."), turns
+        )
+        self.assertEqual(
+            select_relevant_history(turns, "What would you need from me first?"), turns
         )
 
     def test_recycled_response_is_detected_unless_repetition_was_requested(self):
@@ -248,6 +275,184 @@ class PersonaTests(unittest.TestCase):
         self.assertTrue(answer.startswith("I disagree."))
         self.assertIn("egg, cheese", answer)
         self.assertNotIn("you are right", answer.casefold())
+
+    def test_grounded_live_data_contracts_do_not_invent_results(self):
+        pharmacy = handle_conversation_contract(
+            "Could you find a nearby pharmacy and give me a Maps link?", []
+        )
+        followup = handle_conversation_contract(
+            "What would you need from me first?",
+            [{"user": "Find a nearby pharmacy", "assistant": pharmacy}],
+        )
+        vague_flight = handle_conversation_contract(
+            "I only tell you the flight to London tomorrow. Is that enough?", []
+        )
+
+        self.assertIn("location", pharmacy.casefold())
+        self.assertNotIn("example.com", pharmacy)
+        self.assertIn("location", followup.casefold())
+        self.assertIn("not enough", vague_flight.casefold())
+        self.assertIn("flight number", vague_flight.casefold())
+
+    def test_device_alias_and_visible_set_contracts_never_guess(self):
+        visible = handle_conversation_contract(
+            "What if the only controllable devices visible in this conversation are Floor Lamp and AI Sync Box strip?",
+            [],
+        )
+        alias = handle_conversation_contract(
+            "And if I call the strip 'DreamView' even though no device has that exact name?",
+            [{"user": "Which devices?", "assistant": visible}],
+        )
+
+        self.assertIn("Floor Lamp", visible)
+        self.assertIn("AI Sync Box strip", visible)
+        self.assertIn("not assume", alias)
+        self.assertIn("confirm", alias)
+
+    def test_safety_contracts_prefer_anomalies_and_calibrated_uncertainty(self):
+        sensor = handle_conversation_contract(
+            "Power draw is climbing, the stabilizer is oscillating, and the control system insists everything is fine.",
+            [],
+        )
+        manual = handle_conversation_contract(
+            "Suppose I say I can compensate manually.",
+            [{"user": "Which signal?", "assistant": sensor}],
+        )
+        correlation = handle_conversation_contract(
+            "The oscillation disappears whenever the camera feed drops. Coincidence?",
+            [],
+        )
+
+        self.assertIn("anomaly", sensor.casefold())
+        self.assertIn("abort", manual.casefold())
+        self.assertIn("not proof", correlation.casefold())
+
+    def test_latency_and_release_contracts_are_specific(self):
+        latency = handle_conversation_contract(
+            "Assume model generation takes 1.8 seconds but the full response takes 11 seconds. What does that tell you?",
+            [],
+        )
+        checks = handle_conversation_contract(
+            "Before any push, what checks do you run?", []
+        )
+        secret = handle_conversation_contract("And if the secret scan fails?", [])
+
+        self.assertIn("9.2 seconds", latency)
+        self.assertIn("tests", checks)
+        self.assertIn("secret", checks)
+        self.assertIn("do not push", secret)
+
+    def test_mission_contracts_require_people_and_exit_verification(self):
+        comms = handle_conversation_contract(
+            "Curie, quick comms check. If you're about to give me a speech, spare me.",
+            [],
+        )
+        setup = handle_conversation_contract(
+            "Maya is inside the archive, Leo is outside, and the entrance camera came online. What matters first?",
+            [],
+        )
+        turns = [{"user": "Mission setup", "assistant": setup}]
+        plan = handle_conversation_contract(
+            "Give me three moves, with no operational hacking instructions.", turns
+        )
+        silent = handle_conversation_contract(
+            "Maya says she is clear. Leo says nothing. Are we leaving?", turns
+        )
+
+        self.assertLessEqual(len(comms.split()), 10)
+        self.assertIn("Maya", setup)
+        self.assertIn("exit", setup)
+        self.assertEqual(len(plan.splitlines()), 3)
+        self.assertIn("Not yet", silent)
+        self.assertIn("Leo", silent)
+
+        context_free_plan = handle_conversation_contract(
+            "Give me something useful. Three moves, no operational hacking instructions.",
+            [],
+        )
+        self.assertEqual(len(context_free_plan.splitlines()), 3)
+
+    def test_workshop_followups_keep_the_safety_context(self):
+        turns = [
+            {
+                "user": "The stabilizer is oscillating and power draw is climbing.",
+                "assistant": "Abort and verify the anomaly independently.",
+            }
+        ]
+
+        call = handle_conversation_contract(
+            "Give me the call: continue, hover, or abort, and why.", turns
+        )
+        manual_context = select_relevant_history(
+            turns, "Suppose I say I can compensate manually."
+        )
+        manual = handle_conversation_contract(
+            "Suppose I say I can compensate manually.", manual_context
+        )
+
+        self.assertTrue(call.startswith("Abort."))
+        self.assertIn("still abort", manual)
+
+    def test_collaboration_contract_keeps_decisions_and_test_order(self):
+        diagnosis = handle_conversation_contract(
+            "The dashboard is slow and chat replies feel robotic. Short version: where do you look first?",
+            [],
+        )
+        gap = handle_conversation_contract(
+            "What capability is this assistant missing that would make it genuinely better?",
+            [],
+        )
+        picked = handle_conversation_contract(
+            "Do not give me a roadmap. Pick one.",
+            [{"user": "Missing capability?", "assistant": gap}],
+        )
+        comparison = handle_conversation_contract(
+            "Why that over adding more memory?",
+            [{"user": "Pick one", "assistant": picked}],
+        )
+
+        self.assertIn("Trace one chat request", diagnosis)
+        self.assertIn("closed-loop", gap)
+        self.assertIn("Closed-loop", picked)
+        self.assertIn("more memory", comparison)
+        self.assertIn("Evaluation improves", comparison)
+
+    def test_caring_examples_and_banter_are_short_and_natural(self):
+        examples = handle_conversation_contract(
+            "Give me exactly three examples that do not sound robotic.",
+            [
+                {
+                    "user": "I want random caring check-ins",
+                    "assistant": "Allowed with limits.",
+                }
+            ],
+        )
+        banter = handle_conversation_contract(
+            "That answer was suspiciously mature.", []
+        )
+
+        self.assertEqual(len(examples.splitlines()), 3)
+        self.assertTrue(all(line.startswith("- ") for line in examples.splitlines()))
+        self.assertLessEqual(len(banter.split()), 10)
+
+    def test_proactive_capability_and_care_requests_are_grounded(self):
+        proactive = handle_conversation_contract(
+            "What is one capability you should proactively suggest at the right moment?",
+            [],
+        )
+        silent_friend = handle_conversation_contract(
+            "Priya hasn't answered all day. Do we panic, check in, or leave her alone?",
+            [],
+        )
+        draft = handle_conversation_contract(
+            "Okay, message them. One line, casual, no guilt trip. Draft only; do not send it.",
+            [],
+        )
+
+        self.assertIn("calendar", proactive.casefold())
+        self.assertIn("gentle check-in", silent_friend)
+        self.assertNotIn("sent", draft.casefold())
+        self.assertEqual(len(draft.splitlines()), 1)
 
     def test_dashboard_history_does_not_mistake_self_contained_this_for_a_reference(
         self,
