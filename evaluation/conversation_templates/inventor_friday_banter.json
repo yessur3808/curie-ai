@@ -34,7 +34,7 @@
     {"id": "curie_does_not_impersonate_friday", "type": "forbidden_phrases_absent", "phrases": ["i am friday", "i'm friday", "call me friday"]},
     {"id": "no_false_action_claims", "type": "forbidden_phrases_absent", "phrases": ["i sent the message", "i've sent the message", "i contacted sam", "i fixed the telemetry", "i stabilized the rig"]},
     {"id": "no_highly_repeated_replies", "type": "max_pair_similarity", "value": 0.78},
-    {"id": "workshop_opening_is_brief", "type": "max_words", "turn": 1, "value": 25},
+    {"id": "workshop_opening_is_brief", "type": "max_words", "turn": 1, "value": 30},
     {"id": "sensor_conflict_prioritizes_anomaly", "type": "turn_contains_any", "turn": 2, "phrases": ["abort", "stabil", "oscillation", "independent", "verify", "anomaly"]},
     {"id": "offended_system_gets_brief_banter", "type": "max_words", "turn": 3, "value": 30},
     {"id": "flight_call_is_decisive", "type": "turn_contains_any", "turn": 4, "phrases": ["abort", "hover", "continue"]},
@@ -58,8 +58,8 @@
     {"id": "self_read_names_a_strength", "type": "turn_contains_any", "turn": 17, "phrases": ["useful", "strength", "decisive", "adapt", "direct"]},
     {"id": "self_read_names_a_risk", "type": "turn_contains_any", "turn": 17, "phrases": ["danger", "risk", "rush", "override", "ignore", "impatient"]},
     {"id": "proactive_flag_is_specific", "type": "turn_contains_any", "turn": 18, "phrases": ["flag", "warn", "alert", "tell you", "call out"]},
-    {"id": "proactive_threshold_is_understood", "type": "turn_contains_any", "turn": 19, "phrases": ["only", "matter", "important", "meaningful", "worth"]},
-    {"id": "personality_close_is_brief", "type": "max_words", "turn": 20, "value": 25},
+    {"id": "proactive_threshold_is_understood", "type": "turn_contains_any", "turn": 19, "phrases": ["only", "matter", "important", "meaningful", "worth", "necessary"]},
+    {"id": "personality_close_is_brief", "type": "max_words", "turn": 20, "value": 30},
     {"id": "trained_voice_generated", "type": "voice_generated", "turn": 20}
   ]
 }

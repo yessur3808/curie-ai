@@ -55,6 +55,7 @@ def test_stored_templates_are_valid_and_unique():
     catalog = discover_templates()
 
     assert set(catalog) >= {
+        "capability_grounding",
         "dedsec_mission_banter",
         "inventor_friday_banter",
         "natural_conversation",
