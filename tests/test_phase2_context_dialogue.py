@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -277,6 +278,70 @@ def test_recent_assistant_question_restores_direct_answer_after_restart():
     )
 
     assert transition.kind is TransitionClass.DIRECT_ANSWER
+
+
+def test_dialogue_state_round_trip_survives_process_restart():
+    original = DialogueStateStore()
+    _observe(
+        original,
+        "Turn off both lights",
+        {
+            "text": "Should I turn both lights off?",
+            "execution_status": "waiting_approval",
+            "approval_required": True,
+            "_dialogue_entities": ["Desk Lamp", "Floor Lamp"],
+        },
+    )
+    payload = original.export(platform="telegram", owner_id="owner")
+
+    restarted = DialogueStateStore()
+    assert restarted.restore(payload, platform="telegram", owner_id="owner")
+    assert (
+        restarted.transition_for("yes", platform="telegram", owner_id="owner").kind
+        is TransitionClass.APPROVAL
+    )
+    resolution = restarted.resolve_references(
+        "Turn both on", platform="telegram", owner_id="owner"
+    )
+    assert resolution.resolved_text == "Turn Desk Lamp and Floor Lamp on"
+
+
+def test_dialogue_state_restore_rejects_cross_owner_payload():
+    original = DialogueStateStore()
+    _observe(original, "Check the desk lamp", {"text": "It is on."})
+    payload = original.export(platform="telegram", owner_id="owner")
+
+    restarted = DialogueStateStore()
+    assert not restarted.restore(
+        payload, platform="telegram", owner_id="different-owner"
+    )
+    assert (
+        restarted.snapshot(platform="telegram", owner_id="different-owner").active_topic
+        is None
+    )
+
+
+def test_dialogue_state_restore_does_not_resurrect_expired_entities():
+    original = DialogueStateStore()
+    _observe(
+        original,
+        "Turn off the desk lamp",
+        {
+            "text": "The desk lamp is off.",
+            "_dialogue_entities": ["Desk Lamp"],
+            "verification_status": "verified",
+        },
+    )
+    payload = deepcopy(original.export(platform="telegram", owner_id="owner"))
+    payload["referenced_entities"]["expires_at"] = 1
+
+    restarted = DialogueStateStore()
+    assert restarted.restore(payload, platform="telegram", owner_id="owner")
+    resolution = restarted.resolve_references(
+        "Turn it on", platform="telegram", owner_id="owner"
+    )
+    assert not resolution.used_context
+    assert resolution.resolved_text == "Turn it on"
 
 
 def test_fresh_request_interrupts_pending_task_and_ignores_proactive_context():

@@ -164,6 +164,9 @@ class LegacyTurnPipelineAdapter:
             # Recent dialogue is part of understanding every turn, not only a
             # device-pronoun fallback. This also restores pending questions after
             # a process restart, when the in-memory dialogue state is empty.
+            hydrated = self.workflow.hydrate_dialogue_state(
+                str(enriched["platform"]), str(enriched["internal_id"])
+            )
             history = get_session_manager().get_history(
                 str(enriched["platform"]), str(enriched["internal_id"])
             )[-8:]
@@ -184,6 +187,7 @@ class LegacyTurnPipelineAdapter:
                 {
                     "reference_history_loaded": bool(history),
                     "history_items": len(history),
+                    "dialogue_state_hydrated": hydrated,
                     "transition": transition.kind.value,
                     "session_alias_used": session_alias_used,
                 },
@@ -623,6 +627,9 @@ class LegacyTurnPipelineAdapter:
                 self.workflow.dialogue_state.clear(
                     platform=analysis.state.platform, owner_id=str(internal_id)
                 )
+                self.workflow.persist_dialogue_state(
+                    analysis.state.platform, str(internal_id), cleared=True
+                )
             else:
                 self.workflow.dialogue_state.observe_for_owner(
                     str(internal_id),
@@ -634,6 +641,9 @@ class LegacyTurnPipelineAdapter:
                         if isinstance(transition, DialogueTransition)
                         else None
                     ),
+                )
+                self.workflow.persist_dialogue_state(
+                    analysis.state.platform, str(internal_id)
                 )
             if isinstance(transition, DialogueTransition):
                 result["dialogue_transition"] = transition.as_dict()

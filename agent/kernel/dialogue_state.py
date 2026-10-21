@@ -458,6 +458,115 @@ class DialogueStateStore:
     def snapshot(self, *, platform: str, owner_id: str) -> DialogueState:
         return self._get(platform, owner_id) or DialogueState()
 
+    @staticmethod
+    def _restore_slot(
+        raw: Any, *, expected_owner_scope: str, now: float
+    ) -> StateValue | None:
+        if raw is None:
+            return None
+        if not isinstance(raw, Mapping):
+            raise ValueError("dialogue state slot must be an object")
+        owner_scope = str(raw.get("owner_scope") or "")
+        if owner_scope != expected_owner_scope:
+            raise ValueError("dialogue state owner scope mismatch")
+        source_turn = str(raw.get("source_turn") or "").strip()
+        created_at = float(raw.get("created_at"))
+        expires_raw = raw.get("expires_at")
+        expires_at = None if expires_raw is None else float(expires_raw)
+        confidence = float(raw.get("confidence"))
+        if created_at > now + 300:
+            raise ValueError("dialogue state timestamp is in the future")
+        if expires_at is not None and expires_at <= now:
+            return None
+
+        value = raw.get("value")
+        if isinstance(value, (str, bytes)) and len(value) > 16_000:
+            raise ValueError("dialogue state value is too large")
+        return StateValue(
+            value=value,
+            source_turn=source_turn,
+            created_at=created_at,
+            expires_at=expires_at,
+            confidence=confidence,
+            owner_scope=owner_scope,
+            source=str(raw.get("source") or "turn"),
+        )
+
+    def restore(
+        self,
+        payload: Mapping[str, Any] | None,
+        *,
+        platform: str,
+        owner_id: str,
+    ) -> bool:
+        """Hydrate a newer owner-scoped snapshot from durable session metadata.
+
+        Persisted state is untrusted input: schema, owner scope, timestamps and
+        entity shapes are validated before anything reaches the live store.
+        Expired slots are discarded rather than resurrected after a restart.
+        """
+
+        if not isinstance(payload, Mapping) or payload.get("schema_version") != 2:
+            return False
+        now = time.time()
+        try:
+            updated_at = float(payload.get("updated_at"))
+        except (TypeError, ValueError):
+            return False
+        if (
+            updated_at <= 0
+            or updated_at > now + 300
+            or now - updated_at > self.ttl_seconds
+        ):
+            return False
+
+        expected_owner = _owner_scope(owner_id)
+        values: dict[str, Any] = {"updated_at": updated_at}
+        try:
+            for name in _STATE_FIELDS:
+                slot = self._restore_slot(
+                    payload.get(name),
+                    expected_owner_scope=expected_owner,
+                    now=now,
+                )
+                if name == "referenced_entities" and slot is not None:
+                    if not isinstance(slot.value, (list, tuple)):
+                        raise ValueError("dialogue entities must be a list")
+                    entities = []
+                    for raw_entity in slot.value:
+                        if not isinstance(raw_entity, Mapping):
+                            raise ValueError("dialogue entity must be an object")
+                        entities.append(
+                            EntityReference(
+                                surface=str(raw_entity.get("surface") or ""),
+                                resolved_name=str(
+                                    raw_entity.get("resolved_name") or ""
+                                ),
+                                kind=str(raw_entity.get("kind") or "device"),
+                                source=str(raw_entity.get("source") or "persisted"),
+                                confidence=float(raw_entity.get("confidence", 1.0)),
+                            )
+                        )
+                    slot = replace(slot, value=tuple(entities))
+                values[name] = slot
+        except (TypeError, ValueError):
+            return False
+
+        restored = DialogueState(**values).pruned(now)
+        key = self._key(platform, owner_id)
+        hashed_key = self._key(platform, expected_owner)
+        with self._lock:
+            current = self._items.get(key) or self._items.get(hashed_key)
+            if current is not None and current.updated_at >= restored.updated_at:
+                return False
+            self._items[key] = restored
+            self._items[hashed_key] = restored
+            self._items.move_to_end(key)
+            self._items.move_to_end(hashed_key)
+            while len(self._items) > self.max_sessions:
+                self._items.popitem(last=False)
+        return True
+
     def transition_for(
         self,
         text: str,

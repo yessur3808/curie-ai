@@ -113,6 +113,8 @@ _LEARNING_EXECUTOR = _ThreadPoolExecutor(
     max_workers=2, thread_name_prefix="curie-learning"
 )
 
+_DIALOGUE_STATE_METADATA_KEY = "dialogue_state_v2"
+
 # Maximum number of lines a single history message is truncated to when building prompts.
 _SUMMARY_CONTENT_MAX_LENGTH = 200
 _FACT_STOP_WORDS = frozenset(
@@ -524,6 +526,47 @@ class ChatWorkflow:
             f"ChatWorkflow initialized with persona: {self.persona.get('name', 'Unknown')}"
         )
 
+    def hydrate_dialogue_state(self, platform: str, internal_id: str) -> bool:
+        """Restore validated owner-scoped dialogue state after a process restart."""
+
+        try:
+            payload = (
+                get_session_manager()
+                .get_metadata(platform, internal_id)
+                .get(_DIALOGUE_STATE_METADATA_KEY)
+            )
+            return self.dialogue_state.restore(
+                payload,
+                platform=platform,
+                owner_id=internal_id,
+            )
+        except Exception as exc:
+            logger.debug("Could not hydrate dialogue state: %s", exc)
+            return False
+
+    def persist_dialogue_state(
+        self, platform: str, internal_id: str, *, cleared: bool = False
+    ) -> None:
+        """Persist a bounded snapshot without letting storage break a reply."""
+
+        try:
+            payload = (
+                {}
+                if cleared
+                else self.dialogue_state.export(
+                    platform=platform,
+                    owner_id=internal_id,
+                )
+            )
+            get_session_manager().set_metadata(
+                platform,
+                internal_id,
+                _DIALOGUE_STATE_METADATA_KEY,
+                payload,
+            )
+        except Exception as exc:
+            logger.debug("Could not persist dialogue state: %s", exc)
+
     def _load_default_persona(self) -> Dict:
         """Load default persona from personality.json if not provided."""
         persona_file = os.path.join(
@@ -738,6 +781,7 @@ class ChatWorkflow:
             )
             enriched["internal_id"] = internal_id
 
+        self.hydrate_dialogue_state(platform, str(internal_id))
         history = get_session_manager().get_history(platform, internal_id)[-8:]
         resolution = self.dialogue_state.resolve_references(
             original_text,
@@ -781,6 +825,7 @@ class ChatWorkflow:
         result["response_mode"] = analysis.state.response_mode.value
         if original_text.casefold() in {"/reset", "/new"}:
             self.dialogue_state.clear(platform=platform, owner_id=str(internal_id))
+            self.persist_dialogue_state(platform, str(internal_id), cleared=True)
         else:
             self.dialogue_state.observe_for_owner(
                 str(internal_id),
@@ -789,6 +834,7 @@ class ChatWorkflow:
                 text=original_text,
                 transition=transition,
             )
+            self.persist_dialogue_state(platform, str(internal_id))
         result["dialogue_transition"] = transition.as_dict()
         result.pop("_dialogue_entities", None)
         turn_event_writer.record(analysis.state, result)
