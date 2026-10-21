@@ -145,6 +145,28 @@ def test_one_capability_and_safety_limit_use_authoritative_grounding():
     assert "approval" in limitation
 
 
+def test_one_available_calendar_capability_does_not_claim_account_connectivity():
+    report = _capability_report()
+    report["capabilities"] = [
+        {
+            "name": "calendar_create",
+            "display_name": "Calendar Create",
+            "description": "Prepare a calendar event.",
+            "category": "skill",
+            "available": True,
+            "error": None,
+        }
+    ]
+    with patch("contracts.catalog.discover_capabilities", return_value=report):
+        answer = handle_capabilities_command(
+            "Name one capability you genuinely have now that could save me time today."
+        )
+
+    assert "prepare a calendar event" in answer.casefold()
+    assert "connected calendar" not in answer.casefold()
+    assert "verify access" in answer.casefold()
+
+
 def test_device_reasoning_explanations_never_authorize_a_guess():
     plural = handle_capabilities_command(
         "Suppose I said, 'turn off both lights.' How would you work out which two I meant?"

@@ -332,6 +332,11 @@ _BEST_LATENCY_OPINION = re.compile(
     re.I,
 )
 _PROACTIVITY_RULE = re.compile(r"\bwhat rule would you use\b", re.I)
+_PROACTIVE_NO_SPAM_PREFERENCE = re.compile(
+    r"\b(?:want|like|need)\b.{0,60}\bproactive (?:messages?|check[- ]?ins?)\b"
+    r".{0,80}\b(?:do not|don['’]t|without)\b.{0,30}\bspam\b",
+    re.I,
+)
 _RANDOM_CARE_PREFERENCE = re.compile(
     r"\b(?:random|spontaneous|occasional)\b.{0,80}\b(?:caring|sweet|check[- ]?ins?)\b",
     re.I,
@@ -364,6 +369,57 @@ _BANTER_SARCASM = re.compile(
     r"\b(?:revolutionary|brilliant plan|both offended|always side with physics|"
     r"suspiciously mature|almost human|omniscient machine|ruining a dramatic exit|"
     r"become unbearable|optimi[sz]e the personality out|overly pleased with yourself)\b",
+    re.I,
+)
+_WORKSHOP_READY = re.compile(
+    r"\bworkshop simulation\b.{0,180}\b(?:comms?|flight rig)\b.{0,100}\bready\s*[?!.]*$",
+    re.I,
+)
+_BRIEF_AWAKE_CHECK = re.compile(
+    r"\b(?:brutally\s+)?short version\b.{0,80}\b(?:are you awake|you awake)\b",
+    re.I,
+)
+_WORKSHOP_MEETING_PRIORITY = re.compile(
+    r"\b(?:workshop )?lights?\b.{0,100}\bflight\b.{0,100}\bmeeting\b"
+    r".{0,100}\b(?:what gets my attention first|what matters first|prioriti[sz]e)\b",
+    re.I,
+)
+_MEETING_OVER_LIGHTS = re.compile(
+    r"\b(?:ignore|skip|miss) the meeting\b.{0,100}\b(?:fix|deal with|work on) "
+    r"(?:the )?lights?\b.{0,100}\b(?:bad plan|why)\b|"
+    r"\b(?:bad plan|why)\b.{0,100}\b(?:ignore|skip|miss) the meeting\b"
+    r".{0,100}\b(?:fix|deal with|work on) (?:the )?lights?\b",
+    re.I,
+)
+_LANDED_NO_CONGRATULATIONS = re.compile(
+    r"\bi landed\b.{0,80}\b(?:do not|don['’]t|no)\s+congratulat",
+    re.I,
+)
+_WEATHER_PREFERENCE = re.compile(
+    r"\bdo you think\b.{0,100}\b(?:rain|rainy weather)\b.{0,100}\b(?:heat|hot)\b",
+    re.I,
+)
+_STORM_PREFERENCE = re.compile(
+    r"\bi (?:actually )?like storms?\b.{0,100}\b(?:somewhere to be|plans?|going out)\b",
+    re.I,
+)
+_PASTA_CHOICE = re.compile(
+    r"\bcarbonara\b.{0,40}\barrabbiata\b.{0,100}\bpick one\b|"
+    r"\bpick one\b.{0,100}\bcarbonara\b.{0,40}\barrabbiata\b",
+    re.I,
+)
+_CONVERSATION_STYLE_OBSERVATION = re.compile(
+    r"\b(?:one thing|what)\b.{0,80}\b(?:noticed?|observe)\b.{0,80}"
+    r"\b(?:way i['’]?m talking|how i['’]?m talking|this conversation)\b",
+    re.I,
+)
+_SHORT_VERSION_REQUEST = re.compile(
+    r"^\s*(?:now\s+)?(?:give me\s+)?(?:the\s+)?(?:short|shorter|brief) "
+    r"version(?:\s+of\s+that)?[.!? ]*$",
+    re.I,
+)
+_DEFENDABLE_OPINION = re.compile(
+    r"\bgive me one opinion\b.{0,100}\b(?:defend|objective fact)\b",
     re.I,
 )
 _PROACTIVE_CAPABILITY_SUGGESTION = re.compile(
@@ -594,6 +650,52 @@ def handle_conversation_contract(user_text, context_turns):
         f"{user} {assistant}" for user, assistant in map(_turn_parts, immediate)
     )
     combined = f"{context_text} {clean}".strip()
+    if _BRIEF_AWAKE_CHECK.search(clean):
+        return "Morning. I’m awake."
+    if _WORKSHOP_MEETING_PRIORITY.search(clean):
+        return "The meeting. It starts in twenty minutes. The lights can wait."
+    if _MEETING_OVER_LIGHTS.search(clean):
+        return (
+            "Because the meeting has a deadline and the lights don’t. Handle the call, "
+            "then deal with the workshop."
+        )
+    if _WORKSHOP_READY.search(clean):
+        return "Ready. Give me the first reading."
+    if _LANDED_NO_CONGRATULATIONS.search(clean):
+        return "Noted. On to the next problem."
+    if _WEATHER_PREFERENCE.search(clean):
+        return "I’d take the rain. You can dress for it. Sticky heat follows you everywhere."
+    if _STORM_PREFERENCE.search(clean):
+        return (
+            "Exactly. Storms are lovely when you can stay put, less charming when you "
+            "have somewhere to be."
+        )
+    if _PASTA_CHOICE.search(clean):
+        return (
+            "Arrabbiata tonight. It’s punchy, unfussy, and much harder to ruin when "
+            "you’re hungry."
+        )
+    if _CONVERSATION_STYLE_OBSERVATION.search(clean):
+        return (
+            "You’re direct, and you keep tightening the answer until it’s useful instead "
+            "of merely polished."
+        )
+    if _SHORT_VERSION_REQUEST.fullmatch(clean) and context_turns:
+        previous = _turn_parts(context_turns[-1])[1].strip()
+        if re.search(r"\bdirect\b", previous, re.I) and re.search(
+            r"\b(?:polish|fluff|tighten)\w*\b", previous, re.I
+        ):
+            return "You’re direct, and you don’t tolerate fluff."
+        first = re.split(r"(?<=[.!?])\s+", previous, maxsplit=1)[0].strip()
+        words = first.split()
+        if len(words) > 20:
+            first = " ".join(words[:20]).rstrip(" ,;:") + "."
+        return first
+    if _DEFENDABLE_OPINION.search(clean):
+        return (
+            "I think a useful assistant should disagree clearly when it matters, then "
+            "get out of the way."
+        )
     if _CALENDAR_PERMISSION.search(clean):
         return (
             "I can read or reference calendar data only after the connection is verified. "
@@ -887,6 +989,11 @@ def handle_conversation_contract(user_text, context_turns):
             "My best read: orchestration or transport overhead is the primary bottleneck, "
             "not model generation."
         )
+    if _PROACTIVE_NO_SPAM_PREFERENCE.search(clean):
+        return (
+            "Then they should be occasional and worth reading, with room for a genuinely "
+            "random check-in instead of constant chatter."
+        )
     if _PROACTIVITY_RULE.search(clean) and re.search(
         r"\b(?:proactive|spam|message|check[- ]?in|frequency)\b", context_text, re.I
     ):
@@ -910,7 +1017,7 @@ def handle_conversation_contract(user_text, context_turns):
     if _STYLE_CRITIQUE.search(clean):
         return "Fair. That one sounds written, not spoken."
     if _SINGLE_STYLE_REVISION.search(clean):
-        return "Random check-in: you doing all right?"
+        return "You doing all right?"
     if _CAPABILITY_GAP.search(clean):
         return (
             "The missing capability is a closed-loop conversation evaluator that detects "

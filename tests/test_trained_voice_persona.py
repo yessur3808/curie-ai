@@ -435,6 +435,78 @@ class PersonaTests(unittest.TestCase):
         self.assertTrue(all(line.startswith("- ") for line in examples.splitlines()))
         self.assertLessEqual(len(banter.split()), 10)
 
+    def test_proactive_preference_does_not_claim_an_unperformed_change(self):
+        answer = handle_conversation_contract(
+            "I want better proactive messages, but I do not want spam.", []
+        )
+        revision = handle_conversation_contract(
+            "Fix only that one.",
+            [
+                {
+                    "user": "The second one is too formal.",
+                    "assistant": "Fair. That one sounds written, not spoken.",
+                }
+            ],
+        )
+
+        self.assertIn("occasional", answer)
+        self.assertNotIn("I'll adjust", answer)
+        self.assertEqual(revision, "You doing all right?")
+
+    def test_everyday_opinions_reflection_and_shortening_are_natural(self):
+        rain = handle_conversation_contract(
+            "Honestly, do you think rainy weather is better than this kind of heat?",
+            [],
+        )
+        pasta = handle_conversation_contract(
+            "Carbonara or arrabbiata? Pick one and tell me why.", []
+        )
+        observed = handle_conversation_contract(
+            "Tell me one thing you've noticed about the way I'm talking in this conversation.",
+            [],
+        )
+        shorter = handle_conversation_contract(
+            "Now give me the short version of that.",
+            [{"user": "What did you notice?", "assistant": observed}],
+        )
+
+        self.assertTrue(rain.startswith("I’d take the rain."))
+        self.assertTrue(pasta.startswith("Arrabbiata tonight."))
+        self.assertIn("direct", observed.casefold())
+        self.assertEqual(shorter, "You’re direct, and you don’t tolerate fluff.")
+
+    def test_workshop_opening_and_landing_are_brief_without_performance(self):
+        opening = handle_conversation_contract(
+            "Curie, workshop simulation. You're on comms, I'm testing a flight rig. Ready?",
+            [],
+        )
+        landed = handle_conversation_contract(
+            "Skip ahead. I landed. Don't congratulate me.", []
+        )
+
+        self.assertEqual(opening, "Ready. Give me the first reading.")
+        self.assertEqual(landed, "Noted. On to the next problem.")
+
+    def test_operator_awake_and_priority_questions_are_grounded_and_brief(self):
+        awake = handle_conversation_contract(
+            "Morning, Curie. Brutally short version: are you awake?", []
+        )
+        priority = handle_conversation_contract(
+            "The workshop lights are on, my flight is delayed, and I have a meeting "
+            "in twenty minutes. What gets my attention first?",
+            [],
+        )
+        pushback = handle_conversation_contract(
+            "I was going to ignore the meeting and fix the lights. Tell me why that's a bad plan.",
+            [],
+        )
+
+        self.assertEqual(awake, "Morning. I’m awake.")
+        self.assertTrue(priority.startswith("The meeting."))
+        self.assertLessEqual(len(priority.split()), 15)
+        self.assertIn("deadline", pushback)
+        self.assertLessEqual(len(pushback.split()), 24)
+
     def test_proactive_capability_and_care_requests_are_grounded(self):
         proactive = handle_conversation_contract(
             "What is one capability you should proactively suggest at the right moment?",

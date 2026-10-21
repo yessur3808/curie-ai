@@ -234,7 +234,7 @@ def _practical_capability_summary(report: dict[str, Any]) -> str:
     groups = (
         (
             {"calendar_list", "calendar_create", "reminder_create"},
-            "- Review your calendar and prepare events or reminders for approval",
+            "- Prepare calendar events or reminders for approval, and review them after access is verified",
         ),
         (
             {"flight_track", "navigation_skill", "places_search"},
@@ -275,7 +275,7 @@ def _one_capability_answer(report: dict[str, Any]) -> str:
     preferred = (
         (
             "calendar_create",
-            "I can review your connected calendar, find a workable time, and prepare an event for your approval.",
+            "I can prepare a calendar event from your details and show you the exact draft for approval. I verify access before claiming it was added.",
         ),
         (
             "home_control",
