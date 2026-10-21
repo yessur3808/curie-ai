@@ -94,9 +94,9 @@ class SocialConversationService:
             text.strip()
         ) or self._HOT_NO_RAIN_UPDATE.fullmatch(text.strip()):
             reply = (
-                "Ah, got it. Hot and stuffy, not rainy."
+                "Oof. That kind of stuffy heat is miserable."
                 if re.search(r"\b(?:hot|warm|humid|muggy|stuffy)\b", text, re.I)
-                else "Ah, got it. No rain, then."
+                else "Got it. No rain, then."
             )
             return ResponseCandidate(reply, "social:weather_correction")
         acknowledgement = self._ACKNOWLEDGEMENT.fullmatch(text.strip())

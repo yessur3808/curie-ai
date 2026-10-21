@@ -62,6 +62,43 @@ def test_dashboard_history_suppresses_repeated_french_and_invented_experience():
     assert result == "Honesty matters more than easy agreement."
 
 
+def test_casual_reply_drops_stiff_opening_and_generic_flattery():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    result = policy.finalize(
+        "Ah, voilà. I understand perfectly. You speak clearly and directly. "
+        "It's a refreshing approach.",
+        "Tell me one thing you've noticed about how I'm talking.",
+    )
+
+    assert result == "You speak clearly and directly."
+
+
+def test_lightweight_opinion_is_bounded_without_clipping_complex_topics():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    result = policy.finalize(
+        "Arrabbiata. It is punchy, simple, and much harder to fuss over than a sauce "
+        "built around eggs and cheese. You also get plenty of garlic and chili without "
+        "having to babysit the pan. Keep it simple and finish it with parsley.",
+        "Carbonara or arrabbiata? Pick one and tell me why.",
+    )
+
+    assert result == (
+        "Arrabbiata. It is punchy, simple, and much harder to fuss over than a sauce "
+        "built around eggs and cheese."
+    )
+
+
+def test_generic_reassurance_and_truncated_tail_are_removed():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    result = policy.finalize(
+        "You speak directly. But I'm here to help, and I'll make sure we're on the "
+        "same page. What",
+        "Tell me one thing you've noticed about how I'm talking.",
+    )
+
+    assert result == "You speak directly."
+
+
 def test_brutally_short_request_drops_an_appended_question():
     policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
 

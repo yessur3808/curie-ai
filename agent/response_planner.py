@@ -74,6 +74,18 @@ _FORMAL = re.compile(
     r"cover letter|legal memo|formal report)\b",
     re.I,
 )
+_LIGHTWEIGHT_OPINION = re.compile(
+    r"\b(?:do you think|what do you think|pick one|which (?:one|would you)|"
+    r"your opinion|give me (?:one|your) opinion|tell me why (?:that|this|it)|"
+    r"be honest|terrible idea or visionary)\b",
+    re.I,
+)
+_COMPLEX_DOMAIN = re.compile(
+    r"\b(?:code|api|database|algorithm|architecture|security|network|model|"
+    r"medical|medicine|legal|contract|financial|investment|trading|physics|"
+    r"engineering|statistics|research|diagnos(?:e|is)|risk analysis)\b",
+    re.I,
+)
 
 
 def _interaction_kind(text: str) -> str:
@@ -107,6 +119,12 @@ def _length_target(text: str, verbosity: str, *, urgent: bool, interaction: str)
         return "brief"
     if _EXPLICIT_DEPTH.search(text):
         return "deep"
+    if (
+        len(text.split()) <= 32
+        and _LIGHTWEIGHT_OPINION.search(text)
+        and not _COMPLEX_DOMAIN.search(text)
+    ):
+        return "brief"
     if _FOCUSED.search(text) or len(text.split()) > 28:
         return "deep" if verbosity == "detailed" else "focused"
     if verbosity == "detailed":

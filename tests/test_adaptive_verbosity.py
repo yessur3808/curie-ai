@@ -15,6 +15,23 @@ def test_simple_question_is_brief_depth():
     assert context["response_depth"] == "brief"
 
 
+def test_everyday_opinion_with_a_reason_stays_brief():
+    context = PersonalityAdapter().infer_context(
+        "Carbonara or arrabbiata? Pick one and tell me why."
+    )
+
+    assert context["interaction_kind"] == "explanation"
+    assert context["response_depth"] == "brief"
+
+
+def test_technical_choice_still_gets_focused_depth():
+    context = PersonalityAdapter().infer_context(
+        "Pick one database architecture and tell me why."
+    )
+
+    assert context["response_depth"] == "focused"
+
+
 def test_complex_request_is_focused_depth():
     context = PersonalityAdapter().infer_context(
         "Compare these database designs and recommend one"

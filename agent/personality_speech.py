@@ -18,13 +18,13 @@ def _trim_social_reply(response: str, max_words: int = 28) -> str:
     return " ".join(first.split()[:max_words]).rstrip(",;:-") + "…"
 
 
-def _trim_brief_reply(response: str, max_words: int = 85) -> str:
+def _trim_brief_reply(response: str, max_words: int = 60) -> str:
     """Enforce a useful ceiling for simple questions without clipping code or lists."""
     if "```" in response or len(response.split()) <= max_words:
         return response
     sentences = re.findall(r".+?(?:[.!?](?=\s|$)|$)", response.strip(), re.DOTALL)
     selected: list[str] = []
-    for sentence in sentences[:3]:
+    for sentence in sentences[:2]:
         if len((" ".join(selected + [sentence.strip()])).split()) > max_words:
             break
         selected.append(sentence.strip())

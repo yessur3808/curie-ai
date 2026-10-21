@@ -74,7 +74,7 @@ def test_weather_and_no_tool_corrections_get_brief_human_acknowledgements():
     no_query = service.handle("No need to use any query")
 
     assert weather is not None
-    assert weather.text == "Ah, got it. Hot and stuffy, not rainy."
+    assert weather.text == "Oof. That kind of stuffy heat is miserable."
     assert weather.model_used == "social:weather_correction"
     assert no_query is not None
     assert no_query.text == "Got it. No query needed."
@@ -95,5 +95,5 @@ def test_natural_presence_weather_update_and_close_use_the_social_fast_path():
     closing = service.handle("That'll do, merci.")
 
     assert presence.text == "Bonjour. Awake and ready."
-    assert weather.text == "Ah, got it. Hot and stuffy, not rainy."
+    assert weather.text == "Oof. That kind of stuffy heat is miserable."
     assert closing.text == "Anytime."

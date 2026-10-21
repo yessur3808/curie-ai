@@ -13,6 +13,24 @@ class ModelConversationService:
         self.local_manager = local_manager
 
     @staticmethod
+    def is_lightweight_opinion(user_text: str) -> bool:
+        """Keep everyday choices and opinions on the conversational model path."""
+        text = user_text.strip().casefold()
+        asks_for_opinion = re.search(
+            r"\b(?:do you think|what do you think|pick one|which (?:one|would you)|"
+            r"your opinion|give me (?:one|your) opinion|tell me why (?:that|this|it)|"
+            r"be honest)\b",
+            text,
+        )
+        complex_domain = re.search(
+            r"\b(?:code|api|database|algorithm|architecture|security|network|model|"
+            r"medical|medicine|legal|contract|financial|investment|trading|physics|"
+            r"engineering|statistics|research|diagnos(?:e|is)|risk analysis)\b",
+            text,
+        )
+        return bool(asks_for_opinion and not complex_domain and len(text.split()) <= 32)
+
+    @staticmethod
     def token_budget(user_text: str, role: str | None = None) -> int:
         """Choose a measured output ceiling without reducing requested depth."""
         text = user_text.strip().casefold()
@@ -27,10 +45,12 @@ class ModelConversationService:
             return 1024
         selected_role = role or ModelConversationService.model_role(user_text)
         if selected_role in {"reasoning", "coding"}:
-            return 768
+            return 640
         if selected_role == "fast":
-            return 256
-        return 384
+            return 192
+        if ModelConversationService.is_lightweight_opinion(user_text):
+            return 224
+        return 256
 
     @staticmethod
     def model_role(user_text: str) -> str:
@@ -46,6 +66,8 @@ class ModelConversationService:
             or len(re.findall(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", text)) >= 2
         ):
             return "coding"
+        if ModelConversationService.is_lightweight_opinion(user_text):
+            return "general"
         if re.search(
             r"\b(?:reason|analyse|analyze|evaluate|compare|tradeoffs?|prove|math|"
             r"calculate|architecture|design|strategy|plan|research|investigate|"
@@ -80,18 +102,24 @@ class ModelConversationService:
     @staticmethod
     def quality_prompt(prompt: str, role: str) -> str:
         """Add one-pass internal verification for complex work, without extra calls."""
-        if role not in {"reasoning", "coding"}:
-            return prompt
-        guidance = (
-            "Internal answer-quality policy: identify the user's actual goal and all "
-            "referenced entities; silently form a concise plan; check constraints, "
-            "contradictions, calculations, and tool evidence; then return only the "
-            "direct final answer. Do not reveal private chain-of-thought. Distinguish "
-            "verified facts from assumptions and ask only when an unresolved ambiguity "
-            "would materially change the result. When asked to choose or give an opinion, "
-            "take a defensible position instead of listing both sides. Never say you agree "
-            "and then argue the opposite."
-        )
+        if role in {"reasoning", "coding"}:
+            guidance = (
+                "Internal answer-quality policy: identify the user's actual goal and all "
+                "referenced entities; silently form a concise plan; check constraints, "
+                "contradictions, calculations, and tool evidence; then return only the "
+                "direct final answer. Do not reveal private chain-of-thought. Distinguish "
+                "verified facts from assumptions and ask only when an unresolved ambiguity "
+                "would materially change the result. When asked to choose or give an opinion, "
+                "take a defensible position instead of listing both sides. Never say you agree "
+                "and then argue the opposite."
+            )
+        else:
+            guidance = (
+                "Final conversational check: answer the newest message directly in plain, "
+                "complete sentences. Use a natural everyday voice, take a position when one "
+                "is requested, and do not add flattery, a generic offer to help, or a trailing "
+                "question. Do not infer a personality trait beyond the conversation evidence."
+            )
         stripped = prompt.rstrip()
         if stripped.endswith("Assistant:"):
             return (

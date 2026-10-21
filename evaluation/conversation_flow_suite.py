@@ -168,7 +168,7 @@ def run() -> dict:
         "weather_correction_is_acknowledged": replies[
             "No rain, quite hot and stuffy actually"
         ]
-        == "Ah, got it. Hot and stuffy, not rainy.",
+        == "Oof. That kind of stuffy heat is miserable.",
         "tool_rejection_is_acknowledged": replies["No need to use any query"]
         == "Got it. No query needed.",
         "presence_check_is_brief_and_ready": replies["Bonjour, you alive in there?"]
@@ -176,7 +176,7 @@ def run() -> dict:
         "embedded_weather_update_is_natural": replies[
             "I'm surviving. It's hot and stuffy here, but at least there is no rain."
         ]
-        == "Ah, got it. Hot and stuffy, not rainy.",
+        == "Oof. That kind of stuffy heat is miserable.",
         "casual_close_has_no_empty_offer": replies["That'll do, merci."] == "Anytime.",
         "assistant_question_survives_restart": direct_answer.kind
         is TransitionClass.DIRECT_ANSWER,

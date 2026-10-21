@@ -55,6 +55,18 @@ class PersonalityAdapter:
         r"build|create|draft|write|summari[sz]e|evaluate|investigate)\b",
         re.IGNORECASE,
     )
+    _LIGHTWEIGHT_OPINION_PATTERNS = re.compile(
+        r"\b(?:do you think|what do you think|pick one|which (?:one|would you)|"
+        r"your opinion|give me (?:one|your) opinion|tell me why (?:that|this|it)|"
+        r"be honest|terrible idea or visionary)\b",
+        re.IGNORECASE,
+    )
+    _COMPLEX_DOMAIN_PATTERNS = re.compile(
+        r"\b(?:code|api|database|algorithm|architecture|security|network|model|"
+        r"medical|medicine|legal|contract|financial|investment|trading|physics|"
+        r"engineering|statistics|research|diagnos(?:e|is)|risk analysis)\b",
+        re.IGNORECASE,
+    )
     _COMMAND_PATTERNS = re.compile(
         r"^(?:(?:please\s+)|(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?))?"
         r"(?:turn|switch|set|start|stop|open|close|lock|unlock|"
@@ -112,7 +124,14 @@ class PersonalityAdapter:
             response_depth = "deep"
         elif interaction_kind in {"command", "correction"}:
             response_depth = "brief"
-        elif self._SUBSTANTIVE_PATTERNS.search(text) or len(text.split()) > 28:
+        elif (
+            self._SUBSTANTIVE_PATTERNS.search(text)
+            and not (
+                len(text.split()) <= 32
+                and self._LIGHTWEIGHT_OPINION_PATTERNS.search(text)
+                and not self._COMPLEX_DOMAIN_PATTERNS.search(text)
+            )
+        ) or len(text.split()) > 28:
             response_depth = "focused"
         else:
             response_depth = "brief"

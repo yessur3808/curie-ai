@@ -16,13 +16,25 @@ def test_explicit_depth_keeps_a_large_generation_budget():
 
 
 def test_complex_roles_get_more_room_without_slowing_fast_work():
-    assert ModelConversationService.token_budget("Recommend the best option") == 768
-    assert ModelConversationService.token_budget("debug this Python code") == 768
-    assert ModelConversationService.token_budget("Summarize this document") == 256
+    assert ModelConversationService.token_budget("Recommend the best option") == 640
+    assert ModelConversationService.token_budget("debug this Python code") == 640
+    assert ModelConversationService.token_budget("Summarize this document") == 192
 
 
 def test_normal_turns_use_a_balanced_generation_budget():
-    assert ModelConversationService.token_budget("What causes rain?") == 384
+    assert ModelConversationService.token_budget("What causes rain?") == 256
+
+
+def test_lightweight_opinions_use_the_conversational_model_and_small_budget():
+    prompt = "Carbonara or arrabbiata? Pick one and tell me why."
+    assert ModelConversationService.model_role(prompt) == "general"
+    assert ModelConversationService.token_budget(prompt) == 224
+    assert (
+        ModelConversationService.model_role(
+            "Pick one database architecture and tell me why"
+        )
+        == "reasoning"
+    )
 
 
 def test_task_content_selects_specialized_model_roles():
@@ -42,15 +54,13 @@ def test_task_content_selects_specialized_model_roles():
     assert (
         ModelConversationService.model_role("Recommend the best option") == "reasoning"
     )
-    assert (
-        ModelConversationService.model_role("Pick one and tell me why") == "reasoning"
-    )
+    assert ModelConversationService.model_role("Pick one and tell me why") == "general"
     assert (
         ModelConversationService.model_role("Push back if you disagree") == "reasoning"
     )
     assert (
         ModelConversationService.model_role("Give me one opinion you can defend")
-        == "reasoning"
+        == "general"
     )
 
 
@@ -64,6 +74,16 @@ def test_complex_work_is_stable_and_gets_an_internal_quality_check():
     assert "check constraints" in prompt
     assert "Do not reveal private chain-of-thought" in prompt
     assert "Never say you agree and then argue the opposite" in prompt
+    assert prompt.endswith("Assistant:")
+
+
+def test_general_chat_gets_a_final_naturalness_check():
+    prompt = ModelConversationService.quality_prompt(
+        "User: tell me what you noticed\nAssistant:", "general"
+    )
+
+    assert "plain, complete sentences" in prompt
+    assert "generic offer to help" in prompt
     assert prompt.endswith("Assistant:")
 
 

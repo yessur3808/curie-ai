@@ -64,7 +64,7 @@ class PersonalityContext:
         depth = runtime.get("response_depth", "brief")
         depth_rules = {
             "social": "Reply casually in 1–2 short sentences, normally under 25 words. No list, speech, or elaborate self-description.",
-            "brief": "Answer directly in 1–3 sentences, normally under 70 words. Do not add generic advice or a follow-up question unless it is genuinely useful.",
+            "brief": "Answer directly in 1–2 sentences, normally under 55 words. Do not add generic advice or a follow-up question unless it is genuinely useful.",
             "focused": "Give a complete, practical answer with the explanation needed for the task. Keep the language conversational and use structure only when it improves clarity.",
             "deep": "Give a thorough, well-structured answer with rationale, caveats, examples, and actionable detail where they are useful, without padding.",
         }
@@ -93,6 +93,13 @@ class PersonalityContext:
                 "plan as good, smart, healthy, productive, or beneficial, and do not invent a "
                 "wellness explanation such as saying it will help the user reset. React to the "
                 "specific thought naturally; one understated observation or light joke is enough."
+            )
+        if mode == "casual":
+            directives.append(
+                "- Natural conversation: use everyday words and contractions. Do not restate "
+                "the user's message before replying. Avoid formal filler such as 'certainly', "
+                "'I understand perfectly', 'it is a refreshing approach', or 'Ah, voilà'. "
+                "Sound like a perceptive friend, not a customer-service script."
             )
 
         if values:

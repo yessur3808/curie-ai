@@ -31,11 +31,26 @@ LEADING_FRENCH_FILLER_PATTERN = re.compile(
     r"^\s*(?:(?:ah|oh)[,!. ]+)?(?:voilà|mon dieu|monsieur|madame|mon ami)" r"[,!. ]+",
     re.I,
 )
+REDUNDANT_ACKNOWLEDGEMENT_OPENING_PATTERN = re.compile(
+    r"^\s*(?:ah[,!. ]+)?(?:i understand(?: perfectly)?|i see(?: exactly)? what you mean)"
+    r"[.!]+\s+",
+    re.I,
+)
+GENERIC_FLATTERY_SENTENCE_PATTERN = re.compile(
+    r"(?:^|(?<=[.!?])\s+)(?:it(?:'s| is)|that(?:'s| is))\s+"
+    r"(?:a\s+)?(?:refreshing|admirable|wonderful)\s+(?:approach|quality|way to be)"
+    r"[.!?]?",
+    re.I,
+)
 GENERIC_FOLLOWUP_PATTERN = re.compile(
     r"(?:\s+|^)(?:would you like (?:me to )?.+|what would you like me to .+|"
     r"how can i (?:help|assist).+|let me know if (?:you need|i can|there(?:'s| is)) .+|"
     r"let me know (?:whether )?there(?:'s| is) anything else.+|"
     r"i['’]m here if you need anything.+)\?*\s*$",
+    re.I,
+)
+GENERIC_REASSURANCE_SENTENCE_PATTERN = re.compile(
+    r"(?:^|(?<=[.!?])\s+)(?:but\s+)?i['’]m here to help\b[^.!?\n]*[.!?]?",
     re.I,
 )
 INVENTED_EXPERIENCE_PATTERN = re.compile(
@@ -89,6 +104,18 @@ OPERATIONAL_REPLY_PATTERN = re.compile(
 EXPLICIT_BRIEF_PATTERN = re.compile(
     r"\b(?:keep it brief|be brief|brief answer|no follow[- ]?up|brutally short|"
     r"short version|in one sentence|one-sentence|one line|no lecture|spare me (?:the )?speech)\b",
+    re.I,
+)
+LIGHTWEIGHT_OPINION_PATTERN = re.compile(
+    r"\b(?:do you think|what do you think|pick one|which (?:one|would you)|"
+    r"your opinion|give me (?:one|your) opinion|tell me why (?:that|this|it)|"
+    r"be honest)\b",
+    re.I,
+)
+COMPLEX_DOMAIN_PATTERN = re.compile(
+    r"\b(?:code|api|database|algorithm|architecture|security|network|model|"
+    r"medical|medicine|legal|contract|financial|investment|trading|physics|"
+    r"engineering|statistics|research|diagnos(?:e|is)|risk analysis)\b",
     re.I,
 )
 EXACT_BULLET_PATTERN = re.compile(
@@ -216,6 +243,24 @@ def remove_redundant_opening(response: str, user_text: str) -> str:
     return response.strip()
 
 
+def remove_trailing_fragment(response: str) -> str:
+    """Drop a tiny unfinished tail left when local generation reaches its cap."""
+
+    clean = response.strip()
+    match = re.search(r"([.!?])\s+([^.!?\n]+)$", clean)
+    if not match:
+        return clean
+    tail = match.group(2).strip()
+    if len(tail.split()) <= 3 and re.fullmatch(
+        r"(?:and|but|so|because|what|which|where|when|why|how|the|a|an|to|for)"
+        r"(?:\s+\w+){0,2}",
+        tail,
+        re.I,
+    ):
+        return clean[: match.start(2)].rstrip()
+    return clean
+
+
 def normalize_explicit_bullets(response: str, user_text: str) -> str:
     """Honor a requested bullet count when a model emits one long list line."""
 
@@ -282,6 +327,22 @@ def enforce_line_and_tone_constraints(response: str, user_text: str) -> str:
         words = clean.split()
         if len(words) > 45:
             clean = " ".join(words[:45]).rstrip(" ,;:") + "…"
+    lightweight_opinion = (
+        len(user.split()) <= 32
+        and LIGHTWEIGHT_OPINION_PATTERN.search(user)
+        and not COMPLEX_DOMAIN_PATTERN.search(user)
+    )
+    if lightweight_opinion and not structured_list and "```" not in clean:
+        sentences = [
+            part.strip() for part in re.split(r"(?<=[.!?])\s+", clean) if part.strip()
+        ]
+        selected: list[str] = []
+        for sentence in sentences[:2]:
+            if len(" ".join(selected + [sentence]).split()) > 55:
+                break
+            selected.append(sentence)
+        if selected:
+            clean = " ".join(selected)
     return clean
 
 
@@ -444,13 +505,21 @@ class ResponsePolicy:
             FRENCH_MANNERISM_PATTERN.search(message)
             for message in _recent_assistant_messages(history)
         )
-        if recent_french or OPERATIONAL_REPLY_PATTERN.search(str(user_text or "")):
+        if (
+            not EXPLICIT_FRENCH_REQUEST_PATTERN.search(str(user_text or ""))
+            or recent_french
+            or OPERATIONAL_REPLY_PATTERN.search(str(user_text or ""))
+        ):
             styled = LEADING_FRENCH_FILLER_PATTERN.sub("", styled).strip()
+        styled = REDUNDANT_ACKNOWLEDGEMENT_OPENING_PATTERN.sub("", styled).strip()
+        styled = GENERIC_FLATTERY_SENTENCE_PATTERN.sub("", styled).strip()
         styled = INVENTED_EXPERIENCE_PATTERN.sub("", styled).strip()
         styled = INVENTED_EXPERIENCE_PHRASE_PATTERN.sub(
             "based on my reasoning", styled
         ).strip()
         styled = GENERIC_FOLLOWUP_PATTERN.sub("", styled).strip()
+        styled = GENERIC_REASSURANCE_SENTENCE_PATTERN.sub("", styled).strip()
+        styled = remove_trailing_fragment(styled)
         styled = normalize_explicit_bullets(styled, str(user_text or ""))
         styled = enforce_line_and_tone_constraints(styled, str(user_text or ""))
         return condense_priority_answer(styled, str(user_text or ""))
