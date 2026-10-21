@@ -12,8 +12,20 @@ class UnifiedRoutingService:
         self.social_service = social_service
         self.specialist_router = specialist_router
 
-    async def decide(self, text: str, owner_id: str, history=None) -> RoutingDecision:
-        return await route_request(text, owner_id, history=history)
+    async def decide(
+        self,
+        text: str,
+        owner_id: str,
+        history=None,
+        *,
+        allow_model_inference: bool = True,
+    ) -> RoutingDecision:
+        return await route_request(
+            text,
+            owner_id,
+            history=history,
+            allow_model_inference=allow_model_inference,
+        )
 
     async def execute(
         self,

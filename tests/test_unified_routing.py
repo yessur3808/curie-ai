@@ -139,6 +139,16 @@ def test_unrelated_specialist_cannot_intercept_conversation():
     assert decision.selected_capability is None
 
 
+def test_weather_correction_stays_in_conversation_without_model_inference(monkeypatch):
+    async def fail(*args, **kwargs):
+        raise AssertionError("a weather correction should not call the intent model")
+
+    monkeypatch.setattr("agent.intent_router._ask_intent_model", fail)
+    decision = _route("No rain, quite hot and stuffy actually")
+    assert decision.intent == "social"
+    assert decision.selected_capability is None
+
+
 def test_routing_outcomes_are_anonymized_and_corrections_owner_scoped(
     tmp_path, monkeypatch
 ):

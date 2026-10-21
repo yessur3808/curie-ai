@@ -329,6 +329,17 @@ _ACTION_HINT = re.compile(
     r"create|make|run|inspect|analy[sz]e|fix|implement|generate|modify|refactor|turn on|turn off)\b",
     re.I,
 )
+_INFERENCE_REQUEST_FRAME = re.compile(
+    r"(?:\?$|"
+    r"\b(?:can|could|would|will)\s+you\b|"
+    r"^\s*(?:please\s+)?(?:check|show|get|tell|find|search|look\s+up|read|list|"
+    r"track|map|recommend|suggest|research|investigate|analy[sz]e|inspect|open)\b|"
+    r"^\s*(?:i\s+)?(?:need|want|would\s+like)\b|"
+    r"^\s*give\s+me\b|"
+    r"^\s*(?:latest|current|recent|today(?:'s)?)\s+"
+    r"(?:news|weather|forecast|status|results?|information)\b)",
+    re.I,
+)
 _RESPONSE_COMPOSITION = re.compile(
     r"\b(?:format(?:ting)?|write|draft|rewrite|compose)\b.{0,200}"
     r"\b(?:message|reply|response|text|wording|paragraph|heading|bullets?|table|bold|italic|link)\b",
@@ -1440,6 +1451,7 @@ async def resolve_request(
         deterministic is not None
         or _RESPONSE_COMPOSITION.search(text)
         or not _ACTION_HINT.search(text)
+        or not _INFERENCE_REQUEST_FRAME.search(text.strip())
     ):
         return deterministic
     if os.getenv("INTENT_LLM_ENABLED", "true").lower() not in {"1", "true", "yes"}:

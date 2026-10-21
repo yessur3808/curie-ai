@@ -25,6 +25,8 @@ _MULTI_SPLIT = re.compile(r"\s*(?:;|\band then\b|\bthen also\b|\balso\b)\s*", re
 _CONVERSATIONAL_CONTEXT = re.compile(
     r"\b(?:weather|storm|rain)\s+(?:metaphor|symbol|imagery)\b|"
     r"\b(?:my|that)\s+(?:trip|project|memory)\b.{0,80}\b(?:was|felt|seemed)\b|"
+    r"^\s*(?:no\s+(?:rain|storm|snow)\b|(?:it(?:'s| is)\s+)?not\s+"
+    r"(?:raining|rainy|snowing))[^?]*[.! ]*$|"
     r"^(?:there (?:is|are) no\b|there(?:['’]s| is) none\b|"
     r"i (?:do not|don['’]t) have\b)[^?]*[.! ]*$",
     re.I,
@@ -208,7 +210,11 @@ def route_operational_request(
 
 
 async def route_request(
-    text: str, owner_id: str = "", history: Sequence[Any] | None = None
+    text: str,
+    owner_id: str = "",
+    history: Sequence[Any] | None = None,
+    *,
+    allow_model_inference: bool = True,
 ) -> RoutingDecision:
     """Return exactly one explainable decision; model inference is read-only only."""
     clauses = [part for part in _MULTI_SPLIT.split(text.strip()) if part]
@@ -246,11 +252,12 @@ async def route_request(
         )
         _record(owner_id, text, decision)
         return decision
-    inferred = await resolve_request(text, history=history)
-    if inferred:
-        decision = _from_tool_request(inferred)
-        _record(owner_id, text, decision)
-        return decision
+    if allow_model_inference:
+        inferred = await resolve_request(text, history=history)
+        if inferred:
+            decision = _from_tool_request(inferred)
+            _record(owner_id, text, decision)
+            return decision
     decision = _decision(
         "conversation",
         confidence=1.0,
