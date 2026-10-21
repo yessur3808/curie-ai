@@ -39,8 +39,8 @@ Generated JSON reports under `evaluation/reports/` are ignored by Git.
 
 The authoritative structure is `schema.json`. Supported checks are deliberately
 small and deterministic: completeness, API errors, forbidden wording, response
-similarity, per-turn required or forbidden phrases, word limits, bullet counts,
-sentence-mark limits, and trained-voice generation. Add a runner check and unit
+similarity, per-turn required or forbidden phrases, word and line limits, bullet
+counts, sentence-mark limits, and trained-voice generation. Add a runner check and unit
 coverage before using a new check type.
 
 Never add credentials, real private conversations, API tokens, or personally

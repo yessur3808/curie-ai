@@ -46,6 +46,7 @@
               "all_replies_nonempty",
               "bullet_count",
               "forbidden_phrases_absent",
+              "max_lines",
               "max_pair_similarity",
               "max_words",
               "no_error_responses",

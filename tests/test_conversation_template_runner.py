@@ -54,7 +54,11 @@ def _template(*turns):
 def test_stored_templates_are_valid_and_unique():
     catalog = discover_templates()
 
-    assert set(catalog) >= {"natural_conversation", "operator_assistant"}
+    assert set(catalog) >= {
+        "dedsec_mission_banter",
+        "natural_conversation",
+        "operator_assistant",
+    }
     assert all(
         load_template(path)["id"] == template_id
         for template_id, path in catalog.items()
@@ -101,6 +105,10 @@ def test_phrase_similarity_and_format_checks_are_deterministic():
     ).passed
     assert evaluate_check(
         {"id": "voice", "type": "voice_generated", "turn": 1}, transcript
+    ).passed
+    assert evaluate_check(
+        {"id": "one_line", "type": "max_lines", "turn": 2, "value": 1},
+        transcript,
     ).passed
     assert evaluate_check(
         {"id": "different", "type": "max_pair_similarity", "value": 0.8},

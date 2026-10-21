@@ -25,6 +25,7 @@ _SUPPORTED_CHECKS = {
     "all_replies_nonempty",
     "bullet_count",
     "forbidden_phrases_absent",
+    "max_lines",
     "max_pair_similarity",
     "max_words",
     "no_error_responses",
@@ -174,6 +175,7 @@ def validate_template(template: dict[str, Any], *, source: str = "template") -> 
             )
         if check_type in {
             "bullet_count",
+            "max_lines",
             "max_words",
             "terminal_punctuation_max",
             "turn_contains_any",
@@ -186,6 +188,7 @@ def validate_template(template: dict[str, Any], *, source: str = "template") -> 
             )
         if check_type in {
             "bullet_count",
+            "max_lines",
             "max_pair_similarity",
             "max_words",
             "terminal_punctuation_max",
@@ -294,6 +297,13 @@ def evaluate_check(
         limit = float(check["value"])
         passed = observed < limit
         detail = f"maximum similarity {observed:.3f}; required < {limit:.3f}"
+    elif check_type == "max_lines":
+        item = _turn(transcript, check)
+        reply = str(item.get("assistant") or "")
+        observed = sum(bool(line.strip()) for line in reply.splitlines())
+        limit = int(check["value"])
+        passed = observed <= limit
+        detail = f"turn {check['turn']} has {observed} lines; required <= {limit}"
     elif check_type == "max_words":
         item = _turn(transcript, check)
         observed = len(_words(str(item.get("assistant") or "")))
