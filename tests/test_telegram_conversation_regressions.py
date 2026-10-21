@@ -82,6 +82,53 @@ def test_practical_capability_wording_returns_a_compact_useful_subset():
     assert "Calendar List" in answer
 
 
+def test_capability_audit_and_top_three_use_authoritative_discovery():
+    report = _capability_report()
+    report["capabilities"].extend(
+        [
+            {
+                "name": "home_control",
+                "display_name": "Home Control",
+                "description": "Control a uniquely resolved device.",
+                "category": "skill",
+                "available": True,
+                "error": None,
+            },
+            {
+                "name": "flight_track",
+                "display_name": "Flight Track",
+                "description": "Track a flight.",
+                "category": "skill",
+                "available": True,
+                "error": None,
+            },
+        ]
+    )
+    with patch("contracts.catalog.discover_capabilities", return_value=report):
+        audit = handle_capabilities_command(
+            "Curie, capability audit. Simulation only: do not execute tools or change anything. In one short answer, what kinds of work can you genuinely help me with?"
+        )
+        top = handle_capabilities_command(
+            "Which three capabilities are most useful today? Exactly three short bullets."
+        )
+
+    assert "Current capabilities" in audit
+    assert len(top.splitlines()) == 3
+    assert all(line.startswith("- ") for line in top.splitlines())
+
+
+def test_available_calendar_tool_is_not_claimed_connected_without_a_live_check():
+    report = _capability_report()
+    report["capabilities"][1].update(available=True, error=None)
+    with patch("contracts.catalog.discover_capabilities", return_value=report):
+        answer = handle_capabilities_command(
+            "Can you read my Google Calendar right now?"
+        )
+
+    assert "need to verify" in answer
+    assert "your calendar is connected" not in answer.casefold()
+
+
 def test_one_capability_and_safety_limit_use_authoritative_grounding():
     with patch(
         "contracts.catalog.discover_capabilities", return_value=_capability_report()

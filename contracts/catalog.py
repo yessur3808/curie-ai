@@ -101,7 +101,10 @@ def discover_capabilities(*, include_unavailable: bool = False) -> dict[str, Any
 
 
 _GENERAL_CAPABILITY_QUESTION = re.compile(
-    r"^(?:what (?:can|are) you (?:actually )?(?:do|capable of)|"
+    r"^(?:(?:curie[, ]+)?(?:capability audit[.! ]+)?(?:simulation only[.: ]+)?"
+    r"(?:do not execute tools or change anything[.! ]+)?)?"
+    r"(?:in one short answer[, ]+)?(?:what (?:can|are) you (?:actually )?(?:do|capable of)|"
+    r"what kinds? of work can you (?:genuinely |actually )?help me with|"
     r"what (?:useful )?(?:things )?can you (?:actually )?help me with"
     r"(?: from here)?|"
     r"what are your (?:current )?capabilities|"
@@ -137,7 +140,7 @@ _MISSING_DEVICE_QUESTION = re.compile(
 )
 _PLURAL_DEVICE_REASONING_QUESTION = re.compile(
     r"\bturn off (?:both|those|these|all) (?:the )?(?:lights|devices)\b.{0,180}"
-    r"\b(?:how would you|how do you|work out|figure out|know which)\b|"
+    r"\b(?:how would you|how do you|work out|figure out|know which|which (?:lights|devices) do i mean)\b|"
     r"\bturn (?:both|those|these|all)(?: (?:the )?(?:lights|devices))? off\b.{0,180}"
     r"\b(?:what does|how would you|how do you|work out|figure out|know which|refuse to guess)\b|"
     r"\b(?:how would you|how do you|work out|figure out|know which)\b.{0,180}"
@@ -151,7 +154,12 @@ _FOCUSED_CAPABILITY_QUESTION = re.compile(
     r"do you (?:currently |still )?have access to)\s+"
     r"(?P<subject>(?:the |my )?(?:dashboard(?: info(?:rmation)?)?|google calendar|calendar|"
     r"devices?|lights?|smart home|flights?|maps?|places?|voice messages?|audio messages?))"
-    r"(?:\s+directly)?[?.! ]*$",
+    r"(?:\s+(?:directly|right now|for me|today))*[?.! ]*$",
+    re.I,
+)
+_TOP_CAPABILITIES_QUESTION = re.compile(
+    r"\bwhich\s+(?:three|3)\s+capabilities\b.{0,100}\b(?:useful|matter|priority)\b|"
+    r"\b(?:three|3)\s+(?:most useful|top)\s+capabilities\b",
     re.I,
 )
 
@@ -302,6 +310,53 @@ def _one_capability_answer(report: dict[str, Any]) -> str:
     return "I do not currently have a verified optional capability available."
 
 
+def _top_capabilities_answer(report: dict[str, Any]) -> str:
+    """Pick three concrete capabilities from the live registry, never placeholders."""
+
+    active = {
+        str(item.get("name")): item
+        for item in report["capabilities"]
+        if item.get("available")
+    }
+    preferred = (
+        (
+            ("calendar_list", "calendar_create", "reminder_create"),
+            "Calendar and reminders: review commitments and prepare approved events or reminders",
+        ),
+        (
+            ("home_status", "home_control", "home_alias"),
+            "Devices: resolve natural names, control the unique match, and verify its state",
+        ),
+        (
+            ("flight_track", "navigation_skill", "places_search"),
+            "Travel and places: track flights, plan routes, and find nearby places with real links",
+        ),
+        (
+            ("dashboard_snapshot", "hardware", "network_speed"),
+            "Diagnostics: inspect Curie’s dashboard, latency, hardware, and network health",
+        ),
+        (
+            ("research", "weather"),
+            "Research: compare current sources and return a concise, source-linked answer",
+        ),
+    )
+    selected = [
+        label for names, label in preferred if any(name in active for name in names)
+    ][:3]
+    if len(selected) < 3:
+        for item in active.values():
+            label = str(
+                item.get("description") or item.get("display_name") or ""
+            ).strip()
+            if label and label not in selected:
+                selected.append(label.rstrip("."))
+            if len(selected) == 3:
+                break
+    while len(selected) < 3:
+        selected.append("No additional healthy capability is currently verified")
+    return "\n".join(f"- {item}" for item in selected[:3])
+
+
 def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
     lowered = subject.casefold()
     if "voice" in lowered or "audio" in lowered:
@@ -320,7 +375,7 @@ def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
         "device": ("home_status", "home_control"),
         "light": ("home_status", "home_control"),
         "smart home": ("home_status", "home_control"),
-        "flight": ("flight_tracker",),
+        "flight": ("flight_track",),
         "map": ("navigation_skill", "places_search"),
         "place": ("places_search",),
     }
@@ -336,7 +391,11 @@ def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
         if "dashboard" in lowered:
             return "Yes. I can read live health, model, connector, task, resource, and error data from Curie’s dashboard."
         if "calendar" in lowered:
-            return "Yes. I can read your connected Google Calendar and create events after a clear preview and approval."
+            return (
+                "Calendar tools are available, but that does not prove your account connection "
+                "in this turn. I need to verify the connection before reading events; any event "
+                "write still requires a clear preview and approval."
+            )
         if any(word in lowered for word in ("device", "light", "smart home")):
             return "Yes. I can match natural device names, read their live state, control them, and verify the result."
         if "flight" in lowered:
@@ -387,17 +446,21 @@ def handle_capabilities_command(text: str) -> str | None:
     focused = _FOCUSED_CAPABILITY_QUESTION.fullmatch(query)
     general = _GENERAL_CAPABILITY_QUESTION.fullmatch(query)
     one_capability = _ONE_CAPABILITY_QUESTION.fullmatch(cleaned)
+    top_capabilities = _TOP_CAPABILITIES_QUESTION.search(cleaned)
     if (
         command not in {"/capabilities", "/capabilities all"}
         and not focused
         and not general
         and not one_capability
+        and not top_capabilities
     ):
         return None
     include_unavailable = command.endswith(" all") or bool(
-        focused or general or one_capability
+        focused or general or one_capability or top_capabilities
     )
     report = discover_capabilities(include_unavailable=include_unavailable)
+    if top_capabilities:
+        return _top_capabilities_answer(report)
     if one_capability:
         return _one_capability_answer(report)
     if focused:
