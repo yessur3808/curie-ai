@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 import random
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 from memory import local_store
@@ -142,3 +143,52 @@ async def test_live_connected_mode_publishes_and_records_post_id(tmp_path, monke
     assert state["posted_count"] == 1
     assert state["schedule"][0]["status"] == "posted"
     assert state["schedule"][0]["post_id"] == "post-42"
+
+
+@pytest.mark.asyncio
+async def test_payment_required_halts_remaining_posts_for_day(tmp_path, monkeypatch):
+    monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
+    service = XAutopostService(_config(live=True, daily_max=2))
+    request = httpx.Request("POST", "https://api.x.com/2/tweets")
+    response = httpx.Response(
+        402,
+        request=request,
+        json={"title": "CreditsDepleted", "detail": "Credits are required."},
+    )
+
+    with (
+        patch(
+            "services.credential_vault.get_credential",
+            return_value={"connected": True},
+        ),
+        patch.object(service, "_generate", return_value="A careful observation."),
+        patch(
+            "connectors.twitter.create_post",
+            side_effect=httpx.HTTPStatusError(
+                "Payment Required", request=request, response=response
+            ),
+        ) as create_post,
+    ):
+        first = await service.check_once(
+            now=datetime(2026, 9, 15, 23, 30, tzinfo=timezone.utc)
+        )
+        second = await service.check_once(
+            now=datetime(2026, 9, 15, 23, 31, tzinfo=timezone.utc)
+        )
+
+    assert first == {
+        "status": "failed",
+        "http_status": 402,
+        "reason": "x_api_credit_required",
+        "detail": "Credits are required.",
+    }
+    assert second == {
+        "status": "daily_complete",
+        "reason": "x_api_credit_required",
+    }
+    create_post.assert_awaited_once()
+    state = local_store.list_personal_items("owner-1", "x_autopost_state")[-1]
+    assert state["halted_for_day"] is True
+    assert state["halt_reason"] == "x_api_credit_required"
+    failed = [slot for slot in state["schedule"] if slot["status"] == "failed"]
+    assert failed[0]["error"] == "Credits are required."

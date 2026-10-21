@@ -1,9 +1,9 @@
-"""Google OAuth PKCE flow and Gmail API adapter."""
+"""Google OAuth PKCE flow plus Gmail and Calendar API adapters."""
 
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 import hashlib
 import os
@@ -22,6 +22,7 @@ GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
+_CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 
 
 def _pkce() -> tuple[str, str]:
@@ -239,6 +240,114 @@ async def gmail_send(owner_id: str, recipient: str, subject: str, body: str) -> 
         )
         response.raise_for_status()
         return response.json()
+
+
+def _calendar_time(value: dict) -> str:
+    return str(value.get("dateTime") or value.get("date") or "")
+
+
+async def calendar_list_events(
+    owner_id: str,
+    *,
+    time_min: str,
+    time_max: str,
+    query: str = "",
+    limit: int = 10,
+) -> list[dict]:
+    """List a bounded, chronological event window from the primary calendar."""
+    start = datetime.fromisoformat(time_min.replace("Z", "+00:00"))
+    end = datetime.fromisoformat(time_max.replace("Z", "+00:00"))
+    if start.tzinfo is None or end.tzinfo is None:
+        raise ValueError("Calendar windows must include a timezone")
+    if end <= start or end - start > timedelta(days=366):
+        raise ValueError("Calendar window must be positive and no longer than one year")
+    access = await _access_token(owner_id, "calendar")
+    params = {
+        "timeMin": start.isoformat(),
+        "timeMax": end.isoformat(),
+        "singleEvents": "true",
+        "orderBy": "startTime",
+        "maxResults": max(1, min(int(limit), 50)),
+    }
+    if query.strip():
+        params["q"] = query.strip()[:500]
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(
+            f"{_CALENDAR_API}/calendars/primary/events",
+            headers={"Authorization": f"Bearer {access}"},
+            params=params,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    return [
+        {
+            "id": str(row.get("id") or "")[:200],
+            "title": str(row.get("summary") or "Busy")[:300],
+            "start": _calendar_time(row.get("start") or {}),
+            "end": _calendar_time(row.get("end") or {}),
+            "timezone": str(
+                (row.get("start") or {}).get("timeZone")
+                or (row.get("end") or {}).get("timeZone")
+                or ""
+            )[:100],
+            "location": str(row.get("location") or "")[:500],
+            "status": str(row.get("status") or "")[:40],
+            "html_link": str(row.get("htmlLink") or "")[:1000],
+            "untrusted": True,
+        }
+        for row in payload.get("items", [])[: max(1, min(int(limit), 50))]
+        if row.get("status") != "cancelled"
+    ]
+
+
+async def calendar_create_event(
+    owner_id: str,
+    *,
+    summary: str,
+    start: str,
+    end: str,
+    timezone_name: str,
+    description: str = "",
+    location: str = "",
+) -> dict:
+    """Create one event after the tool layer has enforced fresh approval."""
+    token = get_credential(owner_id, "google:calendar") or {}
+    if not token.get("write"):
+        raise PermissionError("Google Calendar write permission has not been granted")
+    start_at = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    end_at = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    if start_at.tzinfo is None or end_at.tzinfo is None:
+        raise ValueError("Event start and end must include a timezone offset")
+    if end_at <= start_at or end_at - start_at > timedelta(days=30):
+        raise ValueError("Event end must follow start and be within 30 days")
+    if not summary.strip():
+        raise ValueError("Event title cannot be empty")
+    access = await _access_token(owner_id, "calendar")
+    body = {
+        "summary": summary.strip()[:300],
+        "start": {"dateTime": start_at.isoformat(), "timeZone": timezone_name[:100]},
+        "end": {"dateTime": end_at.isoformat(), "timeZone": timezone_name[:100]},
+    }
+    if description.strip():
+        body["description"] = description.strip()[:5000]
+    if location.strip():
+        body["location"] = location.strip()[:500]
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(
+            f"{_CALENDAR_API}/calendars/primary/events",
+            headers={"Authorization": f"Bearer {access}"},
+            json=body,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    return {
+        "id": payload.get("id"),
+        "status": payload.get("status"),
+        "html_link": payload.get("htmlLink"),
+        "summary": payload.get("summary"),
+        "start": _calendar_time(payload.get("start") or {}),
+        "end": _calendar_time(payload.get("end") or {}),
+    }
 
 
 def disconnect_google(owner_id: str, product: str = "gmail") -> bool:

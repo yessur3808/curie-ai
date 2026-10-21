@@ -22,6 +22,13 @@ def isolated_runtime(monkeypatch, tmp_path):
 
     monkeypatch.delenv("POSTGRES_HOST", raising=False)
     monkeypatch.delenv("MONGODB_URI", raising=False)
+    # The production circuit breaker defaults to ~/.curie so it survives
+    # process restarts. Tests must never read from or write to that live state:
+    # a deliberately secret-shaped fixture once tripped the real pipeline and
+    # silently forced every subsequent production turn onto the legacy path.
+    monkeypatch.setenv(
+        "CURIE_PIPELINE_ROLLOUT_STATE", str(tmp_path / "pipeline-rollout.json")
+    )
     monkeypatch.setattr(local_store, "_PATH", tmp_path / "memory.sqlite3")
     workspace = tmp_path / "workspace"
     projects = tmp_path / "projects"

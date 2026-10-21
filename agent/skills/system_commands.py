@@ -606,6 +606,13 @@ def handle_system_command(
     if _HELP_TRIGGERS.search(stripped):
         return _HELP_TEXT
 
+    if re.fullmatch(r"/diagnostics(?:\s+(?:summary|verbose))?", stripped, re.I):
+        from services.self_diagnostics import render_diagnostics
+
+        return render_diagnostics(
+            str(internal_id or ""), verbose="verbose" in stripped.casefold()
+        )
+
     cmd = detect_system_command(stripped)
     if not cmd:
         return None
@@ -630,6 +637,13 @@ def handle_system_command(
             return _render_tasks()
 
         if cmd == "doctor":
+            if re.search(r"\bdiagnos(?:e|is|tics?)\b", stripped, re.I):
+                from services.self_diagnostics import render_diagnostics
+
+                return render_diagnostics(
+                    str(internal_id or ""),
+                    verbose="verbose" in stripped.casefold(),
+                )
             return _render_doctor()
 
         if cmd == "logs":

@@ -149,6 +149,35 @@ class WeatherTool:
             )
             return ToolResult(text=text, data=forecast, source=forecast.get("source"))
 
+        forward_rain_query = bool(
+            re.search(
+                r"\b(?:will|forecast|chance|likely|later|today|tomorrow)\b", query, re.I
+            )
+            and re.search(r"\b(?:rain|umbrella|precipitation)\b", query, re.I)
+        )
+        if forward_rain_query:
+            offset = 1 if "tomorrow" in query.casefold() else 0
+            target = date.today() + timedelta(days=offset)
+            forecast = await get_weather_range(city, target, target)
+            day = forecast["days"][0]
+            probability = int(day.get("precipitation_probability") or 0)
+            amount = float(day.get("rain_mm") or 0)
+            timing = "tomorrow" if offset else "today"
+            if probability >= 60:
+                opening = "Rain is likely"
+            elif probability >= 30:
+                opening = "Rain is possible"
+            elif probability > 0:
+                opening = "Rain looks unlikely, but it is not ruled out"
+            else:
+                opening = "No rain is currently forecast"
+            text = (
+                f"{opening} in {forecast['city']} {timing}: the daily forecast shows "
+                f"up to a {probability}% precipitation chance and {amount:g} mm of rain. "
+                "Source: Open-Meteo."
+            )
+            return ToolResult(text=text, data=forecast, source=forecast.get("source"))
+
         weather = await get_weather(
             city, day_offset=1 if "tomorrow" in query.lower() else 0
         )

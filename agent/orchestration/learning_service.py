@@ -20,6 +20,7 @@ class ConversationLearningService:
         *,
         source_message_id: str = "",
         source_channel: str = "unknown",
+        history=None,
     ) -> None:
         try:
             learner = self.learner
@@ -27,7 +28,7 @@ class ConversationLearningService:
                 from memory.learning import learn_from_exchange
 
                 learner = learn_from_exchange
-            if source_message_id or source_channel != "unknown":
+            if source_message_id or source_channel != "unknown" or history is not None:
                 self.executor.submit(
                     learner,
                     internal_id,
@@ -35,6 +36,7 @@ class ConversationLearningService:
                     response,
                     source_message_id=source_message_id,
                     source_channel=source_channel,
+                    history=history,
                 )
             else:
                 self.executor.submit(learner, internal_id, user_text, response)

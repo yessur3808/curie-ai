@@ -29,10 +29,13 @@ from .voice_persona import (
     dashboard_scope_prompt,
     finalize_live_response,
     live_conversation_prompt,
+    needs_english_rewrite,
     persona_prompt,
+    select_relevant_history,
     delivery_settings,
     persona_revision,
 )
+from contracts.catalog import handle_capabilities_command
 from .runtime import (
     TrainedVoiceBusy,
     TrainedVoiceError,
@@ -68,6 +71,26 @@ def refresh_persona():
         persona = load_persona()
         persona_mtime = mtime
     return persona
+
+
+def active_voice_id(active=None):
+    selected_persona = active or refresh_persona()
+    voice = (
+        selected_persona.get("voice")
+        if isinstance(selected_persona.get("voice"), dict)
+        else {}
+    )
+    value = str(voice.get("trained_id") or selected_persona.get("name") or "curie")
+    return re.sub(r"[^a-z0-9_-]+", "-", value.casefold()).strip("-") or "curie"
+
+
+def active_voice_health(active=None):
+    voice_id = active_voice_id(active)
+    return (
+        trained_voice_health()
+        if voice_id in {"curie", "default"}
+        else trained_voice_health(voice_id=voice_id)
+    )
 
 
 history = collections.OrderedDict()
@@ -112,12 +135,19 @@ def custom_config():
 
 
 def reference_voice_ready():
-    return trained_voice_health()["ready"]
+    return active_voice_health()["ready"]
 
 
 async def reference_voice(text, output, delivery):
     try:
-        metrics = await synthesize_trained_voice(text, output, delivery)
+        voice_id = active_voice_id()
+        metrics = (
+            await synthesize_trained_voice(text, output, delivery)
+            if voice_id in {"curie", "default"}
+            else await synthesize_trained_voice(
+                text, output, delivery, voice_id=voice_id
+            )
+        )
     except TrainedVoiceBusy as error:
         raise HTTPException(
             429, "The trained voice is busy. Try again shortly."
@@ -145,7 +175,8 @@ def voice_status():
         and importlib.util.find_spec("TTS")
     )
     piper = bool(get_piper_executable() and get_ffmpeg_executable())
-    trained_health = trained_voice_health()
+    active = refresh_persona()
+    trained_health = active_voice_health(active)
     reference = bool(trained_health["ready"])
     trained = bool(trained_health["trained"])
     return {
@@ -156,6 +187,7 @@ def voice_status():
         "custom": reference_voice_ready() or custom_ready,
         "revision": trained_health.get("revision") or "reference-v1",
         "persona": persona.get("name"),
+        "voiceId": active_voice_id(active),
         "personaRevision": persona_revision(persona),
         "owner": "curie-ai",
         "description": (
@@ -208,7 +240,9 @@ async def make_voice(text, profile, mode="professional"):
             if proc.returncode:
                 raise HTTPException(503, "Voice encoding failed")
     elif trained_voice_required():
-        raise HTTPException(503, "Curie's trained voice is not available")
+        raise HTTPException(
+            503, "The active personality's trained voice is not available"
+        )
     elif profile == "custom":
         with tempfile.NamedTemporaryFile(suffix=".wav") as wav:
             from services.custom_voice import (
@@ -428,11 +462,22 @@ async def speak_stream(req: Speech):
                         old.unlink(missing_ok=True)
                 if reference_voice_ready():
                     with tempfile.NamedTemporaryFile(suffix=".wav") as combined:
-                        stream = trained_voice_stream_events(
-                            req.text,
-                            combined.name,
-                            audio_dir,
-                            delivery,
+                        voice_id = active_voice_id(active)
+                        stream = (
+                            trained_voice_stream_events(
+                                req.text,
+                                combined.name,
+                                audio_dir,
+                                delivery,
+                            )
+                            if voice_id in {"curie", "default"}
+                            else trained_voice_stream_events(
+                                req.text,
+                                combined.name,
+                                audio_dir,
+                                delivery,
+                                voice_id=voice_id,
+                            )
                         )
                         try:
                             async for event in stream:
@@ -488,17 +533,18 @@ async def chat(req: Message, request: Request):
                 else history.get(req.user_id, [])
             )
         )
+        context_turns = select_relevant_history(turns, user)
         active = refresh_persona()
         personality = PersonalityContext(active)
         directives = (
             []
             if req.ephemeral
-            else personality.build_prompt_directives(user, history=turns)
+            else personality.build_prompt_directives(user, history=context_turns)
         )
         mode = (
             "professional"
             if req.ephemeral
-            else personality.infer_runtime_context(user, history=turns).get(
+            else personality.infer_runtime_context(user, history=context_turns).get(
                 "mode", "casual"
             )
         )
@@ -509,8 +555,8 @@ async def chat(req: Message, request: Request):
             + dashboard_scope_prompt(bool(snapshot.strip()))
             + "\n"
             + snapshot
-            + "\nPrevious conversation:\n"
-            + json.dumps(turns, ensure_ascii=False)
+            + "\nDirectly relevant previous conversation:\n"
+            + json.dumps(context_turns, ensure_ascii=False)
             + "\nUser: "
             + user
             + "\nAssistant:"
@@ -520,28 +566,68 @@ async def chat(req: Message, request: Request):
                 "\nUser: ",
                 "\n" + live_conversation_prompt() + "\nUser: ",
             )
-        candidate = await until_disconnect(
-            request,
-            model.generate(
-                prompt,
-                user,
-                0.35,
-                owner_id="dashboard:" + req.user_id,
-                request_id=(
-                    f"voice:{session_id}:{session_token}"
-                    if session_id is not None
-                    else str(uuid.uuid4())
-                ),
-            ),
+        request_id = (
+            f"voice:{session_id}:{session_token}"
+            if session_id is not None
+            else str(uuid.uuid4())
         )
-        text = candidate.text or "No response was available."
-        text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
-        if text.startswith("[Error"):
-            raise HTTPException(503, "Curie’s configured model could not answer")
+        grounded = handle_capabilities_command(user)
+        grounded_response = grounded is not None
+        if grounded is not None:
+            text = grounded
+            model_used = "capability_discovery"
+        else:
+            candidate = await until_disconnect(
+                request,
+                model.generate(
+                    prompt,
+                    user,
+                    0.35,
+                    owner_id="dashboard:" + req.user_id,
+                    request_id=request_id,
+                ),
+            )
+            text = candidate.text or "No response was available."
+            text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+            if text.startswith("[Error"):
+                raise HTTPException(503, "Curie’s configured model could not answer")
+            model_used = candidate.model_used
+            if needs_english_rewrite(text, user):
+                rewrite_prompt = (
+                    "Rewrite this reply in natural, grammatically correct English. Preserve "
+                    "its meaning, warmth, brevity, and Curie's understated personality. Do "
+                    "not add facts, advice, a question, or French. Return only the reply.\n\n"
+                    f"Reply:\n{text}\n\nNatural English reply:"
+                )
+                rewritten = await until_disconnect(
+                    request,
+                    model.generate(
+                        rewrite_prompt,
+                        user,
+                        0.2,
+                        owner_id="dashboard:" + req.user_id,
+                        request_id=request_id + ":english-rewrite",
+                    ),
+                )
+                candidate_text = re.sub(
+                    r"<think>[\s\S]*?</think>", "", rewritten.text or ""
+                ).strip()
+                if (
+                    candidate_text
+                    and not candidate_text.startswith("[Error")
+                    and not needs_english_rewrite(candidate_text, user)
+                ):
+                    text = candidate_text
+                    model_used = rewritten.model_used + ":english_rewrite"
         if not req.ephemeral:
-            text = ResponsePolicy(
+            response_policy = ResponsePolicy(
                 active, personality, minimal_sanitization=True
-            ).finalize(text, user, history=turns)
+            )
+            text = (
+                response_policy.sanitize(text)
+                if grounded_response
+                else response_policy.finalize(text, user, history=context_turns)
+            )
             if req.live:
                 text = finalize_live_response(
                     text, user, has_snapshot=bool(snapshot.strip())
@@ -570,7 +656,7 @@ async def chat(req: Message, request: Request):
         return {
             "text": text,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "model_used": candidate.model_used,
+            "model_used": model_used,
             "processing_time_ms": round((time.perf_counter() - started) * 1000),
             "voice_url": voice_url,
             "session_id": session_id,

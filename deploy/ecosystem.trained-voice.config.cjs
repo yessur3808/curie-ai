@@ -25,6 +25,14 @@ module.exports = { apps: [{
     RUN_CODING_SERVICE: 'false',
     ENABLE_PROACTIVE_MESSAGING: 'false',
     HOME_INVENTORY_WARM_ON_STARTUP: 'false',
-    X_AUTOPOST_ENABLED: 'false'
+    X_AUTOPOST_ENABLED: 'false',
+    // Dashboard conversation favors the compact model for normal chat, while
+    // analysis and code still route to Curie's stronger specialist models.
+    LLM_MODELS: process.env.CURIE_DASHBOARD_LLM_MODELS || 'Qwen3-4B-Q4_K_M.gguf,Qwen3.5-9B-Q4_K_M.gguf,Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf',
+    LLM_GENERAL_MODEL: process.env.CURIE_DASHBOARD_GENERAL_MODEL || 'Qwen3-4B-Q4_K_M.gguf',
+    LLM_FAST_MODEL: process.env.CURIE_DASHBOARD_FAST_MODEL || 'Qwen3-4B-Q4_K_M.gguf',
+    LLM_REASONING_MODEL: process.env.CURIE_DASHBOARD_REASONING_MODEL || 'Qwen3.5-9B-Q4_K_M.gguf',
+    LLM_CODING_MODEL: process.env.CURIE_DASHBOARD_CODING_MODEL || 'Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf',
+    LLM_MAX_LOADED_MODELS: process.env.CURIE_DASHBOARD_MAX_LOADED_MODELS || '2'
   }
 }] };

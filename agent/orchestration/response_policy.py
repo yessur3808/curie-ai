@@ -16,7 +16,7 @@ ACTION_PATTERN = re.compile(
 THINK_PATTERN = re.compile(r"<think>[\s\S]*?</think>|<think>[\s\S]*$", re.I)
 CANNED_FRENCH_SUFFIX_PATTERN = re.compile(
     r"(?:,\s*|\s+)\*?(?:c['’]est\s+(?:dommage|magnifique)|très\s+bien|"
-    r"ça\s+va|voilà|merci|d['’]accord|bien\s+sûr)\*?"
+    r"ça\s+va|voilà|merci|d['’]accord|bien\s+sûr|bon\s+repos)\*?"
     r"(?:,?\s*(?:oui|non))?[?!.]*\s*$",
     re.I,
 )
@@ -32,6 +32,62 @@ INLINE_CODE_PATTERN = re.compile(r"`[^`]+`")
 DEPENDENCY_PATTERN = re.compile(
     r"\b(?:I need you|you only need me|I(?:'ll| will) always be all you need|"
     r"don't leave me|never leave me|I get jealous|choose me over)\b",
+    re.I,
+)
+NEUTRAL_PERSONAL_PLAN_PATTERN = re.compile(
+    r"^\s*(?:i\s+(?:might|may|plan\s+to|intend\s+to|am\s+thinking\s+(?:of|about))|"
+    r"i['’]m\s+(?:thinking\s+(?:of|about)|planning\s+to|going\s+to)|"
+    r"maybe\s+i['’]ll)\b",
+    re.I,
+)
+GENERIC_PLAN_PRAISE_PATTERN = re.compile(
+    r"^\s*(?:that|it)\s+sounds\s+like\s+(?:a\s+)?"
+    r"(?:good|great|nice|smart|healthy|excellent)\s+(?:idea|plan)[.!]?\s*",
+    re.I,
+)
+UNSUPPORTED_WELLNESS_SENTENCE_PATTERN = re.compile(
+    r"(?:^|(?<=[.!?])\s+)[^.!?\n]{0,100}\b(?:clear\s+your\s+head|"
+    r"help\s+you\s+(?:reset|unwind|recharge|relax)|do\s+you\s+good|"
+    r"good\s+for\s+your\s+(?:mental\s+)?health)\b[^.!?\n]*[.!?]?",
+    re.I,
+)
+FRENCH_MANNERISM_PATTERN = re.compile(
+    r"\b(?:c['’]est|très|ça|voilà|merci|d['’]accord|bien\s+sûr|bon\s+courage|"
+    r"bon\s+repos|bon\s+appétit|en\s+effet|mon\s+dieu|quelle|magnifique|charmant|"
+    r"parfait)\b",
+    re.I,
+)
+ITALIC_ASIDE_PATTERN = re.compile(r"(?<!\*)\*(?!\*)([^*\n]{1,100})(?<!\*)\*(?!\*)")
+OPERATIONAL_REPLY_PATTERN = re.compile(
+    r"^(?:(?:please\s+)|(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?))?"
+    r"(?:turn|switch|set|start|stop|open|close|lock|unlock|enable|disable|run|send|"
+    r"show|check|cancel|pause|resume|remind|schedule)\b|"
+    r"\b(?:does(?:\s+not|n['’]t)\s+make\s+sense|already\s+awake)\b",
+    re.I,
+)
+EXPLICIT_FRENCH_REQUEST_PATTERN = re.compile(
+    r"\b(?:speak|say|write|reply|respond|translate)\b.{0,30}\b(?:in|into)?\s*french\b|"
+    r"^\s*(?:bonjour|salut)\b",
+    re.I,
+)
+LOW_STAKES_PERSONAL_UPDATE_PATTERN = re.compile(
+    r"\b(?:just\s+)?(?:finished|done|off)\s+(?:with\s+)?work\b|"
+    r"\b(?:just\s+)?(?:had|ate)\s+(?:a\s+)?(?:late\s+)?(?:breakfast|lunch|dinner)\b|"
+    r"\b(?:just\s+)?woke\s+up\b|\bgetting\s+ready\s+for\s+work\b",
+    re.I,
+)
+OVERDONE_CASUAL_REACTION_PATTERN = re.compile(
+    r"(?:^|(?<=[.!?])\s+)[^.!?\n]{0,140}\b(?:"
+    r"sounds\s+like\s+(?:a\s+)?solid|earned\s+(?:some|a|your|the)\s+rest|"
+    r"long\s+shift|won['’]t\s+suggest\s+anything|keep\s+(?:your\s+)?focus\s+sharp|"
+    r"perfect\s+way\s+to\s+end|sounds\s+like\s+a\s+long\s+day|probably\s+tired|"
+    r"perfect\s+sense\s+to\s+rest|your\s+body\s+is\s+asking|you\s+deserve\s+to\s+rest)"
+    r"\b[^.!?\n]*[.!?]?",
+    re.I,
+)
+ALARM_CORRECTION_PATTERN = re.compile(
+    r"\balready\s+awake\b.{0,120}\b(?:alarm|reminder)\b|"
+    r"\bdoes(?:\s+not|n['’]t)\s+make\s+sense\b.{0,80}\b(?:alarm|reminder)\b",
     re.I,
 )
 
@@ -66,6 +122,48 @@ def _rewrite_punctuation(text: str) -> str:
     text = re.sub(r"\s*[—–]\s*", ", ", text)
     text = re.sub(r";\s+([A-Z])", lambda match: ". " + match.group(1), text)
     return re.sub(r";\s*", ", ", text)
+
+
+def _recent_assistant_messages(history) -> list[str]:
+    messages: list[str] = []
+    for row in history or ():
+        if isinstance(row, dict):
+            role, content = row.get("role"), row.get("content")
+        elif isinstance(row, (list, tuple)) and len(row) >= 2:
+            role, content = row[0], row[1]
+        else:
+            continue
+        if str(role).casefold() == "assistant":
+            messages.append(str(content or ""))
+    return messages[-3:]
+
+
+def _remove_short_french_asides(text: str) -> str:
+    def replace(match: re.Match) -> str:
+        return "" if FRENCH_MANNERISM_PATTERN.search(match.group(1)) else match.group(0)
+
+    cleaned = ITALIC_ASIDE_PATTERN.sub(replace, text)
+    cleaned = re.sub(r"\s+([,.!?])", r"\1", cleaned)
+    cleaned = re.sub(r"^[,;:]\s*", "", cleaned)
+    cleaned = re.sub(r" {2,}", " ", cleaned)
+    return cleaned.strip()
+
+
+def _plain_personal_acknowledgement(user_text: str) -> str:
+    lowered = user_text.casefold()
+    meal = bool(re.search(r"\b(?:breakfast|lunch|dinner)\b", lowered))
+    finished_work = bool(
+        re.search(r"\b(?:finished|done|off)\s+(?:with\s+)?work\b", lowered)
+    )
+    if finished_work and meal:
+        return "Ah, got it. Hope dinner was good."
+    if finished_work:
+        return "Ah, got it. You’re off the clock now."
+    if meal:
+        return "Nice. Hope it hit the spot."
+    if re.search(r"\bwoke\s+up\b", lowered):
+        return "Morning. Sounds like you’re getting moving."
+    return "Got it."
 
 
 class ResponsePolicy:
@@ -108,6 +206,50 @@ class ResponsePolicy:
         styled = self.personality_context.apply_response_style(
             sanitized, user_text, user_profile=profile, history=history
         )
+        if (
+            self.persona.get("name") or ""
+        ).strip().casefold() == "curie" and ALARM_CORRECTION_PATTERN.search(
+            str(user_text or "")
+        ):
+            styled = "Right. You’re already awake, so setting an alarm now wouldn’t make sense."
+        if (
+            (self.persona.get("name") or "").strip().casefold() == "curie"
+            and not EXPLICIT_FRENCH_REQUEST_PATTERN.search(str(user_text or ""))
+            and FRENCH_MANNERISM_PATTERN.search(styled)
+        ):
+            recent_french = any(
+                FRENCH_MANNERISM_PATTERN.search(message)
+                for message in _recent_assistant_messages(history)
+            )
+            if recent_french or OPERATIONAL_REPLY_PATTERN.search(str(user_text or "")):
+                cleaned = _remove_short_french_asides(styled)
+                if cleaned:
+                    styled = cleaned
+        if (
+            (self.persona.get("name") or "").strip().casefold() == "curie"
+            and "?" not in str(user_text or "")
+            and LOW_STAKES_PERSONAL_UPDATE_PATTERN.search(str(user_text or ""))
+        ):
+            if OVERDONE_CASUAL_REACTION_PATTERN.search(styled):
+                styled = _plain_personal_acknowledgement(str(user_text or ""))
+            else:
+                cleaned = _remove_short_french_asides(styled)
+                cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,")
+                if not re.search(r"\w", cleaned):
+                    cleaned = ""
+                styled = cleaned or _plain_personal_acknowledgement(
+                    str(user_text or "")
+                )
+        if (
+            (self.persona.get("name") or "").strip().casefold() == "curie"
+            and "?" not in str(user_text or "")
+            and NEUTRAL_PERSONAL_PLAN_PATTERN.search(str(user_text or ""))
+        ):
+            styled = UNSUPPORTED_WELLNESS_SENTENCE_PATTERN.sub("", styled).strip()
+            styled = GENERIC_PLAN_PRAISE_PATTERN.sub("Fair enough. ", styled).strip()
+            styled = re.sub(r"\s+", " ", styled).strip()
+            if not styled:
+                styled = "Fair enough."
         if re.search(
             r"\b(?:keep\s+it\s+brief|be\s+brief|brief\s+answer|no\s+follow[- ]?up)\b",
             str(user_text or ""),

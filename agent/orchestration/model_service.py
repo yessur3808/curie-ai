@@ -107,6 +107,31 @@ class ModelConversationService:
     ) -> ResponseCandidate:
         role = self.model_role(user_text)
         max_tokens = self.token_budget(user_text, role)
+        from services.resource_governor import resource_governor
+        from services.self_diagnostics import diagnostic_monitor
+
+        decision = resource_governor.admit(
+            "conversation",
+            owner_id,
+            max_tokens,
+            preferred_model=role,
+            fallback_model="general" if role in {"reasoning", "coding"} else "fast",
+            diagnostics=diagnostic_monitor.snapshot(owner_id=owner_id, limit=50),
+        )
+        if not decision.allowed:
+            return ResponseCandidate(
+                "I’m at the current resource limit, so I’m pausing new model work rather than giving you a poor answer. `/budgets` will show what was reached.",
+                "resource_governor",
+                {
+                    "role": role,
+                    "max_tokens": 0,
+                    "budget_mode": decision.mode,
+                    "budget_reason": decision.reason,
+                    "fallback": False,
+                },
+            )
+        role = decision.model or role
+        max_tokens = decision.max_tokens
         effective_temperature = self.reasoning_temperature(role, temperature)
         effective_prompt = self.quality_prompt(prompt, role)
         outcome = {
@@ -159,6 +184,13 @@ class ModelConversationService:
             request_id=request_id,
             supersede_owner=priority == "active",
         )
+        resource_governor.record(
+            "conversation",
+            owner_id,
+            tokens=int(managed.output_tokens or 0),
+            wall_seconds=float(managed.total_ms or 0) / 1000,
+            model=str(outcome["provider"]),
+        )
         return ResponseCandidate(
             managed.text,
             str(outcome["provider"]),
@@ -170,6 +202,9 @@ class ModelConversationService:
                 "temperature": effective_temperature,
                 "max_tokens": max_tokens,
                 "fallback": bool(outcome["fallback"]),
+                "budget_mode": decision.mode,
+                "budget_reason": decision.reason,
+                "model_downgraded": decision.downgraded,
                 "request_id": managed.request_id,
                 "queue_ms": managed.queue_ms,
                 "first_token_ms": managed.first_token_ms,

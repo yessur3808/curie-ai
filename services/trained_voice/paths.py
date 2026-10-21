@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import re
 
 
 @dataclass(frozen=True)
@@ -12,13 +13,28 @@ class VoicePaths:
     home: Path
     speech_python: Path
     transcription_python: Path
+    voice_id: str = "curie"
 
     @classmethod
-    def from_root(cls, root: Path):
+    def from_root(cls, root: Path, voice_id: str | None = None):
         root = root.resolve()
+        selected = re.sub(r"[^a-z0-9_-]+", "-", (voice_id or "curie").casefold()).strip(
+            "-"
+        )
+        selected = selected or "curie"
+        env_suffix = re.sub(r"[^A-Z0-9]+", "_", selected.upper())
+        if selected in {"curie", "default"}:
+            home = Path(os.environ.get("CURIE_VOICE_HOME", root / "data/trained-voice"))
+        else:
+            home = Path(
+                os.environ.get(
+                    f"CURIE_VOICE_HOME_{env_suffix}",
+                    root / "data/trained-voices" / selected,
+                )
+            )
         return cls(
             root,
-            Path(os.environ.get("CURIE_VOICE_HOME", root / "data/trained-voice")),
+            home,
             Path(
                 os.environ.get(
                     "CURIE_VOICE_PYTHON", root / ".trained-voice-venv/bin/python"
@@ -29,6 +45,7 @@ class VoicePaths:
                     "CURIE_TRANSCRIBE_PYTHON", root / ".transcription-venv/bin/python"
                 )
             ),
+            selected,
         )
 
     @property

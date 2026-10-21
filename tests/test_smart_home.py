@@ -427,7 +427,9 @@ def test_smart_home_intents_are_deterministic(text, action, target, state):
     request = classify_request(text)
     assert request.action == action
     assert request.params["target"] == target
-    assert request.needs_approval is False
+    assert request.needs_approval is (
+        action == "home_control" and target == "all lights"
+    )
     if state:
         assert request.params["state"] == state
 
@@ -494,6 +496,7 @@ def test_multi_device_command_and_plural_reference_keep_the_entity_set():
     first = classify_request("Turn on the floor lamp and tv light")
     assert first.action == "home_control"
     assert first.params["targets"] == ["floor lamp", "tv light"]
+    assert first.needs_approval is True
 
     follow_up = classify_request(
         "Please turn them on",
@@ -505,6 +508,7 @@ def test_multi_device_command_and_plural_reference_keep_the_entity_set():
     assert follow_up.action == "home_control"
     assert follow_up.params["targets"] == ["floor lamp", "tv light"]
     assert follow_up.params["state"] == "on"
+    assert follow_up.needs_approval is True
 
 
 def test_plural_follow_up_can_reuse_a_recent_light_group():
@@ -525,6 +529,7 @@ def test_plural_follow_up_can_reuse_a_recent_light_group():
         "state": "off",
         "provider": "",
     }
+    assert follow_up.needs_approval is True
 
 
 def test_try_again_repeats_only_a_recent_failed_home_command():

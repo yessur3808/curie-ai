@@ -67,8 +67,38 @@ def _schema_for(name: str) -> Mapping[str, Any]:
                 "request": {"type": "string"},
                 "path": {"type": "string"},
                 "run_tests": {"type": "boolean"},
+                "preview_id": {"type": "string"},
+                "preview_hash": {"type": "string"},
             },
-            "required": ["request"],
+            "required": ["preview_id", "preview_hash"],
+        },
+        "organize_files": {
+            "type": "object",
+            "properties": {
+                "preview_id": {"type": "string"},
+                "preview_hash": {"type": "string"},
+            },
+            "required": ["preview_id", "preview_hash"],
+        },
+        "draft_note": {
+            "type": "object",
+            "properties": {
+                "preview_id": {"type": "string"},
+                "preview_hash": {"type": "string"},
+            },
+            "required": ["preview_id", "preview_hash"],
+        },
+        "github_contribution_scan": {
+            "type": "object",
+            "properties": {"topic": {"type": "string"}},
+        },
+        "github_contribution_publish": {
+            "type": "object",
+            "properties": {
+                "preview_id": {"type": "string"},
+                "preview_hash": {"type": "string"},
+            },
+            "required": ["preview_id", "preview_hash"],
         },
         "gmail_search": {
             "type": "object",
@@ -88,6 +118,63 @@ def _schema_for(name: str) -> Mapping[str, Any]:
                 "body": {"type": "string"},
             },
             "required": ["recipient", "subject", "body"],
+        },
+        "calendar_list": {
+            "type": "object",
+            "properties": {
+                "time_min": {"type": "string"},
+                "time_max": {"type": "string"},
+                "query": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+            "required": ["time_min", "time_max"],
+        },
+        "calendar_create": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "start": {"type": "string"},
+                "end": {"type": "string"},
+                "timezone": {"type": "string"},
+                "description": {"type": "string"},
+                "location": {"type": "string"},
+            },
+            "required": ["summary", "start", "end", "timezone"],
+        },
+        "flight_track": {
+            "type": "object",
+            "properties": {
+                "flight_number": {"type": "string"},
+                "date": {"type": "string"},
+            },
+            "required": ["flight_number"],
+        },
+        "places_search": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer"},
+                "open_now": {"type": "boolean"},
+                "latitude": {"type": "number"},
+                "longitude": {"type": "number"},
+                "radius_meters": {"type": "number"},
+            },
+            "required": ["query"],
+        },
+        "dashboard_snapshot": _OBJECT,
+        "reminder_list": _OBJECT,
+        "reminder_create": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string"},
+                "due_at": {"type": "string"},
+                "platform": {"type": "string"},
+            },
+            "required": ["message", "due_at"],
+        },
+        "reminder_delete": {
+            "type": "object",
+            "properties": {"index": {"type": "integer"}},
         },
         "x_search": {
             "type": "object",
@@ -255,7 +342,7 @@ def _execution_policies(
             IdempotencyPolicy("state_reconciled", True),
             CompensationPolicy("home_alias", True, True),
         )
-    if name in {"gmail_send", "x_post", "x_reply", "x_dm_send"}:
+    if name in {"gmail_send", "calendar_create", "x_post", "x_reply", "x_dm_send"}:
         return (
             VerificationPolicy(
                 False,
@@ -516,6 +603,8 @@ def _coding_service_probe() -> tuple[bool, str | None]:
 
 def _build_runtime_registry() -> ToolRegistry:
     from agent.tooling.account_tools import (
+        CalendarCreateTool,
+        CalendarListTool,
         GmailReadTool,
         GmailSearchTool,
         GmailSendTool,
@@ -525,6 +614,11 @@ def _build_runtime_registry() -> ToolRegistry:
         XReplyTool,
         XSearchTool,
         XSendDMTool,
+    )
+    from agent.tooling.context_tools import (
+        DashboardSnapshotTool,
+        FlightTrackerTool,
+        PlacesSearchTool,
     )
     from agent.tooling.browser_tools import (
         BrowserClickTool,
@@ -536,9 +630,15 @@ def _build_runtime_registry() -> ToolRegistry:
     from agent.tooling.project_tools import (
         CreateDirectoryTool,
         CreatePythonProjectTool,
+        DraftNoteTool,
         InspectProjectTool,
+        OrganizeFilesTool,
         ProjectChangeTool,
         RunTestsTool,
+    )
+    from agent.tooling.github_contribution_tools import (
+        GitHubContributionPublishTool,
+        GitHubContributionScanTool,
     )
     from agent.tooling.conversion_tool import ConversionTool
     from agent.tooling.control_tools import EmergencyStopTool
@@ -561,9 +661,22 @@ def _build_runtime_registry() -> ToolRegistry:
         HomeControlTool,
         HomeStatusTool,
     )
+    from agent.tooling.scheduler_tools import (
+        ReminderCreateTool,
+        ReminderDeleteTool,
+        ReminderListTool,
+    )
     from agent.tooling.weather_tool import WeatherTool
 
     gmail_probe = _dependency_probe(
+        "connectors.google_oauth",
+        (
+            "GOOGLE_OAUTH_CLIENT_ID",
+            "GOOGLE_OAUTH_REDIRECT_URI",
+            "CURIE_CREDENTIAL_KEY",
+        ),
+    )
+    calendar_probe = _dependency_probe(
         "connectors.google_oauth",
         (
             "GOOGLE_OAUTH_CLIENT_ID",
@@ -632,6 +745,65 @@ def _build_runtime_registry() -> ToolRegistry:
             ),
             audit_redactions=frozenset({"body"}),
             tags=("gmail", "email", "write"),
+        ),
+        definition(
+            CalendarListTool(),
+            description="Read a bounded window from the owner's Google Calendar and cache it for proactive agenda reminders.",
+            availability_probe=calendar_probe,
+            resource_policy=ResourcePolicy(
+                timeout_seconds=30, concurrency_limit=2, network=True
+            ),
+            tags=("google", "calendar", "schedule", "read", "proactive"),
+        ),
+        definition(
+            CalendarCreateTool(),
+            description="Create one Google Calendar event after a complete preview and fresh approval.",
+            availability_probe=calendar_probe,
+            required_permissions=("calendar_write",),
+            resource_policy=ResourcePolicy(
+                timeout_seconds=30, concurrency_limit=1, network=True
+            ),
+            audit_redactions=frozenset({"description"}),
+            tags=("google", "calendar", "schedule", "write"),
+        ),
+        definition(
+            FlightTrackerTool(),
+            description="Track a flight with schedule, terminal, gate, delay, live-position data when configured, and current map links.",
+            examples=("Track CX101", "Where is BA28 right now?"),
+            resource_policy=ResourcePolicy(
+                timeout_seconds=35, concurrency_limit=2, network=True
+            ),
+            tags=("flight", "travel", "live", "maps"),
+        ),
+        definition(
+            PlacesSearchTool(),
+            description="Find restaurants, doctors, stores, coffee shops, post offices, and other places with Google Maps links and live details when configured.",
+            examples=("Find a coffee shop near Central", "Show doctors near me"),
+            resource_policy=ResourcePolicy(
+                timeout_seconds=30, concurrency_limit=2, network=True
+            ),
+            tags=("maps", "places", "local", "recommendations"),
+        ),
+        definition(
+            DashboardSnapshotTool(),
+            description="Read the same bounded instance, model, connector, task, resource, error, and readiness data shown by Curie's dashboard.",
+            resource_policy=ResourcePolicy(timeout_seconds=15, concurrency_limit=1),
+            tags=("dashboard", "health", "telemetry", "self-awareness"),
+        ),
+        definition(
+            ReminderListTool(),
+            description="List the owner's scheduled reminders from the durable task engine.",
+            tags=("schedule", "reminder", "tasks", "read"),
+        ),
+        definition(
+            ReminderCreateTool(),
+            description="Preview and schedule exactly one durable reminder after approval.",
+            tags=("schedule", "reminder", "tasks", "write", "preview"),
+        ),
+        definition(
+            ReminderDeleteTool(),
+            description="Preview and remove selected durable reminders after approval.",
+            tags=("schedule", "reminder", "tasks", "write", "preview"),
         ),
         definition(
             XSearchTool(),
@@ -753,7 +925,41 @@ def _build_runtime_registry() -> ToolRegistry:
         definition(
             ProjectChangeTool(),
             required_permissions=("write_project",),
-            tags=("coding", "filesystem"),
+            description="Generate an exact code diff, show it before approval, and apply only that immutable reviewed patch.",
+            resource_policy=ResourcePolicy(timeout_seconds=180, concurrency_limit=1),
+            tags=("coding", "filesystem", "preview", "approval"),
+        ),
+        definition(
+            OrganizeFilesTool(),
+            required_permissions=("write_project",),
+            description="Preview exact selected-file moves and apply them only after approval.",
+            tags=("filesystem", "organization", "preview", "approval"),
+        ),
+        definition(
+            DraftNoteTool(),
+            required_permissions=("write_project",),
+            description="Preview an exact note diff and save it only after approval.",
+            tags=("notes", "filesystem", "preview", "approval"),
+        ),
+        definition(
+            GitHubContributionScanTool(),
+            description="Find a suitable good-first issue and use separate reasoning and coding model roles to prepare a bounded patch for review.",
+            availability_probe=_module_probe("github"),
+            resource_policy=ResourcePolicy(
+                timeout_seconds=240, concurrency_limit=1, network=True
+            ),
+            tags=("github", "open-source", "coding", "proactive", "preview"),
+        ),
+        definition(
+            GitHubContributionPublishTool(),
+            description="Push exactly one approved immutable contribution branch and open a pull request when GitHub permits it.",
+            availability_probe=_module_probe("github"),
+            required_permissions=("github_write",),
+            resource_policy=ResourcePolicy(
+                timeout_seconds=120, concurrency_limit=1, network=True
+            ),
+            audit_redactions=frozenset({"preview_hash"}),
+            tags=("github", "open-source", "coding", "write", "approval"),
         ),
         definition(
             HomeStatusTool(),

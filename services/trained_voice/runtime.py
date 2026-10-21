@@ -45,8 +45,8 @@ def trained_voice_required() -> bool:
     }
 
 
-def _paths(root: Path | None = None) -> VoicePaths:
-    return VoicePaths.from_root(root or ROOT)
+def _paths(root: Path | None = None, voice_id: str | None = None) -> VoicePaths:
+    return VoicePaths.from_root(root or ROOT, voice_id=voice_id)
 
 
 def _config(paths: VoicePaths) -> dict[str, Any]:
@@ -57,16 +57,20 @@ def _config(paths: VoicePaths) -> dict[str, Any]:
         return {}
 
 
-def trained_voice_health(root: Path | None = None) -> dict[str, Any]:
+def trained_voice_health(
+    root: Path | None = None, voice_id: str | None = None
+) -> dict[str, Any]:
     """Read readiness metadata without importing Torch or model packages."""
-    paths = _paths(root)
+    paths = _paths(root, voice_id)
     from services.api_voice_runtime import required_native
 
     native = required_native()
     if native is not None:
-        return json.loads(
+        result = json.loads(
             native.trained_voice_health(str(paths.home), str(paths.speech_python))
         )
+        result["voice_id"] = paths.voice_id
+        return result
     config = _config(paths)
     ready = paths.ready()
     return {
@@ -78,6 +82,7 @@ def trained_voice_health(root: Path | None = None) -> dict[str, Any]:
         "revision": config.get("revision"),
         "worker_isolated": True,
         "threads": int(config.get("threads") or 0),
+        "voice_id": paths.voice_id,
     }
 
 
@@ -146,7 +151,7 @@ async def trained_voice_lease(
     paths: VoicePaths | None = None,
 ) -> AsyncIterator[VoicePaths]:
     selected = paths or _paths()
-    if not trained_voice_health(selected.root)["ready"]:
+    if not trained_voice_health(selected.root, selected.voice_id)["ready"]:
         raise TrainedVoiceError("trained_voice_unavailable")
     lease = await _acquire_file_lock(_lock_path(selected), _queue_seconds())
     try:
@@ -232,6 +237,8 @@ async def synthesize_trained_voice(
     text: str,
     output: str | Path,
     delivery: Mapping[str, Any],
+    *,
+    voice_id: str | None = None,
 ) -> dict[str, Any]:
     """Generate one WAV using only the trained worker or fail explicitly."""
     from services.api_voice_runtime import required_native
@@ -245,7 +252,7 @@ async def synthesize_trained_voice(
     elif not str(text).strip() or len(text) > 24000:
         raise TrainedVoiceError("trained_voice_invalid_text")
     output_path = Path(output)
-    paths = _paths()
+    paths = _paths(voice_id=voice_id)
     try:
         async with trained_voice_lease(paths):
             from services.media_transport import inspect_attachment, supervise_process
@@ -287,9 +294,11 @@ async def trained_voice_stream_events(
     output: str | Path,
     stream_dir: str | Path,
     delivery: Mapping[str, Any],
+    *,
+    voice_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream trained sentence files while holding the shared worker lease."""
-    paths = _paths()
+    paths = _paths(voice_id=voice_id)
     async with trained_voice_lease(paths):
         stream = worker_events(
             _command(paths, output, delivery, stream_dir=stream_dir),

@@ -253,7 +253,8 @@ _NATURAL_MEMORY_SEARCH = re.compile(r"^what do you remember about\s+(.+?)[?.!]*$
 _EPISODE_SIGNAL = re.compile(
     r"\b(?:remember this|keep track of|for future reference|we (?:decided|agreed)|"
     r"the plan is|next step|from now on|my project|our project|working on|"
-    r"i (?:want|need|plan) to|(?:can|could) we (?:build|create|make)|let's (?:build|create)|"
+    r"i (?:want|need|plan) to|i have (?:a|an|my) trip|my upcoming trip|"
+    r"i(?:'m| am) (?:travell?ing|flying) to|(?:can|could) we (?:build|create|make)|let's (?:build|create)|"
     r"milestone|shipped|deployed|resolved|fixed)\b",
     re.I,
 )

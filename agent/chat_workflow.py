@@ -541,6 +541,38 @@ class ChatWorkflow:
         )
 
     async def process_message(self, normalized_input: Dict) -> Dict:
+        """Run one turn and attach privacy-safe per-command diagnostics."""
+        from services.self_diagnostics import diagnostic_monitor
+
+        raw_input = dict(normalized_input or {})
+        diagnostic_owner = str(raw_input.get("internal_id") or "")
+        if not diagnostic_owner:
+            platform = str(raw_input.get("platform") or "unknown")
+            external_user_id = raw_input.get("external_user_id")
+            if external_user_id:
+                # Diagnostics begin before the inbound safety boundary. Use a
+                # stable, privacy-safe scope here rather than touching identity
+                # persistence for a message that may still be quarantined.
+                diagnostic_owner = (
+                    "external:"
+                    + hashlib.sha256(
+                        f"{platform}\0{external_user_id}".encode()
+                    ).hexdigest()[:24]
+                )
+        ticket = diagnostic_monitor.start(
+            owner_id=diagnostic_owner or "anonymous",
+            connector=str(raw_input.get("platform") or "unknown"),
+        )
+        try:
+            result = await self._process_message_routed(raw_input)
+        except BaseException as exc:
+            diagnostic_monitor.finish(ticket, None, error=exc)
+            raise
+        record = diagnostic_monitor.finish(ticket, result)
+        result["diagnostics"] = record
+        return result
+
+    async def _process_message_routed(self, normalized_input: Dict) -> Dict:
         """Select the legacy, shadow, or active typed turn path."""
         try:
             inbound = InboundEvent.from_mapping(normalized_input or {})
@@ -1152,6 +1184,54 @@ class ChatWorkflow:
             logger.debug("Could not process security/privacy controls: %s", exc)
 
         try:
+            from services.open_source_contributions import handle_open_source_command
+
+            open_source_response = handle_open_source_command(
+                str(internal_id), user_text
+            )
+            if open_source_response is not None:
+                return {
+                    "text": open_source_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "open_source_controls",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                }
+        except Exception as exc:
+            logger.debug("Could not process open-source controls: %s", exc)
+
+        try:
+            from services.self_diagnostics import handle_diagnostics_command
+
+            diagnostic_response = handle_diagnostics_command(
+                user_text, owner_id=str(internal_id)
+            )
+            if diagnostic_response is not None:
+                return {
+                    "text": diagnostic_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "self_diagnostics",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                }
+        except Exception as exc:
+            logger.debug("Could not process self-diagnostics controls: %s", exc)
+
+        try:
+            from services.resource_governor import handle_resource_budget_command
+
+            budget_response = handle_resource_budget_command(
+                user_text, owner_id=str(internal_id)
+            )
+            if budget_response is not None:
+                return {
+                    "text": budget_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "resource_governor",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                }
+        except Exception as exc:
+            logger.debug("Could not process resource-budget controls: %s", exc)
+
+        try:
             from services.runtime_health import handle_health_command
 
             health_response = handle_health_command(user_text, workflow_ready=True)
@@ -1192,6 +1272,24 @@ class ChatWorkflow:
                 }
         except Exception as exc:
             logger.debug("Could not process proactive controls: %s", exc)
+
+        try:
+            from services.autonomous_learning import (
+                handle_autonomous_learning_command,
+            )
+
+            autonomous_response = handle_autonomous_learning_command(
+                str(internal_id), user_text
+            )
+            if autonomous_response is not None:
+                return {
+                    "text": autonomous_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "autonomous_learning_controls",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                }
+        except Exception as exc:
+            logger.debug("Could not process autonomous-learning controls: %s", exc)
 
         try:
             from memory.adaptive import capture_proactive_feedback
@@ -1596,6 +1694,7 @@ class ChatWorkflow:
                 response,
                 source_message_id=message_id,
                 source_channel=platform,
+                history=history,
             )
 
             self.dedupe_cache.set(

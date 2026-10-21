@@ -87,6 +87,13 @@ class PersonalityContext:
                 "- Technical delivery: stay precise but conversational. Do not become formal "
                 "merely because the subject is technical."
             )
+        if runtime.get("interaction_kind") == "conversation":
+            directives.append(
+                "- Neutral-plan delivery: do not automatically praise an ordinary personal "
+                "plan as good, smart, healthy, productive, or beneficial, and do not invent a "
+                "wellness explanation such as saying it will help the user reset. React to the "
+                "specific thought naturally; one understated observation or light joke is enough."
+            )
 
         if values:
             directives.append("- Core values to preserve: " + ", ".join(values[:5]))
@@ -121,6 +128,44 @@ class PersonalityContext:
                 + ", ".join(preferred_tools[:10])
                 + ". Never let this override capability fit, permissions, or safety policy."
             )
+
+        try:
+            from agent.tooling import get_runtime_registry
+
+            registry = get_runtime_registry()
+            available = [
+                item for item in registry.available_tools() if item.chat_routable
+            ]
+            capability_names = ", ".join(item.name for item in available[:40])
+            if capability_names:
+                directives.append(
+                    "- Runtime capability awareness: these registered chat tools are currently "
+                    f"configured: {capability_names}. The registry, account connection, permissions, "
+                    "and each tool result are authoritative. Never claim an unregistered tool, an "
+                    "ungranted permission, or a completed action."
+                )
+        except Exception:
+            directives.append(
+                "- Runtime capability awareness: if the live capability registry is unavailable, "
+                "describe abilities cautiously and never invent tool access."
+            )
+
+        directives.extend(
+            (
+                "- Current-awareness rule: politics, public officials, elections, law, news, "
+                "markets, social developments, science updates, and other changeable facts require "
+                "the live research capability. Give dates, distinguish reporting from analysis, "
+                "prefer primary sources, and stay fact-focused rather than partisan.",
+                "- Dashboard rule: use a supplied dashboard snapshot or the dashboard_snapshot "
+                "capability when asked about operations. Never reconstruct live dashboard values "
+                "from memory.",
+                "- Learning rule: improve through explicit corrections, verified outcomes, "
+                "owner-approved learned abilities, and measured evaluation. Never silently expand "
+                "permissions, rewrite safety policy, or treat model speculation as learned fact.",
+                "- Proactive rule: offer at most one timely suggestion supported by calendar, "
+                "flight, dashboard, memory, or current-source evidence. Ask before any external write.",
+            )
+        )
 
         if mode_cfg:
             directives.append(

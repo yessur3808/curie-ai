@@ -366,8 +366,41 @@ async def oauth_status(
 
     return {
         "gmail": credential_configured(owner_id, "google:gmail"),
+        "calendar": credential_configured(owner_id, "google:calendar"),
         "x": credential_configured(owner_id, "x"),
     }
+
+
+@app.get("/diagnostics/trends")
+async def diagnostics_trends(
+    owner_id: str,
+    hours: int = 24,
+    bucket_minutes: int = 30,
+    x_curie_setup_token: str | None = Header(None),
+):
+    """Owner-only resource and latency trend series for the dashboard."""
+    _require_setup_token(x_curie_setup_token)
+    _require_master_owner(owner_id)
+    from services.self_diagnostics import diagnostic_monitor
+
+    return diagnostic_monitor.trends(
+        owner_id=owner_id,
+        hours=max(1, min(hours, 168)),
+        bucket_minutes=max(5, min(bucket_minutes, 360)),
+    )
+
+
+@app.get("/resource-budgets")
+async def resource_budgets(
+    owner_id: str,
+    x_curie_setup_token: str | None = Header(None),
+):
+    """Owner-only per-feature limits, usage, and current throttle mode."""
+    _require_setup_token(x_curie_setup_token)
+    _require_master_owner(owner_id)
+    from services.resource_governor import resource_governor
+
+    return resource_governor.snapshot(owner_id)
 
 
 @app.get("/reminders")

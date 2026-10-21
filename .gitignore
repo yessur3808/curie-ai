@@ -127,6 +127,7 @@ dmypy.json
 .curie_memory.sqlite3-wal
 .curie_*.sqlite3-shm
 .curie_*.sqlite3-wal
+.curie_*.sqlite3*.corrupt-*
 *.ses
 models/**/*.onnx
 projects/

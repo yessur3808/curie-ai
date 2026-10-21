@@ -64,9 +64,18 @@ def test_project_is_created_in_per_user_sandbox(isolated, monkeypatch):
     assert (project / "tests" / "test_smoke.py").exists()
 
 
-def test_generated_change_requires_user_bound_approval(isolated):
+def test_generated_change_requires_user_bound_approval(isolated, monkeypatch):
+    from services.action_previews import preview_store
+
+    monkeypatch.setattr(preview_store, "root", isolated / "previews")
+    monkeypatch.setattr(
+        "llm.manager.ask_llm",
+        lambda *args, **kwargs: '{"files":{"fix.py":"fixed = True\\n"},"summary":"Fix authentication."}',
+    )
     req = router.classify_request("Fix the authentication bug in this project")
     response = asyncio.run(router.execute_request(req, "user-1", {}))
+    assert "Exact changes" in response
+    assert not (isolated / "projects" / "user-1" / "fix.py").exists()
     token = response.split("/approve action ", 1)[1][:8]
     wrong = asyncio.run(
         router.execute_request(

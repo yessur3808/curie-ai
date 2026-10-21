@@ -24,7 +24,7 @@ def _route(text: str, owner: str = "u1") -> RoutingDecision:
             False,
             "mutating",
         ),
-        ("Remind me tomorrow", "capability", "scheduler_skill", False, "mutating"),
+        ("Remind me tomorrow", "capability", "reminder_create", False, "mutating"),
         ("Tell me a joke", "conversation", None, False, "none"),
     ],
 )

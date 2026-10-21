@@ -200,6 +200,26 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
+def _http_error_detail(exc: httpx.HTTPStatusError) -> str:
+    """Return a short, non-secret API error suitable for state and logs."""
+    try:
+        payload = exc.response.json()
+    except ValueError:
+        payload = {}
+    if isinstance(payload, dict):
+        for key in ("detail", "title", "reason", "error"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return re.sub(r"\s+", " ", value).strip()[:240]
+        errors = payload.get("errors")
+        if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+            for key in ("detail", "message", "title", "reason"):
+                value = errors[0].get(key)
+                if isinstance(value, str) and value.strip():
+                    return re.sub(r"\s+", " ", value).strip()[:240]
+    return f"X API returned HTTP {exc.response.status_code}"
+
+
 def build_autopost_prompt(topic: str, recent: list[str]) -> str:
     """Build a public-post prompt using Curie's complete active persona."""
     task = (
@@ -307,7 +327,10 @@ class XAutopostService:
             or int(state.get("posted_count", 0)) >= self.config.daily_max
         ):
             _save_state(self.config.owner_id, state)
-            return {"status": "daily_complete"}
+            return {
+                "status": "daily_complete",
+                "reason": state.get("halt_reason", "daily_limit_reached"),
+            }
 
         pending = [
             (index, slot)
@@ -365,16 +388,41 @@ class XAutopostService:
             return {"status": status, "post_id": post_id, "text": text}
         except httpx.HTTPStatusError as exc:
             code = exc.response.status_code
+            detail = _http_error_detail(exc)
             state["schedule"][slot_index] = {
                 **slot,
                 "status": "failed",
                 "processed_at": now.isoformat(),
                 "http_status": code,
+                "error": detail,
             }
-            if code in {403, 429}:
+            # Billing, permission, and rate-limit failures are not transient on
+            # the scheduler's one-minute timescale. Stop for the local day so
+            # Curie does not repeatedly generate drafts that X cannot accept.
+            if code in {402, 403, 429}:
                 state["halted_for_day"] = True
+                state["halt_reason"] = {
+                    402: "x_api_credit_required",
+                    403: "x_write_forbidden",
+                    429: "x_rate_limited",
+                }[code]
             _save_state(self.config.owner_id, state)
-            return {"status": "failed", "http_status": code}
+            logger.warning(
+                "X autopost failed with HTTP %d: %s%s",
+                code,
+                detail,
+                (
+                    "; scheduler halted for the local day"
+                    if state.get("halted_for_day")
+                    else ""
+                ),
+            )
+            return {
+                "status": "failed",
+                "http_status": code,
+                "reason": state.get("halt_reason", "x_api_error"),
+                "detail": detail,
+            }
         except Exception as exc:
             state["schedule"][slot_index] = {
                 **slot,
@@ -398,7 +446,7 @@ def status_snapshot(config: XAutopostConfig | None = None) -> dict[str, Any]:
             connected = bool(get_credential(cfg.owner_id, "x"))
         except Exception:
             connected = False
-    return {
+    snapshot = {
         "enabled": cfg.enabled,
         "live": cfg.live,
         "account_connected": connected,
@@ -408,3 +456,15 @@ def status_snapshot(config: XAutopostConfig | None = None) -> dict[str, Any]:
         "timezone": cfg.timezone_name,
         "blockers": cfg.blockers(account_connected=connected),
     }
+    if cfg.owner_id:
+        try:
+            state = _load_state(cfg.owner_id)
+            snapshot["scheduler"] = {
+                "local_day": state.get("local_day"),
+                "posted_count": int(state.get("posted_count", 0)),
+                "halted_for_day": bool(state.get("halted_for_day")),
+                "halt_reason": state.get("halt_reason"),
+            }
+        except Exception:
+            logger.debug("Could not load X autopost state for status", exc_info=True)
+    return snapshot

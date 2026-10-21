@@ -1,4 +1,4 @@
-"""Registered Gmail and X capabilities."""
+"""Registered Google and X account capabilities."""
 
 from __future__ import annotations
 
@@ -79,6 +79,68 @@ class GmailSendTool:
             f"Email sent to {recipient}. Gmail message ID: `{result.get('id', 'unknown')}`.",
             {"message_id": result.get("id"), "thread_id": result.get("threadId")},
             "Gmail API",
+        )
+
+
+class CalendarListTool:
+    name, read_only = "calendar_list", True
+
+    async def execute(
+        self, params: Mapping[str, Any], context: ToolContext
+    ) -> ToolResult:
+        from connectors.google_oauth import calendar_list_events
+        from services.personal_ops import import_calendar_events
+
+        rows = await calendar_list_events(
+            context.internal_id,
+            time_min=str(params["time_min"]),
+            time_max=str(params["time_max"]),
+            query=str(params.get("query") or ""),
+            limit=int(params.get("limit", 10)),
+        )
+        import_calendar_events(context.internal_id, rows, provider="google")
+        lines = []
+        for row in rows:
+            label = (
+                f"[{row['title']}]({row['html_link']})"
+                if row.get("html_link")
+                else row["title"]
+            )
+            lines.append(
+                f"- **{label}**\n  {row['start']} → {row['end']}"
+                + (f"\n  {row['location']}" if row.get("location") else "")
+            )
+        return ToolResult(
+            "**Google Calendar**\n\n"
+            + ("\n".join(lines) if lines else "Nothing is scheduled in that window."),
+            {"events": rows, "untrusted": True},
+            "Google Calendar API",
+        )
+
+
+class CalendarCreateTool:
+    name, read_only = "calendar_create", False
+
+    async def execute(
+        self, params: Mapping[str, Any], context: ToolContext
+    ) -> ToolResult:
+        _require_approved(context)
+        from connectors.google_oauth import calendar_create_event
+
+        row = await calendar_create_event(
+            context.internal_id,
+            summary=str(params["summary"]),
+            start=str(params["start"]),
+            end=str(params["end"]),
+            timezone_name=str(params["timezone"]),
+            description=str(params.get("description") or ""),
+            location=str(params.get("location") or ""),
+        )
+        link = f" [Open event]({row['html_link']})" if row.get("html_link") else ""
+        return ToolResult(
+            f"Added **{row.get('summary') or params['summary']}** to Google Calendar.{link}",
+            {"event": row},
+            "Google Calendar API",
         )
 
 

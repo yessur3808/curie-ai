@@ -288,6 +288,34 @@ async def execute_request(
             )
             return "That approval token is invalid, expired, already used, or belongs to another user."
         if not approved:
+            if str(pending.get("action") or "") == "github_contribution_publish":
+                try:
+                    from services.action_previews import preview_store
+                    from services.contribution_learning import contribution_learning
+
+                    preview = preview_store.load(
+                        str(internal_id),
+                        str((pending.get("params") or {}).get("preview_id") or ""),
+                        allow_consumed=True,
+                    )
+                    payload = dict(preview.get("payload") or {})
+                    contribution_learning.record(
+                        str(internal_id),
+                        "preview_rejected",
+                        repository=str(payload.get("repository") or ""),
+                        topic=str(payload.get("topic") or ""),
+                        preview_id=str(preview.get("id") or ""),
+                    )
+                except Exception:
+                    pass
+            try:
+                from services.action_previews import discard_request_preview
+
+                discard_request_preview(
+                    str(internal_id), dict(pending.get("params") or {})
+                )
+            except Exception:
+                pass
             _audit(
                 internal_id,
                 pending["action"],
@@ -308,6 +336,26 @@ async def execute_request(
             return "Action rejected. No changes were made."
         restored = ToolRequest(**pending)
         restored.needs_approval = False
+        if restored.action == "github_contribution_publish":
+            try:
+                from services.action_previews import preview_store
+                from services.contribution_learning import contribution_learning
+
+                preview = preview_store.load(
+                    str(internal_id),
+                    str(restored.params.get("preview_id") or ""),
+                    allow_consumed=True,
+                )
+                payload = dict(preview.get("payload") or {})
+                contribution_learning.record(
+                    str(internal_id),
+                    "preview_approved",
+                    repository=str(payload.get("repository") or ""),
+                    topic=str(payload.get("topic") or ""),
+                    preview_id=str(preview.get("id") or ""),
+                )
+            except Exception:
+                pass
         return await execute_request(
             restored,
             internal_id,
@@ -316,6 +364,33 @@ async def execute_request(
             _outcome=_outcome,
         )
     if req.needs_approval:
+        preview_text = ""
+        try:
+            from services.action_previews import prepare_action_preview
+
+            req, preview_text = await prepare_action_preview(
+                req, str(internal_id), profile
+            )
+        except Exception as exc:
+            _audit(
+                internal_id,
+                req.action,
+                "preview_failed",
+                connector=profile.get("_connector", "unknown"),
+                error_type=type(exc).__name__,
+                policy_decision="preview_required",
+            )
+            _capture(
+                _outcome,
+                status="failed",
+                capability=req.action,
+                verification_status="not_run",
+                error_type="preview_failed",
+            )
+            return (
+                "I couldn't prepare a trustworthy preview, so I did not create "
+                f"an approval or make changes. {str(exc)[:300]}"
+            )
         connector = str(profile.get("_connector", "unknown"))
         authorization = dict(req.authorization or {})
         authorization.setdefault("owner_scope_hash", _owner_scope_hash(internal_id))
@@ -398,11 +473,13 @@ async def execute_request(
             verification_status="not_run",
             data={"approval_token": token},
         )
-        return (
-            f"I can {req.explanation}. This is an external action. "
-            f"Reply `/approve action {token}` within 30 minutes to proceed, or "
-            f"`/reject action {token}` to cancel."
+        approval = (
+            f"Reply `/approve action {token}` within 30 minutes to apply exactly "
+            f"this preview, or `/reject action {token}` to cancel."
         )
+        if preview_text:
+            return f"{preview_text}\n\n{approval}"
+        return f"I can {req.explanation}. This is an external action. {approval}"
     try:
         from agent.tooling import ToolContext, get_runtime_registry
 
@@ -419,13 +496,21 @@ async def execute_request(
                 idempotency=SimpleNamespace(mode="read_only", safe_retry=True),
             )
         )
+        execution_params = dict(req.params)
+        materialized_preview = None
+        if approved:
+            from services.action_previews import materialize_request_preview
+
+            execution_params, materialized_preview = materialize_request_preview(
+                str(internal_id), req.action, req.params
+            )
         safe_params = {
             key: (
                 "[REDACTED]"
                 if key in getattr(definition, "audit_redactions", ())
                 else value
             )
-            for key, value in req.params.items()
+            for key, value in execution_params.items()
         }
         if req.authorization and not _valid_execution_authorization(
             req.authorization,
@@ -439,7 +524,7 @@ async def execute_request(
         mutation_request_hash = ""
         if definition.risk == "mutating" and req.idempotency_key:
             mutation_key = req.idempotency_key
-            mutation_request_hash = _parameter_hash(req.action, req.params)
+            mutation_request_hash = _parameter_hash(req.action, execution_params)
             existing = _repositories().mutations.reserve(
                 str(internal_id),
                 mutation_key,
@@ -496,7 +581,7 @@ async def execute_request(
                     )
         tool_result = await registry.execute(
             req.action,
-            req.params,
+            execution_params,
             ToolContext(
                 internal_id=str(internal_id),
                 profile=profile,
@@ -505,6 +590,10 @@ async def execute_request(
             ),
         )
         result = tool_result.text
+        if materialized_preview is not None:
+            from services.action_previews import consume_materialized_preview
+
+            consume_materialized_preview(str(internal_id), materialized_preview)
         verification_status = _verification_status(req.action, tool_result.data)
         if mutation_key:
             _repositories().mutations.finish(
@@ -568,6 +657,14 @@ async def execute_request(
         )
         return "I do not have an executor for that action."
     except Exception as exc:
+        materialized_preview = locals().get("materialized_preview")
+        if materialized_preview is not None:
+            try:
+                from services.action_previews import consume_materialized_preview
+
+                consume_materialized_preview(str(internal_id), materialized_preview)
+            except Exception:
+                pass
         mutation_key = str(locals().get("mutation_key") or "")
         definition = locals().get("definition")
         if mutation_key:
@@ -585,7 +682,9 @@ async def execute_request(
         redactions = getattr(locals().get("definition"), "audit_redactions", ())
         safe_params = {
             key: "[REDACTED]" if key in redactions else value
-            for key, value in req.params.items()
+            for key, value in dict(
+                locals().get("execution_params") or req.params
+            ).items()
         }
         _audit(
             internal_id,

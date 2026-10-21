@@ -499,6 +499,28 @@ jobs:
       - name: Run public contract and migration conformance
         run: pytest -q tests/test_phase10_extensibility.py tests/test_connector_lifecycle.py tests/test_media_ingestion.py tests/test_tooling_registry.py
 
+  contribution-sandbox:
+    name: Disposable contribution sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install sandbox test dependencies
+        run: pip install -r requirements-ci.txt
+      - name: Build the pinned network-isolated verifier image
+        run: >-
+          docker build
+          --tag curie-contribution-sandbox:py312-v1
+          deploy/contribution-sandbox
+      - name: Verify a real public patch with networking disabled in the test container
+        run: python -m scripts.smoke_contribution_sandbox
+
   release-ready:
     name: Release readiness
     if: always()
@@ -518,6 +540,7 @@ jobs:
       - security-scans
       - deterministic-evaluation
       - release-contracts
+      - contribution-sandbox
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -538,6 +561,7 @@ jobs:
           SECURITY_SCANS: ${{ needs.security-scans.result }}
           DETERMINISTIC_EVALUATION: ${{ needs.deterministic-evaluation.result }}
           RELEASE_CONTRACTS: ${{ needs.release-contracts.result }}
+          CONTRIBUTION_SANDBOX: ${{ needs.contribution-sandbox.result }}
         run: |
           for result in \
             "$STATIC_ANALYSIS" \
@@ -554,7 +578,8 @@ jobs:
             "$SECURITY_TESTS" \
             "$SECURITY_SCANS" \
             "$DETERMINISTIC_EVALUATION" \
-            "$RELEASE_CONTRACTS"
+            "$RELEASE_CONTRACTS" \
+            "$CONTRIBUTION_SANDBOX"
           do
             test "$result" = "success"
           done

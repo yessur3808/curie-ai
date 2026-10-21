@@ -73,6 +73,13 @@ _DELETE_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+_NON_REQUEST_REMINDER_CONTEXT = re.compile(
+    r"\b(?:already\s+awake|does(?:\s+not|n['’]t)\s+make\s+sense|"
+    r"do(?:\s+not|n['’]t)\s+(?:set|create|need|want)|no\s+need\s+to\s+(?:set|create)|"
+    r"why\s+(?:would|should)\s+(?:i|we|you))\b.{0,100}\b(?:alarm|reminder)\b",
+    re.IGNORECASE,
+)
+
 _TIME_PATTERNS = [
     # "in 30 minutes", "in 2 hours", "in 1 day"
     re.compile(
@@ -97,7 +104,10 @@ _TIME_PATTERNS = [
 
 def is_reminder_query(text: str) -> bool:
     """Return True if the text looks like a reminder/scheduling intent."""
-    return bool(_REMINDER_KEYWORDS.search(text))
+    return bool(
+        _REMINDER_KEYWORDS.search(text)
+        and not _NON_REQUEST_REMINDER_CONTEXT.search(text)
+    )
 
 
 def _parse_due_time(text: str) -> Optional[datetime]:
@@ -186,6 +196,40 @@ def _extract_reminder_message(text: str) -> str:
     cleaned = re.sub(r"\s*(–|-|at|in|on|by|before|after)\s*$", "", cleaned).strip()
 
     return cleaned or text.strip()
+
+
+def parse_reminder_request(text: str, platform: str = "unknown") -> dict | None:
+    """Return a typed reminder intent without mutating durable state."""
+    if _DELETE_KEYWORDS.search(text):
+        match = _DELETE_KEYWORDS.search(text)
+        number = re.search(r"\b(\d+)\b", text[match.end() :]) if match else None
+        return {
+            "action": "reminder_delete",
+            "params": {"index": int(number.group(1)) if number else 0},
+            "needs_approval": True,
+        }
+    if _LIST_KEYWORDS.search(text):
+        return {"action": "reminder_list", "params": {}, "needs_approval": False}
+    if not is_reminder_query(text):
+        return None
+    due_at = _parse_due_time(text)
+    if due_at is None:
+        return {
+            "action": "clarify",
+            "params": {
+                "message": "When should I remind you? For example: ‘remind me in 30 minutes’ or ‘tomorrow at 9am’."
+            },
+            "needs_approval": False,
+        }
+    return {
+        "action": "reminder_create",
+        "params": {
+            "message": _extract_reminder_message(text) or "your reminder",
+            "due_at": due_at.isoformat(),
+            "platform": str(platform or "unknown"),
+        },
+        "needs_approval": True,
+    }
 
 
 # ---------------------------------------------------------------------------

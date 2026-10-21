@@ -923,7 +923,10 @@ fn read_archive_member<R: Read + Seek>(
         let file = archive
             .by_index_raw(index)
             .map_err(|_| value_error("invalid archive member"))?;
-        validate_member_name(file.name())?;
+        let name = file
+            .name()
+            .map_err(|_| value_error("invalid archive member name"))?;
+        validate_member_name(name.as_ref())?;
         total = total.saturating_add(file.size());
         if total > max_expanded {
             return Err(value_error(

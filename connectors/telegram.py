@@ -301,7 +301,7 @@ def _startup_notification_path() -> Path:
 def _startup_notification_due() -> bool:
     try:
         cooldown = max(
-            0, int(os.getenv("CURIE_STARTUP_NOTIFICATION_COOLDOWN_SECONDS", "0"))
+            0, int(os.getenv("CURIE_STARTUP_NOTIFICATION_COOLDOWN_SECONDS", "21600"))
         )
     except ValueError:
         cooldown = 0
@@ -317,7 +317,9 @@ def _startup_notification_due() -> bool:
 
 def _mark_startup_notification_sent() -> None:
     try:
-        cooldown = int(os.getenv("CURIE_STARTUP_NOTIFICATION_COOLDOWN_SECONDS", "0"))
+        cooldown = int(
+            os.getenv("CURIE_STARTUP_NOTIFICATION_COOLDOWN_SECONDS", "21600")
+        )
     except ValueError:
         cooldown = 0
     if cooldown <= 0:
@@ -881,6 +883,7 @@ async def _process_and_reply(
     internal_id: str,
     *,
     attachments: Optional[list[dict]] = None,
+    force_voice: bool = False,
 ) -> None:
     normalized_input = {
         "platform": "telegram",
@@ -902,9 +905,17 @@ async def _process_and_reply(
             await typing_task
     response_text = result.get("text", "[Error: No response]")
     try:
-        from services.voice_delivery import synthesize_reply, voice_replies_enabled
+        from services.voice_delivery import (
+            synthesize_reply,
+            voice_replies_enabled,
+            voice_reply_requested,
+        )
 
-        if voice_replies_enabled(internal_id, "telegram"):
+        if (
+            force_voice
+            or voice_reply_requested(user_message)
+            or voice_replies_enabled(internal_id, "telegram")
+        ):
             voice_path = await synthesize_reply(
                 response_text, _runtime.workflow.persona, internal_id
             )
@@ -1127,6 +1138,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_message,
         internal_id,
         attachments=attachment_descriptors,
+        force_voice=bool(update.message.voice),
     )
 
 

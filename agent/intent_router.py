@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 import json
 import os
 import re
 from typing import Any, Callable, Iterable, Mapping, Optional
+from zoneinfo import ZoneInfo
 
 from agent.understanding.taxonomy import INTENT_TAXONOMY
 
@@ -23,6 +25,20 @@ class ToolRequest:
     classifier_trace: dict[str, Any] = field(default_factory=dict)
     authorization: dict[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""
+
+    def __post_init__(self) -> None:
+        # A single named device remains immediate. Broad groups and explicit
+        # batches have a larger blast radius and must always be previewed.
+        if self.action == "home_control":
+            targets = self.params.get("targets") or ()
+            target = str(self.params.get("target") or "").strip().casefold()
+            if len(targets) > 1 or target in {
+                "all lights",
+                "all devices",
+                "every light",
+                "every device",
+            }:
+                self.needs_approval = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +93,63 @@ TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
             ("body", _NONEMPTY),
         ),
     ),
+    "calendar_list": ParameterSpec(
+        required=("time_min", "time_max"),
+        defaults=(("query", ""), ("limit", 10)),
+        validators=(
+            ("time_min", _NONEMPTY),
+            ("time_max", _NONEMPTY),
+            ("query", lambda value: isinstance(value, str)),
+            ("limit", lambda value: isinstance(value, int) and 1 <= value <= 50),
+        ),
+    ),
+    "calendar_create": ParameterSpec(
+        required=("summary", "start", "end", "timezone"),
+        defaults=(("description", ""), ("location", "")),
+        validators=(
+            ("summary", _NONEMPTY),
+            ("start", _NONEMPTY),
+            ("end", _NONEMPTY),
+            ("timezone", _NONEMPTY),
+            ("description", lambda value: isinstance(value, str)),
+            ("location", lambda value: isinstance(value, str)),
+        ),
+    ),
+    "flight_track": ParameterSpec(
+        required=("flight_number",),
+        defaults=(("date", ""),),
+        validators=(
+            (
+                "flight_number",
+                lambda value: isinstance(value, str)
+                and bool(re.fullmatch(r"[A-Za-z0-9]{2,3}\s?\d{1,4}[A-Za-z]?", value)),
+            ),
+            (
+                "date",
+                lambda value: isinstance(value, str)
+                and (not value or bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", value))),
+            ),
+        ),
+    ),
+    "places_search": ParameterSpec(
+        required=("query",),
+        defaults=(
+            ("limit", 5),
+            ("open_now", False),
+            ("radius_meters", 5000),
+        ),
+        validators=(
+            ("query", _NONEMPTY),
+            ("limit", lambda value: isinstance(value, int) and 1 <= value <= 10),
+            ("open_now", _BOOL),
+            (
+                "radius_meters",
+                lambda value: isinstance(value, (int, float))
+                and 100 <= value <= 50_000,
+            ),
+        ),
+    ),
+    "dashboard_snapshot": ParameterSpec(),
     "x_search": ParameterSpec(required=("query",), validators=(("query", _NONEMPTY),)),
     "x_read": ParameterSpec(
         required=("post_id",),
@@ -153,6 +226,32 @@ TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
         defaults=(("path", "."), ("run_tests", False)),
         validators=(("request", _NONEMPTY), ("path", _PATH), ("run_tests", _BOOL)),
     ),
+    "organize_files": ParameterSpec(
+        required=("files", "destination"),
+        defaults=(("path", "."),),
+        validators=(
+            (
+                "files",
+                lambda value: isinstance(value, (list, tuple))
+                and 1 <= len(value) <= 50
+                and all(_NONEMPTY(item) for item in value),
+            ),
+            ("destination", _PATH),
+            ("path", _PATH),
+        ),
+    ),
+    "draft_note": ParameterSpec(
+        required=("path", "content"),
+        defaults=(("workspace", "."),),
+        validators=(("path", _PATH), ("content", _NONEMPTY), ("workspace", _PATH)),
+    ),
+    "github_contribution_scan": ParameterSpec(
+        defaults=(("topic", ""),),
+        validators=(("topic", lambda value: isinstance(value, str)),),
+    ),
+    "github_contribution_publish": ParameterSpec(
+        required=("proposal_id",), validators=(("proposal_id", _NONEMPTY),)
+    ),
     "home_status": ParameterSpec(
         defaults=(("target", ""), ("provider", ""), ("match_only", False)),
         validators=(
@@ -178,6 +277,20 @@ TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
     "home_alias_reject": ParameterSpec(
         required=("alias",), validators=(("alias", _NONEMPTY),)
     ),
+    "reminder_list": ParameterSpec(),
+    "reminder_create": ParameterSpec(
+        required=("message", "due_at"),
+        defaults=(("platform", ""),),
+        validators=(
+            ("message", _NONEMPTY),
+            ("due_at", _NONEMPTY),
+            ("platform", lambda value: isinstance(value, str)),
+        ),
+    ),
+    "reminder_delete": ParameterSpec(
+        defaults=(("index", 0),),
+        validators=(("index", lambda value: isinstance(value, int) and value >= 0),),
+    ),
     "emergency_stop": ParameterSpec(),
 }
 
@@ -185,7 +298,11 @@ _MUTATING_ACTIONS = {
     "create_directory",
     "create_python_project",
     "project_change",
+    "organize_files",
+    "draft_note",
+    "github_contribution_publish",
     "gmail_send",
+    "calendar_create",
     "x_post",
     "x_reply",
     "x_dm_send",
@@ -194,6 +311,8 @@ _MUTATING_ACTIONS = {
     "home_control",
     "home_alias",
     "home_alias_reject",
+    "reminder_create",
+    "reminder_delete",
     "emergency_stop",
 }
 _APPROVE = re.compile(r"^/approve\s+action\s+([a-f0-9]{8})$", re.I)
@@ -205,7 +324,7 @@ _EMERGENCY_STOP = re.compile(
 )
 _ACTION_HINT = re.compile(
     r"\b(?:files?|folder|directory|project|repo|repository|weather|forecast|"
-    r"rain|ram|memory|hardware|computer|internet|network|speed|latency|ping|email|gmail|twitter|tweet|\bx\b|direct message|research|sources?|investigate|look up|"
+    r"rain|ram|memory|hardware|computer|internet|network|speed|latency|ping|email|gmail|calendar|schedule|flight|airport|maps?|directions?|restaurant|doctor|coffee|post office|store|dashboard|telemetry|twitter|tweet|\bx\b|direct message|research|sources?|investigate|look up|news|politics?|election|president|prime minister|"
     r"home|house|device|light|lamp|plug|switch|air conditioner|ac|tapo|nanoleaf|smartthings|petlibro|govee|mi home|xiaomi|thinq|"
     r"create|make|run|inspect|analy[sz]e|fix|implement|generate|modify|refactor|turn on|turn off)\b",
     re.I,
@@ -265,6 +384,111 @@ def _project_name(text: str) -> Optional[str]:
         re.I,
     )
     return match.group(1) if match else None
+
+
+def _calendar_window(label: str) -> tuple[str, str]:
+    """Resolve a small, deterministic set of natural calendar windows."""
+    timezone_name = os.getenv("DEFAULT_TIMEZONE", "UTC")
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz, timezone_name = ZoneInfo("UTC"), "UTC"
+    now = datetime.now(tz)
+    folded = label.casefold()
+    if "tomorrow" in folded:
+        start = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        end = start + timedelta(days=1)
+    elif re.search(r"\b(?:week|seven days|next 7 days)\b", folded):
+        start = now
+        end = now + timedelta(days=7)
+    elif re.search(r"\b(?:month|next 30 days)\b", folded):
+        start = now
+        end = now + timedelta(days=30)
+    elif "today" in folded:
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+    else:
+        start = now
+        end = now + timedelta(days=7)
+    return start.isoformat(), end.isoformat()
+
+
+def _natural_calendar_create(command: str) -> ToolRequest | None:
+    """Parse common one-hour event phrasing; ambiguous writes remain clarifications."""
+    match = re.fullmatch(
+        r"(?:please\s+)?(?:add|schedule|create|put)\s+(?:an?\s+)?"
+        r"(?P<title>.+?)\s+"
+        r"(?P<day>today|tomorrow|on\s+\d{4}-\d{2}-\d{2})\s+"
+        r"at\s+(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?"
+        r"(?:\s+(?:on|to|in)\s+(?:my\s+)?(?:google\s+)?calendar)?"
+        r"(?:\s+for\s+(?P<duration>\d{1,3})\s*(?P<unit>minutes?|hours?))?"
+        r"[.!?]?",
+        command.strip(),
+        re.I | re.S,
+    )
+    if not match or not re.search(
+        r"\b(?:calendar|event|appointment|meeting|call|consultation|reservation)\b",
+        command,
+        re.I,
+    ):
+        return None
+    timezone_name = os.getenv("DEFAULT_TIMEZONE", "UTC")
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz, timezone_name = ZoneInfo("UTC"), "UTC"
+    now = datetime.now(tz)
+    day = match.group("day").casefold()
+    if day == "tomorrow":
+        event_date = (now + timedelta(days=1)).date()
+    elif day == "today":
+        event_date = now.date()
+    else:
+        event_date = datetime.strptime(day.removeprefix("on "), "%Y-%m-%d").date()
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or 0)
+    ampm = (match.group("ampm") or "").casefold()
+    if ampm and not 1 <= hour <= 12:
+        return ToolRequest("clarify", {"message": "What start time should I use?"})
+    if ampm == "pm" and hour != 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59:
+        return ToolRequest("clarify", {"message": "What start time should I use?"})
+    start = datetime.combine(event_date, datetime.min.time(), tzinfo=tz).replace(
+        hour=hour, minute=minute
+    )
+    duration = int(match.group("duration") or 1)
+    if match.group("unit") and match.group("unit").casefold().startswith("minute"):
+        delta = timedelta(minutes=duration)
+    else:
+        delta = timedelta(hours=duration)
+    if delta <= timedelta(0) or delta > timedelta(days=1):
+        return ToolRequest(
+            "clarify", {"message": "How long should the calendar event be?"}
+        )
+    title = re.sub(
+        r"\s+(?:on|to|in)\s+(?:my\s+)?(?:google\s+)?calendar\s*$",
+        "",
+        match.group("title"),
+        flags=re.I,
+    ).strip()
+    return ToolRequest(
+        "calendar_create",
+        {
+            "summary": title,
+            "start": start.isoformat(),
+            "end": (start + delta).isoformat(),
+            "timezone": timezone_name,
+            "description": "",
+            "location": "",
+        },
+        needs_approval=True,
+        explanation=f"add {title!r} to Google Calendar at {start.isoformat()}",
+    )
 
 
 def _home_target(value: str) -> str:
@@ -592,6 +816,22 @@ def classify_request(
     alias_request = _home_alias_request(command)
     if alias_request:
         return alias_request
+    calendar_create = _natural_calendar_create(command)
+    if calendar_create:
+        return calendar_create
+    try:
+        from agent.skills.scheduler import parse_reminder_request
+
+        reminder = parse_reminder_request(command)
+    except Exception:
+        reminder = None
+    if reminder:
+        return ToolRequest(
+            str(reminder["action"]),
+            dict(reminder.get("params") or {}),
+            needs_approval=bool(reminder.get("needs_approval")),
+            explanation="manage the displayed scheduled reminder",
+        )
     # Tool vocabulary inside quoted, illustrative, or explicitly figurative
     # prose is not a command. Keep this ahead of natural home-control matching,
     # while leaving explicit slash commands and corrections above it usable.
@@ -802,6 +1042,66 @@ def classify_request(
             needs_approval=True,
             explanation=f"send this email to {recipient}",
         )
+    match = re.fullmatch(r"/calendar\s+list(?:\s+(.+))?", command, re.I | re.S)
+    if match:
+        label = (match.group(1) or "week").strip()
+        time_min, time_max = _calendar_window(label)
+        query = (
+            ""
+            if re.search(r"\b(?:today|tomorrow|week|month)\b", label, re.I)
+            else label
+        )
+        return ToolRequest(
+            "calendar_list",
+            {"time_min": time_min, "time_max": time_max, "query": query, "limit": 20},
+        )
+    match = re.fullmatch(
+        r"/calendar\s+create\s+([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)"
+        r"(?:\|([^|]*))?(?:\|(.+))?",
+        command,
+        re.I | re.S,
+    )
+    if match:
+        summary, start, end, timezone_name, location, description = (
+            (part or "").strip() for part in match.groups()
+        )
+        return ToolRequest(
+            "calendar_create",
+            {
+                "summary": summary,
+                "start": start,
+                "end": end,
+                "timezone": timezone_name,
+                "location": location,
+                "description": description,
+            },
+            needs_approval=True,
+            explanation=f"add {summary!r} to Google Calendar from {start} to {end}",
+        )
+    match = re.fullmatch(
+        r"/(?:flight|track)\s+([A-Za-z0-9]{2,3}\s?\d{1,4}[A-Za-z]?)"
+        r"(?:\s+(\d{4}-\d{2}-\d{2}))?",
+        command,
+        re.I,
+    )
+    if match:
+        return ToolRequest(
+            "flight_track",
+            {"flight_number": match.group(1), "date": match.group(2) or ""},
+        )
+    match = re.fullmatch(r"/(?:places|maps)\s+(.+)", command, re.I | re.S)
+    if match:
+        return ToolRequest(
+            "places_search",
+            {
+                "query": match.group(1).strip(),
+                "limit": 5,
+                "open_now": bool(re.search(r"\bopen now\b", match.group(1), re.I)),
+                "radius_meters": 5000,
+            },
+        )
+    if re.fullmatch(r"/(?:dashboard|telemetry)(?:\s+status)?", command, re.I):
+        return ToolRequest("dashboard_snapshot")
     match = re.fullmatch(r"/(?:x|twitter)\s+search\s+(.+)", command, re.I | re.S)
     if match:
         return ToolRequest("x_search", {"query": match.group(1).strip()})
@@ -839,6 +1139,47 @@ def classify_request(
             explanation=f"send this X direct message to user ID {match.group(1)}",
         )
 
+    match = re.fullmatch(r"/organize\s+([^|]+)\|\s*(.+)", command, re.I | re.S)
+    if match:
+        files = [item.strip() for item in match.group(2).split(",") if item.strip()]
+        return ToolRequest(
+            "organize_files",
+            {"destination": match.group(1).strip(), "files": files, "path": "."},
+            needs_approval=True,
+            explanation="organize the selected files",
+        )
+    match = re.fullmatch(
+        r"/(?:note|draft-note)\s+([^|]+)\|\s*(.+)", command, re.I | re.S
+    )
+    if match:
+        return ToolRequest(
+            "draft_note",
+            {
+                "path": match.group(1).strip(),
+                "content": match.group(2).strip(),
+                "workspace": ".",
+            },
+            needs_approval=True,
+            explanation="save this drafted note",
+        )
+    match = re.fullmatch(
+        r"/(?:opensource|open-source)\s+publish\s+([a-f0-9]{16})", command, re.I
+    )
+    if match:
+        return ToolRequest(
+            "github_contribution_publish",
+            {"proposal_id": match.group(1).lower()},
+            needs_approval=True,
+            explanation="push the reviewed branch and open a pull request",
+        )
+    match = re.fullmatch(
+        r"/(?:opensource|open-source)\s+(?:scan|find)(?:\s+(.+))?", command, re.I | re.S
+    )
+    if match:
+        return ToolRequest(
+            "github_contribution_scan", {"topic": (match.group(1) or "").strip()}
+        )
+
     candidates: list[ToolRequest] = []
     if re.search(
         r"\b(?:what|show|check|inspect)\b.{0,40}\b(?:using|uses)\b.{0,20}\b(?:ram|memory)\b|"
@@ -865,6 +1206,60 @@ def classify_request(
         lowered,
     ):
         candidates.append(ToolRequest("gmail_search", {"query": text}))
+    if re.search(
+        r"\b(?:what(?:'s| is)|show|check|read|list|look at)\b.{0,50}\b"
+        r"(?:my\s+)?(?:google\s+)?calendar\b|"
+        r"\b(?:what|anything)\b.{0,30}\b(?:scheduled|on my agenda)\b",
+        lowered,
+    ):
+        time_min, time_max = _calendar_window(lowered)
+        candidates.append(
+            ToolRequest(
+                "calendar_list",
+                {"time_min": time_min, "time_max": time_max, "query": "", "limit": 20},
+            )
+        )
+    flight_match = re.search(
+        r"\b(?:track|check|find|where(?:'s| is)|status(?: of)?|map)\s+"
+        r"(?:flight\s+)?([A-Za-z0-9]{2,3}\s?\d{1,4}[A-Za-z]?)\b|"
+        r"\bflight\s+([A-Za-z0-9]{2,3}\s?\d{1,4}[A-Za-z]?)\b",
+        text,
+        re.I,
+    )
+    if flight_match:
+        candidates.append(
+            ToolRequest(
+                "flight_track",
+                {
+                    "flight_number": flight_match.group(1) or flight_match.group(2),
+                    "date": "",
+                },
+            )
+        )
+    if re.search(
+        r"\b(?:find|show|recommend|suggest|where(?:'s| is)|look for)\b.{0,100}\b"
+        r"(?:restaurants?|doctors?|clinics?|hospitals?|coffee shops?|cafes?|stores?|shops?|"
+        r"post offices?|pharmacies|supermarkets?|groceries|places?)\b",
+        lowered,
+    ):
+        candidates.append(
+            ToolRequest(
+                "places_search",
+                {
+                    "query": text,
+                    "limit": 5,
+                    "open_now": bool(re.search(r"\bopen now\b", lowered)),
+                    "radius_meters": 5000,
+                },
+            )
+        )
+    if re.search(
+        r"\b(?:show|read|check|summari[sz]e|what(?:'s| is))\b.{0,50}\b"
+        r"(?:curie(?:'s)?\s+)?(?:dashboard|telemetry)\b|"
+        r"\b(?:dashboard|telemetry)\b.{0,30}\b(?:status|data|metrics?|summary)\b",
+        lowered,
+    ):
+        candidates.append(ToolRequest("dashboard_snapshot"))
     if re.search(
         r"\b(?:search|find)\b.{0,30}\b(?:x|twitter|tweets?|posts?)\b|\b(?:x|twitter)\b.{0,30}\b(?:search|find)\b",
         lowered,
@@ -893,6 +1288,49 @@ def classify_request(
             return ToolRequest(
                 "clarify", {"message": "What should I name the directory?"}
             )
+    organize_match = re.search(
+        r"\borganize\s+(?:the\s+)?(?:selected\s+)?files?\s+(.+?)\s+"
+        r"(?:into|in|under)\s+(?:the\s+)?(?:folder|directory)\s+([^.!?]+)",
+        text,
+        re.I,
+    )
+    if organize_match:
+        files = [
+            item.strip(" `\"'")
+            for item in re.split(r"\s*,\s*|\s+and\s+", organize_match.group(1))
+            if item.strip(" `\"'")
+        ]
+        candidates.append(
+            ToolRequest(
+                "organize_files",
+                {
+                    "files": files,
+                    "destination": organize_match.group(2).strip(" `\"'"),
+                    "path": ".",
+                },
+                needs_approval=True,
+                explanation="organize the selected files",
+            )
+        )
+    note_match = re.search(
+        r"\b(?:draft|write|save|create)\s+(?:a\s+)?note\s+(?:at|as|named)\s+"
+        r"([^:|]+)\s*[:|]\s*(.+)",
+        text,
+        re.I | re.S,
+    )
+    if note_match:
+        candidates.append(
+            ToolRequest(
+                "draft_note",
+                {
+                    "path": note_match.group(1).strip(" `\"'"),
+                    "content": note_match.group(2).strip(),
+                    "workspace": ".",
+                },
+                needs_approval=True,
+                explanation="save this drafted note",
+            )
+        )
     if re.search(
         r"\b(?:fix|implement|add|generate|modify|adjust|refactor)\b.*\b(?:bug|code|endpoint|project|feature|tests?)\b",
         lowered,
@@ -928,8 +1366,20 @@ def classify_request(
     ):
         candidates.append(ToolRequest("weather", {"query": text}))
     if re.search(
+        r"\b(?:search|look up|check)\b.{0,60}\b(?:google|the web|the internet|"
+        r"official (?:site|website)|their (?:site|website))\b|"
+        r"\b(?:google|web|internet) search\b",
+        lowered,
+    ):
+        candidates.append(ToolRequest("research", {"query": text}))
+    if re.search(
         r"\b(?:research|analy[sz]e|plan)\b.*\b(?:market|trends?|trip|travel|itinerary|sources?|topic)\b|"
-        r"\b(?:research|current sources?)\b",
+        r"\b(?:research|current sources?)\b|"
+        r"\b(?:latest|current|recent|today(?:'s)?)\b.{0,80}\b"
+        r"(?:news|politics?|election|government|president|prime minister|law|policy|"
+        r"social trends?|economy|markets?|technology|science|world events?)\b|"
+        r"\b(?:news|what(?:'s| is) happening)\b.{0,80}\b"
+        r"(?:politics?|election|government|world|technology|science|society|social)\b",
         lowered,
     ):
         candidates.append(ToolRequest("research", {"query": text}))

@@ -75,7 +75,8 @@ _SIGNAL_HABITS = (
 # Professional / contextual facts
 _SIGNAL_CONTEXT = (
     r"i work (as|in|at)|my timezone|my location|i speak|my language|"
-    r"i travel|i visit|my job|my occupation|my hobby|my hobbies"
+    r"i travel|i visit|i have (?:a|an|my) trip|my upcoming trip|i(?:'m| am) travelling|"
+    r"i(?:'m| am) traveling|my job|my occupation|my hobby|my hobbies"
 )
 
 _SIGNAL_PATTERNS = re.compile(
@@ -234,6 +235,72 @@ def _filter_facts(existing: dict, new_facts: dict) -> dict:
     return merged
 
 
+_TRIP_DATE_RANGE = re.compile(
+    r"\btrip\b.{0,40}?\bfrom\s+(.{1,40}?)\s+to\s+(.{1,40}?)(?:[.!?]|$)", re.I
+)
+_TRIP_DESTINATION = re.compile(
+    r"\b(?:trip|travell?ing|flying)\s+to\s+([^,.!?]{2,80})", re.I
+)
+_TRIP_PURPOSE = re.compile(
+    r"\b(?:it|the trip)(?:['’]s|\s+is)?\s+for\s+(.{2,100}?)(?:[.!?]|$)", re.I
+)
+_DESTINATION_QUESTION = re.compile(
+    r"\b(?:where.{0,30}(?:going|travell?ing|trip)|destination|which\s+(?:city|country))\b",
+    re.I,
+)
+_SHORT_CONTEXT_ANSWER = re.compile(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'-]{1,79}")
+
+
+def _history_messages(history) -> list[tuple[str, str]]:
+    messages: list[tuple[str, str]] = []
+    for row in history or ():
+        if isinstance(row, dict):
+            role, content = row.get("role"), row.get("content")
+        elif isinstance(row, (list, tuple)) and len(row) >= 2:
+            role, content = row[0], row[1]
+        else:
+            continue
+        messages.append((str(role or ""), str(content or "")))
+    return messages[-12:]
+
+
+def _extract_explicit_trip_facts(user_message: str, history=None) -> dict:
+    """Extract only literal trip details, including short contextual answers."""
+    clean = re.sub(r"\s+", " ", str(user_message or "")).strip()
+    messages = _history_messages(history)
+    recent_user = " ".join(
+        content for role, content in messages if role.casefold() == "user"
+    )
+    has_trip_context = bool(re.search(r"\b(?:trip|travel|flight)\b", recent_user, re.I))
+    facts: dict[str, str] = {}
+
+    date_match = _TRIP_DATE_RANGE.search(clean)
+    if date_match:
+        facts["upcoming_trip_dates"] = (
+            f"{date_match.group(1).strip()} to {date_match.group(2).strip()}"[:100]
+        )
+
+    destination_match = _TRIP_DESTINATION.search(clean)
+    if destination_match:
+        facts["upcoming_trip_destination"] = destination_match.group(1).strip()[:100]
+    elif 1 <= len(clean.split()) <= 6 and _SHORT_CONTEXT_ANSWER.fullmatch(clean):
+        recent_assistant = next(
+            (
+                content
+                for role, content in reversed(messages)
+                if role.casefold() == "assistant"
+            ),
+            "",
+        )
+        if _DESTINATION_QUESTION.search(recent_assistant):
+            facts["upcoming_trip_destination"] = clean.rstrip(".!?")[:100]
+
+    purpose_match = _TRIP_PURPOSE.search(clean)
+    if purpose_match and has_trip_context:
+        facts["upcoming_trip_purpose"] = purpose_match.group(1).strip()[:100]
+    return facts
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -246,6 +313,7 @@ def learn_from_exchange(
     *,
     source_message_id: str = "",
     source_channel: str = "unknown",
+    history=None,
 ) -> None:
     """
     Attempt to extract and persist learnable facts from a conversation turn.
@@ -280,6 +348,25 @@ def learn_from_exchange(
         )
     except Exception as exc:
         logger.debug("Ability or episodic memory capture skipped: %s", exc)
+    deterministic_facts = _extract_explicit_trip_facts(user_message, history)
+    if deterministic_facts:
+        try:
+            from memory.adaptive import record_memories
+            from memory.users import UserManager
+
+            existing = UserManager.get_user_profile(internal_id) or {}
+            to_store = _filter_facts(existing, deterministic_facts)
+            if to_store:
+                record_memories(
+                    internal_id,
+                    to_store,
+                    evidence=user_message,
+                    source="explicit_user_statement",
+                    source_message_id=source_message_id,
+                    source_channel=source_channel,
+                )
+        except Exception as exc:
+            logger.debug("Deterministic trip memory capture skipped: %s", exc)
     if not _should_attempt_extraction(user_message):
         return
 

@@ -46,6 +46,12 @@ _FRENCH_WORDS = frozenset(
         "encore",
     }
 )
+_VOICE_REQUEST = re.compile(
+    r"\b(?:reply|respond|answer|send|say|read)(?:\s+(?:that|this|it|the answer))?\s+"
+    r"(?:as|in|with|using|by)?\s*(?:a\s+)?(?:voice|audio)(?:\s+message|\s+reply|\s+note)?\b|"
+    r"\b(?:voice|audio)\s+(?:message|reply|response)\b",
+    re.I,
+)
 
 
 def detect_language_spans(text: str, accent: str = "subtle") -> list[tuple[str, str]]:
@@ -143,6 +149,20 @@ def voice_replies_enabled(internal_id: str, channel: str | None = None) -> bool:
     )
 
 
+def voice_reply_requested(text: str) -> bool:
+    """Recognize an explicit one-shot request without changing saved preferences."""
+    return bool(_VOICE_REQUEST.search(str(text or "")))
+
+
+def trained_voice_id(persona: dict | None) -> str:
+    """Resolve a stable model assignment from the active personality."""
+    persona = persona or {}
+    voice = persona.get("voice") if isinstance(persona.get("voice"), dict) else {}
+    value = str(voice.get("trained_id") or persona.get("name") or "curie")
+    selected = re.sub(r"[^a-z0-9_-]+", "-", value.casefold()).strip("-")
+    return selected or "curie"
+
+
 def voice_health() -> dict:
     """Report local voice readiness without loading or downloading a model."""
     from services.trained_voice.runtime import (
@@ -228,7 +248,12 @@ async def synthesize_reply(
         )
         from services.trained_voice.voice_persona import delivery_settings
 
-        trained = trained_voice_health()
+        voice_id = trained_voice_id(persona)
+        trained = (
+            trained_voice_health()
+            if voice_id in {"curie", "default"}
+            else trained_voice_health(voice_id=voice_id)
+        )
         if trained["ready"]:
             trained_fd, trained_wav = tempfile.mkstemp(
                 prefix="curie_trained_voice_", suffix=".wav"
@@ -243,7 +268,12 @@ async def synthesize_reply(
                     4,
                 )
                 try:
-                    await synthesize_trained_voice(text, trained_wav, delivery)
+                    if voice_id in {"curie", "default"}:
+                        await synthesize_trained_voice(text, trained_wav, delivery)
+                    else:
+                        await synthesize_trained_voice(
+                            text, trained_wav, delivery, voice_id=voice_id
+                        )
                 except TrainedVoiceError:
                     Path(path).unlink(missing_ok=True)
                     return None

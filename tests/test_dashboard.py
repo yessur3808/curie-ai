@@ -1,5 +1,6 @@
 import json
 import time
+from datetime import datetime
 from types import SimpleNamespace
 
 from cli import dashboard
@@ -36,6 +37,7 @@ def test_pm2_status_reports_named_managed_instance(monkeypatch, tmp_path):
     assert status["running"] is True
     assert status["pid"] == 4321
     assert 40 <= status["uptime_seconds"] <= 44
+    assert status["started_at"] == started_ms / 1000
     assert status["supervisor"] == "pm2"
     assert status["connector_env"]["RUN_TELEGRAM"] == "true"
 
@@ -47,6 +49,33 @@ def test_pm2_status_returns_empty_when_pm2_is_unavailable(monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=""),
     )
     assert dashboard._pm2_statuses() == {}
+
+
+def test_pm2_executable_finds_nvm_install(monkeypatch, tmp_path):
+    binary = tmp_path / ".nvm/versions/node/v24.18.0/bin/pm2"
+    binary.parent.mkdir(parents=True)
+    binary.touch()
+    monkeypatch.delenv("CURIE_PM2_BINARY", raising=False)
+    monkeypatch.setattr(dashboard.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(dashboard.Path, "home", lambda: tmp_path)
+
+    assert dashboard._pm2_executable() == str(binary)
+
+
+def test_recent_log_ignores_errors_from_before_current_process(tmp_path):
+    log = tmp_path / "curie.log"
+    log.write_text(
+        "2026-09-25 13:26:54 +00:00: ERROR: old shutdown error\n"
+        "2026-09-25 13:27:10 +00:00: INFO: ready\n"
+    )
+    started = datetime.strptime(
+        "2026-09-25 13:26:56 +00:00", "%Y-%m-%d %H:%M:%S %z"
+    ).timestamp()
+
+    assert dashboard._recent_log("curie", log_path=str(log), since_epoch=started) == (
+        0,
+        [],
+    )
 
 
 def test_connectors_use_runtime_supervisor_environment(monkeypatch):

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
+import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -31,23 +34,46 @@ except ImportError:  # pragma: no cover
 
 from cli import daemon
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTANCE_DIR = REPO_ROOT / "instances"
 PERSONA_DIR = REPO_ROOT / "assets" / "personality"
 _processes: dict[int, Any] = {}
 
 
+def _pm2_executable() -> str:
+    """Resolve PM2 in non-login services where the NVM bin is absent from PATH."""
+    configured = os.getenv("CURIE_PM2_BINARY", "").strip()
+    if configured:
+        return configured
+    discovered = shutil.which("pm2")
+    if discovered:
+        return discovered
+    candidates = sorted(
+        (Path.home() / ".nvm/versions/node").glob("*/bin/pm2"),
+        key=lambda path: path.stat().st_mtime if path.exists() else 0,
+        reverse=True,
+    )
+    return str(candidates[0]) if candidates else "pm2"
+
+
 def _pm2_statuses() -> dict[str, dict[str, Any]]:
     """Return Curie instance statuses reported by PM2, keyed by instance."""
     app_name = os.getenv("CURIE_PM2_APP_NAME", "curie-main")
+    executable = _pm2_executable()
+    process_env = dict(os.environ)
+    executable_path = Path(executable)
+    if executable_path.is_absolute():
+        process_env["PATH"] = (
+            str(executable_path.parent) + os.pathsep + process_env.get("PATH", "")
+        )
     try:
         result = subprocess.run(
-            ["pm2", "jlist"],
+            [executable, "jlist"],
             capture_output=True,
             text=True,
             timeout=3,
             check=False,
+            env=process_env,
         )
         if result.returncode != 0:
             return {}
@@ -84,9 +110,11 @@ def _pm2_statuses() -> dict[str, dict[str, Any]]:
             "running": running,
             "pid": pid if running else None,
             "uptime_seconds": uptime,
+            "started_at": (
+                started_ms / 1000 if isinstance(started_ms, (int, float)) else None
+            ),
             "log_file": str(
-                pm2_env.get("pm_out_log_path")
-                or REPO_ROOT / "log" / "pm2-out-0.log"
+                pm2_env.get("pm_out_log_path") or REPO_ROOT / "log" / "pm2-out-0.log"
             ),
             "instance": instance,
             "supervisor": "pm2",
@@ -244,7 +272,10 @@ def _connectors(
 
 
 def _recent_log(
-    name: str, limit: int = 2, log_path: str | None = None
+    name: str,
+    limit: int = 2,
+    log_path: str | None = None,
+    since_epoch: float | None = None,
 ) -> tuple[int, list[str]]:
     log_file = Path(log_path) if log_path else daemon._instance_paths(name)[1]
     try:
@@ -253,11 +284,27 @@ def _recent_log(
         lines = log_file.read_text(errors="replace").splitlines()[-200:]
     except OSError:
         return 0, []
-    errors = [
-        line.strip()
-        for line in lines
-        if "error" in line.casefold() or "exception" in line.casefold()
-    ]
+    errors = []
+    for line in lines:
+        if "error" not in line.casefold() and "exception" not in line.casefold():
+            continue
+        if since_epoch:
+            match = re.match(
+                r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{2}:\d{2}):",
+                line,
+            )
+            if match:
+                try:
+                    if (
+                        datetime.strptime(
+                            match.group(1), "%Y-%m-%d %H:%M:%S %z"
+                        ).timestamp()
+                        < since_epoch
+                    ):
+                        continue
+                except ValueError:
+                    pass
+        errors.append(line.strip())
     return len(errors), [line[-140:] for line in errors[-limit:]]
 
 
@@ -301,7 +348,9 @@ def collect_instances(sample: bool = False) -> list[dict[str, Any]]:
         activity, active_tasks = _task_status(name)
         telemetry = _read_json(_runtime_path(name, "telemetry"))
         log_errors, recent_errors = _recent_log(
-            name, log_path=status.get("log_file")
+            name,
+            log_path=status.get("log_file"),
+            since_epoch=status.get("started_at"),
         )
         telemetry_stale = time.time() - telemetry.get("updated_at", 0) > 300
         if not status["running"]:
@@ -324,9 +373,7 @@ def collect_instances(sample: bool = False) -> list[dict[str, Any]]:
                 "threads": threads,
                 "health": health,
                 "uptime": _format_uptime(status.get("uptime_seconds")),
-                "connectors": _connectors(
-                    name, env, status.get("connector_env")
-                ),
+                "connectors": _connectors(name, env, status.get("connector_env")),
                 "activity": activity,
                 "active_tasks": active_tasks,
                 "telemetry": (

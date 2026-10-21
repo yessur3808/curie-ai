@@ -31,6 +31,23 @@ class VoicePathTests(unittest.TestCase):
             with patch.dict(os.environ, {"CURIE_VOICE_HOME": str(root / "elsewhere")}):
                 self.assertEqual(VoicePaths.from_root(root).home, root / "elsewhere")
 
+    def test_personalities_receive_isolated_trained_voice_homes(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            root = Path(directory).resolve()
+            self.assertEqual(
+                VoicePaths.from_root(root, "jarvis").home,
+                root / "data/trained-voices/jarvis",
+            )
+            with patch.dict(
+                os.environ, {"CURIE_VOICE_HOME_JARVIS": str(root / "voices/j")}
+            ):
+                self.assertEqual(
+                    VoicePaths.from_root(root, "jarvis").home, root / "voices/j"
+                )
+
     def test_readiness_requires_the_preserved_adapter_and_base_files(self):
         with (
             tempfile.TemporaryDirectory() as directory,

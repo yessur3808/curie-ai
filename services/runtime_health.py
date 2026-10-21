@@ -53,6 +53,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
     from services.voice_delivery import voice_health
     from services.api_voice_runtime import api_voice_runtime_status
     from services.speech_runtime import speech_recognition_status
+    from services.self_diagnostics import diagnostic_monitor
 
     models = []
     for value in os.getenv("LLM_MODELS", "").split(","):
@@ -123,6 +124,15 @@ def capability_health(workflow_ready: bool = True) -> dict:
         ),
     }
     transcription = speech_recognition_status()
+    diagnostic_snapshot = diagnostic_monitor.snapshot(limit=25)
+    diagnostics = {
+        "ready": True,
+        "sample_count": diagnostic_snapshot["count"],
+        "average_latency_ms": diagnostic_snapshot["average_latency_ms"],
+        "p95_latency_ms": diagnostic_snapshot["p95_latency_ms"],
+        "last": diagnostic_snapshot["last"],
+        "warning_counts": diagnostic_snapshot["warning_counts"],
+    }
     capabilities = {
         "text": {
             "ready": text_ready and workflow_ready,
@@ -153,6 +163,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         "backpressure": backpressure,
         "slos": slo_metrics.snapshot(),
         "pipeline_rollout": PipelineFeatureFlags.from_env().status(),
+        "self_diagnostics": diagnostics,
     }
     required = (
         capabilities["text"]["ready"],
@@ -203,6 +214,7 @@ def handle_health_command(text: str, workflow_ready: bool = True) -> str | None:
         "task_engine",
         "runtime_kernel",
         "api_voice_runtime",
+        "self_diagnostics",
         "database",
         "disk",
     ):
