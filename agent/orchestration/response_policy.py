@@ -88,11 +88,20 @@ OPERATIONAL_REPLY_PATTERN = re.compile(
 )
 EXPLICIT_BRIEF_PATTERN = re.compile(
     r"\b(?:keep it brief|be brief|brief answer|no follow[- ]?up|brutally short|"
-    r"short version|in one sentence|one-sentence)\b",
+    r"short version|in one sentence|one-sentence|one line|no lecture|spare me (?:the )?speech)\b",
     re.I,
 )
 EXACT_BULLET_PATTERN = re.compile(
-    r"\bexactly\s+(?P<count>one|two|three|four|five|[1-5])\s+(?:short\s+)?bullets?\b",
+    r"\b(?:exactly\s+)?(?P<count>one|two|three|four|five|[1-5])\s+"
+    r"(?:short\s+)?(?P<kind>bullets?|moves?|examples?|points?)\b",
+    re.I,
+)
+ONE_LINE_PATTERN = re.compile(r"\b(?:one line|single line)\b", re.I)
+NO_CONGRATULATIONS_PATTERN = re.compile(
+    r"\b(?:do not|don['’]t|no)\s+congratulat(?:e|ions?)\b", re.I
+)
+CONGRATULATIONS_PATTERN = re.compile(
+    r"(?:^|(?<=[.!?])\s+)(?:congratulations|congrats|well done|nice work)\b[^.!?\n]*[.!?]?",
     re.I,
 )
 PRIORITY_REQUEST_PATTERN = re.compile(
@@ -216,16 +225,64 @@ def normalize_explicit_bullets(response: str, user_text: str) -> str:
     names = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
     raw_count = request.group("count").casefold()
     expected = int(raw_count) if raw_count.isdigit() else names[raw_count]
-    items = [
-        item.strip()
-        for item in re.findall(
-            r"(?:^|\s)-\s+(.+?)(?=\s+-\s+|$)", response.strip(), re.S
+    clean = response.strip()
+    marker = re.compile(r"(?:^|(?<=\s))(?:[-*•]|\d{1,2}[.)])\s+")
+    matches = list(marker.finditer(clean))
+    items: list[str] = []
+    if matches:
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(clean)
+            item = clean[match.end() : end].strip(" \n;,")
+            if item:
+                items.append(item)
+    if len(items) != expected:
+        ordinal = re.compile(
+            r"(?:^|(?<=[.!?])\s+)(?:first|second|third|fourth|fifth)[,:]\s+",
+            re.I,
         )
-        if item.strip()
-    ]
-    if len(items) == expected:
-        return "\n".join(f"- {item}" for item in items)
+        matches = list(ordinal.finditer(clean))
+        ordinal_items: list[str] = []
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(clean)
+            item = clean[match.end() : end].strip(" \n;,")
+            if item:
+                ordinal_items.append(item)
+        if ordinal_items:
+            items = ordinal_items
+    if len(items) != expected:
+        lines = [
+            re.sub(r"^\s*(?:[-*•]|\d{1,2}[.)])\s*", "", line).strip()
+            for line in clean.splitlines()
+            if line.strip()
+        ]
+        if len(lines) == expected:
+            items = lines
+    if len(items) >= expected:
+        return "\n".join(f"- {item}" for item in items[:expected])
     return response.strip()
+
+
+def enforce_line_and_tone_constraints(response: str, user_text: str) -> str:
+    """Apply literal, low-risk presentation constraints after model styling."""
+
+    clean = response.strip()
+    user = str(user_text or "")
+    if NO_CONGRATULATIONS_PATTERN.search(user):
+        clean = CONGRATULATIONS_PATTERN.sub("", clean).strip()
+    if ONE_LINE_PATTERN.search(user):
+        clean = re.sub(r"\s*\n+\s*", " ", clean)
+        clean = re.sub(r"\s{2,}", " ", clean).strip()
+    structured_list = len(re.findall(r"(?:^|\s)(?:[-*•]|\d{1,2}[.)])\s+", clean)) >= 2
+    if EXPLICIT_BRIEF_PATTERN.search(user) and not structured_list:
+        sentences = [
+            part.strip() for part in re.split(r"(?<=[.!?])\s+", clean) if part.strip()
+        ]
+        if len(sentences) > 2:
+            clean = " ".join(sentences[:2])
+        words = clean.split()
+        if len(words) > 45:
+            clean = " ".join(words[:45]).rstrip(" ,;:") + "…"
+    return clean
 
 
 def condense_priority_answer(response: str, user_text: str) -> str:
@@ -395,4 +452,5 @@ class ResponsePolicy:
         ).strip()
         styled = GENERIC_FOLLOWUP_PATTERN.sub("", styled).strip()
         styled = normalize_explicit_bullets(styled, str(user_text or ""))
+        styled = enforce_line_and_tone_constraints(styled, str(user_text or ""))
         return condense_priority_answer(styled, str(user_text or ""))

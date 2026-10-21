@@ -88,6 +88,43 @@ def test_exact_bullets_are_split_when_model_returns_one_line():
     ]
 
 
+def test_requested_moves_and_inline_star_items_become_real_bullets():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    moves = policy.finalize(
+        "1. Confirm Maya's route. 2. Get Leo on comms. 3. Use the safe exit.",
+        "Give me something useful. Three moves, no operational hacking instructions.",
+    )
+    stars = policy.finalize(
+        "* Isolate the camera feed * Repeat the test at low power",
+        "Design the next safe test in exactly two short bullets.",
+    )
+
+    assert moves.splitlines() == [
+        "- Confirm Maya's route.",
+        "- Get Leo on comms.",
+        "- Use the safe exit.",
+    ]
+    assert stars.splitlines() == [
+        "- Isolate the camera feed",
+        "- Repeat the test at low power",
+    ]
+
+
+def test_one_line_and_no_congratulations_are_enforced():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    one_line = policy.finalize(
+        "Hey, checking in.\nNo pressure to answer right away.",
+        "Draft the message. One line. Warm, not creepy.",
+    )
+    landed = policy.finalize(
+        "Congratulations. The rig is intact. Now inspect the telemetry.",
+        "I landed. Don't congratulate me.",
+    )
+
+    assert one_line == "Hey, checking in. No pressure to answer right away."
+    assert "congrat" not in landed.casefold()
+
+
 def test_generic_anything_else_offer_is_removed():
     policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
 
