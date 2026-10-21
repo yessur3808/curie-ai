@@ -8,6 +8,10 @@ from agent.orchestration.contracts import ResponseCandidate
 
 
 class SocialConversationService:
+    _FRENCH_WELLBEING = re.compile(
+        r"^\s*(?:(?:comment\s+)?(?:ça|ca)\s+va|tu\s+vas\s+bien)\s*[?!. ]*$",
+        re.I,
+    )
     _GREETING = re.compile(
         r"^\s*(?:hi|hello|hey|bonjour|salut)(?:\s+curie|\s+there)?"
         r"(?:[,!. ]+(?:how are you(?: doing)?|how(?:'s| is) it going))?[,!.? ]*$",
@@ -45,8 +49,33 @@ class SocialConversationService:
         r"(?:switched |turned )?on during the day[.! ]*$",
         re.I,
     )
+    _NO_TOOL_NEEDED = re.compile(
+        r"^\s*no\s+need\s+to\s+(?:use|run|do|make)\s+(?:a|any|the)?\s*"
+        r"(?:query|search|lookup|tool)(?:\s+for\s+that)?[.! ]*$",
+        re.I,
+    )
+    _WEATHER_CORRECTION = re.compile(
+        r"^\s*(?:no\s+(?:rain|storm|snow)|(?:it(?:'s| is)\s+)?not\s+"
+        r"(?:raining|rainy|snowing))\b[^?]*[.! ]*$",
+        re.I,
+    )
 
     def handle(self, text: str) -> ResponseCandidate | None:
+        if self._FRENCH_WELLBEING.fullmatch(text.strip()):
+            return ResponseCandidate(
+                "Ça va bien, merci. Et toi?", "social:french_check_in"
+            )
+        if self._NO_TOOL_NEEDED.fullmatch(text.strip()):
+            return ResponseCandidate(
+                "Got it. No query needed.", "social:no_tool_acknowledgement"
+            )
+        if self._WEATHER_CORRECTION.fullmatch(text.strip()):
+            reply = (
+                "Ah, got it. Hot and stuffy, not rainy."
+                if re.search(r"\b(?:hot|warm|humid|muggy|stuffy)\b", text, re.I)
+                else "Ah, got it. No rain, then."
+            )
+            return ResponseCandidate(reply, "social:weather_correction")
         acknowledgement = self._ACKNOWLEDGEMENT.fullmatch(text.strip())
         if acknowledgement:
             normalized = text.strip().casefold()
@@ -86,4 +115,4 @@ class SocialConversationService:
             # Let the model use relationship history for genuine conversation
             # instead of repeating one canned line forever.
             return None
-        return ResponseCandidate("Bonjour! What is on your mind?", "social")
+        return ResponseCandidate("Bonjour! How are you?", "social")

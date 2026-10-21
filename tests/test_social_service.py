@@ -56,3 +56,30 @@ def test_short_banter_routes_without_model_inference():
     decision = asyncio.run(route_request("That was almost suspiciously efficient."))
 
     assert decision.intent == "social"
+
+
+def test_french_check_in_is_brief_natural_and_deterministic():
+    candidate = SocialConversationService().handle("Ca va?")
+
+    assert candidate is not None
+    assert candidate.text == "Ça va bien, merci. Et toi?"
+    assert candidate.model_used == "social:french_check_in"
+    assert asyncio.run(route_request("Ça va? ")).intent == "social"
+
+
+def test_weather_and_no_tool_corrections_get_brief_human_acknowledgements():
+    service = SocialConversationService()
+
+    weather = service.handle("No rain, quite hot and stuffy actually")
+    no_query = service.handle("No need to use any query")
+
+    assert weather is not None
+    assert weather.text == "Ah, got it. Hot and stuffy, not rainy."
+    assert weather.model_used == "social:weather_correction"
+    assert no_query is not None
+    assert no_query.text == "Got it. No query needed."
+    assert no_query.model_used == "social:no_tool_acknowledgement"
+    assert (
+        asyncio.run(route_request("No rain, quite hot and stuffy actually")).intent
+        == "social"
+    )
