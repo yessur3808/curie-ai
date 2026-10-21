@@ -1884,6 +1884,20 @@ class ChatWorkflow:
         folded = content.casefold()
         return any(topic and topic in folded for topic in rejected_topics)
 
+    @staticmethod
+    def _prompt_history_for_transition(
+        history: list, transition: DialogueTransition | None
+    ) -> list:
+        """Keep stale transcript topics out of a clearly independent turn."""
+
+        if transition and transition.kind in {
+            TransitionClass.NEW_GOAL,
+            TransitionClass.INTERRUPTION,
+            TransitionClass.UNRELATED_SMALL_TALK,
+        }:
+            return []
+        return history
+
     def _prepare_prompt_context(
         self,
         history: list,
@@ -1898,6 +1912,16 @@ class ChatWorkflow:
         """Select dynamic prompt context once and make every choice inspectable."""
 
         snapshot = self.dialogue_state.snapshot(platform=platform, owner_id=internal_id)
+        prompt_history = self._prompt_history_for_transition(history, transition)
+        carry_pending_context = not transition or transition.kind in {
+            TransitionClass.CONTINUATION,
+            TransitionClass.DIRECT_ANSWER,
+            TransitionClass.CORRECTION,
+            TransitionClass.REJECTION,
+            TransitionClass.CANCELLATION,
+            TransitionClass.APPROVAL,
+            TransitionClass.DENIAL,
+        }
         rejected_topics = tuple(
             snapshot.topic_rejections.value
             if snapshot.topic_rejections and not snapshot.topic_rejections.expired()
@@ -1924,7 +1948,11 @@ class ChatWorkflow:
             ),
         ]
 
-        if snapshot.active_goal and not snapshot.active_goal.expired():
+        if (
+            carry_pending_context
+            and snapshot.active_goal
+            and not snapshot.active_goal.expired()
+        ):
             candidates.append(
                 ContextCandidate(
                     "active-goal",
@@ -1936,7 +1964,8 @@ class ChatWorkflow:
                 )
             )
         if (
-            snapshot.unresolved_assistant_question
+            carry_pending_context
+            and snapshot.unresolved_assistant_question
             and not snapshot.unresolved_assistant_question.expired()
         ):
             candidates.append(
@@ -1973,8 +2002,8 @@ class ChatWorkflow:
                 )
             )
 
-        for index in range(len(history) - 1, -1, -1):
-            role, content = history[index]
+        for index in range(len(prompt_history) - 1, -1, -1):
+            role, content = prompt_history[index]
             label = "User" if role == "user" else "Assistant"
             section = (
                 ContextSection.ROLLING_SUMMARY

@@ -280,6 +280,40 @@ def test_recent_assistant_question_restores_direct_answer_after_restart():
     assert transition.kind is TransitionClass.DIRECT_ANSWER
 
 
+def test_new_goal_drops_stale_history_and_pending_question_from_prompt():
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Helpful."})
+    _observe(
+        workflow.dialogue_state,
+        "Research battery markets",
+        {"text": "Which market should I focus on?", "execution_status": "pending"},
+    )
+    text = "Write a birthday note"
+    transition = workflow.dialogue_state.transition_for(
+        text, platform="telegram", owner_id="owner"
+    )
+    analysis = analyze_turn(text, text, owner_id="owner", platform="telegram")
+
+    envelope, prompt_history, *_ = workflow._prepare_prompt_context(
+        [
+            ("user", "Research battery markets"),
+            ("assistant", "Which market should I focus on?"),
+        ],
+        text,
+        internal_id="owner",
+        platform="telegram",
+        user_profile={},
+        turn_analysis=analysis,
+        transition=transition,
+    )
+    candidate_ids = {item.candidate_id for item in envelope.decisions}
+
+    assert transition.kind is TransitionClass.INTERRUPTION
+    assert prompt_history == []
+    assert "active-goal" not in candidate_ids
+    assert "unresolved-question" not in candidate_ids
+    assert not any(item.startswith("history-") for item in candidate_ids)
+
+
 def test_dialogue_state_round_trip_survives_process_restart():
     original = DialogueStateStore()
     _observe(
