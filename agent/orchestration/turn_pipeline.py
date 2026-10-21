@@ -161,21 +161,18 @@ class LegacyTurnPipelineAdapter:
                     session_alias_used = True
             except Exception:
                 session_alias_used = False
-            needs_history = bool(
-                _DEVICE_REFERENCE.search(session_text)
-                and _DEVICE_OPERATION.search(session_text)
-            ) or bool(re.search(r"\btry again\b", session_text, re.I))
-            history = []
-            effects: frozenset[SideEffect] = frozenset()
-            if needs_history:
-                history = get_session_manager().get_history(
-                    str(enriched["platform"]), str(enriched["internal_id"])
-                )[-8:]
-                effects = frozenset({SideEffect.STORAGE_READ})
+            # Recent dialogue is part of understanding every turn, not only a
+            # device-pronoun fallback. This also restores pending questions after
+            # a process restart, when the in-memory dialogue state is empty.
+            history = get_session_manager().get_history(
+                str(enriched["platform"]), str(enriched["internal_id"])
+            )[-8:]
+            effects: frozenset[SideEffect] = frozenset({SideEffect.STORAGE_READ})
             transition = self.workflow.dialogue_state.transition_for(
                 original_text,
                 platform=str(enriched["platform"]),
                 owner_id=str(enriched["internal_id"]),
+                history=history,
             )
             return StageOutput(
                 {
@@ -207,6 +204,7 @@ class LegacyTurnPipelineAdapter:
                     original_text,
                     platform=str(enriched["platform"]),
                     owner_id=str(enriched["internal_id"]),
+                    history=history,
                 )
             resolution: ReferenceResolution = (
                 self.workflow.dialogue_state.resolve_references(

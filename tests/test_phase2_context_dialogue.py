@@ -261,6 +261,24 @@ def test_yes_is_approval_only_when_approval_is_pending():
     assert pending.kind is TransitionClass.APPROVAL
 
 
+def test_recent_assistant_question_restores_direct_answer_after_restart():
+    store = DialogueStateStore()
+    transition = store.transition_for(
+        "No rain, quite hot and stuffy actually",
+        platform="telegram",
+        owner_id="owner",
+        history=[
+            {"role": "user", "content": "Ca va?"},
+            {
+                "role": "assistant",
+                "content": "How are you? Has it been raining there?",
+            },
+        ],
+    )
+
+    assert transition.kind is TransitionClass.DIRECT_ANSWER
+
+
 def test_fresh_request_interrupts_pending_task_and_ignores_proactive_context():
     store = DialogueStateStore()
     _observe(

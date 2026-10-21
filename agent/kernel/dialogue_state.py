@@ -326,8 +326,30 @@ def _corrected_device(text: str) -> str | None:
     return match.group("name").strip(" .,!?:;") if match else None
 
 
+def _latest_unanswered_history_question(
+    history: Iterable[Any] | None,
+) -> str | None:
+    """Recover one pending assistant question after a process restart."""
+    items = list(history or ())
+    if not items:
+        return None
+    latest = items[-1]
+    if isinstance(latest, Mapping):
+        role, content = latest.get("role"), latest.get("content")
+    elif isinstance(latest, (tuple, list)) and len(latest) >= 2:
+        role, content = latest[0], latest[1]
+    else:
+        return None
+    clean = str(content or "").strip()
+    if str(role or "").casefold() != "assistant" or not clean.endswith("?"):
+        return None
+    return clean
+
+
 def classify_transition(
-    text: str, state: DialogueState | None = None
+    text: str,
+    state: DialogueState | None = None,
+    history: Iterable[Any] | None = None,
 ) -> DialogueTransition:
     """Classify a turn using explicit precedence instead of fuzzy history."""
 
@@ -381,7 +403,9 @@ def classify_transition(
             "fresh explicit request outranks earlier and proactive context",
         )
 
-    unresolved = _slot_value(current.unresolved_assistant_question)
+    unresolved = _slot_value(
+        current.unresolved_assistant_question
+    ) or _latest_unanswered_history_question(history)
     if unresolved and clean:
         return DialogueTransition(
             TransitionClass.DIRECT_ANSWER,
@@ -435,9 +459,14 @@ class DialogueStateStore:
         return self._get(platform, owner_id) or DialogueState()
 
     def transition_for(
-        self, text: str, *, platform: str, owner_id: str
+        self,
+        text: str,
+        *,
+        platform: str,
+        owner_id: str,
+        history: Iterable[Any] | None = None,
     ) -> DialogueTransition:
-        return classify_transition(text, self._get(platform, owner_id))
+        return classify_transition(text, self._get(platform, owner_id), history=history)
 
     def resolve_references(
         self,

@@ -738,32 +738,7 @@ class ChatWorkflow:
             )
             enriched["internal_id"] = internal_id
 
-        has_device_reference = bool(
-            re.search(
-                r"\b(?:it|that(?: one| device)?|this(?: one| device)?|them|"
-                r"both\s+of\s+them|all\s+of\s+them|those\s+two|these\s+two|"
-                r"those(?: devices)?|these(?: devices)?|both(?: devices)?|the device)\b",
-                original_text,
-                re.I,
-            )
-        )
-        has_device_operation = bool(
-            re.search(
-                r"\b(?:turn|switch|power|status|still (?:on|off)|"
-                r"(?:stay|remain)\b.{0,50}\b(?:on|off)|"
-                r"(?:is|are)\b.{0,50}\b(?:on|off|online|offline|running))\b",
-                original_text,
-                re.I,
-            )
-        )
-        needs_dialogue_history = (
-            has_device_reference and has_device_operation
-        ) or bool(re.search(r"\btry again\b", original_text, re.I))
-        history = (
-            get_session_manager().get_history(platform, internal_id)[-8:]
-            if needs_dialogue_history
-            else []
-        )
+        history = get_session_manager().get_history(platform, internal_id)[-8:]
         resolution = self.dialogue_state.resolve_references(
             original_text,
             platform=platform,
@@ -774,6 +749,7 @@ class ChatWorkflow:
                     original_text,
                     platform=platform,
                     owner_id=str(internal_id),
+                    history=history,
                 )
             ),
         )
@@ -1502,9 +1478,25 @@ class ChatWorkflow:
             routing_history = get_session_manager().get_history(platform, internal_id)[
                 -8:
             ]
+            conversational_transition = bool(
+                isinstance(turn_analysis, TurnAnalysis)
+                and not turn_analysis.operational_decisions
+                and isinstance(dialogue_transition, DialogueTransition)
+                and dialogue_transition.kind
+                in {
+                    TransitionClass.CONTINUATION,
+                    TransitionClass.DIRECT_ANSWER,
+                    TransitionClass.CORRECTION,
+                    TransitionClass.REJECTION,
+                    TransitionClass.UNRELATED_SMALL_TALK,
+                }
+            )
             with trace.stage("tool"):
                 routing_decision = await self.routing_service.decide(
-                    routing_text, str(internal_id), history=routing_history
+                    routing_text,
+                    str(internal_id),
+                    history=routing_history,
+                    allow_model_inference=not conversational_transition,
                 )
                 routed_candidate = await self.routing_service.execute(
                     routing_decision,
@@ -2518,6 +2510,12 @@ class ChatWorkflow:
             lines.append(
                 "- Never invent facts, citations, memories, tool results, or completed actions. "
                 "Clearly label uncertainty and inference."
+            )
+            lines.append(
+                "- In small talk, never invent personal experiences, recent activities, moods, "
+                "physical surroundings, or live observations for yourself. Do not claim you have "
+                "been watching the weather, thinking about a current event, going places, or "
+                "managing a human day unless this turn provides verified evidence."
             )
             lines.append(
                 "- A saved user-context location is only the default. Any place named in the "
