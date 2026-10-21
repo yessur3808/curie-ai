@@ -2,10 +2,15 @@ import unittest
 from services.trained_voice.voice_persona import (
     dashboard_scope_prompt,
     finalize_live_response,
+    handle_conversation_contract,
+    is_topic_regression,
+    is_unhelpful_repeat,
     live_conversation_prompt,
+    max_recent_response_similarity,
     needs_english_rewrite,
     persona_prompt,
     select_relevant_history,
+    turn_contract_prompt,
     delivery_settings,
     persona_revision,
 )
@@ -26,6 +31,11 @@ class PersonaTests(unittest.TestCase):
         )
         self.assertFalse(needs_english_rewrite(response, "Reply to me in French"))
 
+    def test_a_french_greeting_does_not_request_a_full_french_reply(self):
+        response = "Bonjour, monsieur. Je suis là. Quel est votre projet aujourd'hui?"
+
+        self.assertTrue(needs_english_rewrite(response, "Bonjour, you alive in there?"))
+
     def test_briefing_retains_actual_profile(self):
         p = {
             "system_prompt": "Unique complete Curie personality.",
@@ -44,6 +54,9 @@ class PersonaTests(unittest.TestCase):
 
         self.assertIn("not evidence that anything is offline", prompt)
         self.assertIn("otherwise omit all snapshot and status talk", prompt)
+        self.assertIn("Do not repeat or paraphrase", prompt)
+        self.assertIn("mention one specific next action", prompt)
+        self.assertIn("Never guess a device", prompt)
 
     def test_dashboard_scope_allows_relevant_supplied_snapshot(self):
         prompt = dashboard_scope_prompt(True)
@@ -103,6 +116,138 @@ class PersonaTests(unittest.TestCase):
         ]
 
         self.assertEqual(select_relevant_history(turns, "Would that help?"), turns)
+
+    def test_dashboard_history_keeps_insistence_and_rephrasing_followups(self):
+        turns = [
+            {
+                "user": "I want every memory stored forever.",
+                "assistant": "That creates privacy and retrieval problems.",
+            }
+        ]
+
+        self.assertEqual(select_relevant_history(turns, "Suppose I insist."), turns)
+        self.assertEqual(
+            select_relevant_history(turns, "Give me the short version of that."),
+            turns,
+        )
+
+    def test_recycled_response_is_detected_unless_repetition_was_requested(self):
+        turns = [
+            {
+                "user": "Is permanent memory wise?",
+                "assistant": "No. Permanent memory creates privacy and retrieval risks.",
+            }
+        ]
+        repeated = "No. Permanent memory creates privacy and retrieval risks."
+
+        self.assertTrue(is_unhelpful_repeat(repeated, turns, "Suppose I insist."))
+        self.assertFalse(is_unhelpful_repeat(repeated, turns, "Repeat that verbatim."))
+        self.assertGreaterEqual(max_recent_response_similarity(repeated, turns), 0.99)
+
+    def test_topic_regression_detects_an_answer_to_an_older_exchange(self):
+        turns = [
+            {
+                "user": "What does turn those off mean?",
+                "assistant": "It means the workshop lights; ask if the reference is unclear.",
+            },
+            {
+                "user": "I want every software memory retained forever.",
+                "assistant": "That creates privacy, retrieval, and relevance risks.",
+            },
+        ]
+        context = select_relevant_history(turns, "Suppose I insist.")
+
+        self.assertTrue(
+            is_topic_regression(
+                "I would still ask which workshop lights you want turned off, because the reference is unclear.",
+                context,
+                turns,
+                "Suppose I insist.",
+            )
+        )
+        self.assertFalse(
+            is_topic_regression(
+                "I would still reject permanent retention because privacy and retrieval quality matter.",
+                context,
+                turns,
+                "Suppose I insist.",
+            )
+        )
+
+    def test_turn_contract_anchors_continuations_and_software_memory(self):
+        turns = [
+            {
+                "user": "I am redesigning your memory system.",
+                "assistant": "Permanent retention would be a mistake.",
+            }
+        ]
+
+        followup = turn_contract_prompt("Suppose I insist.", turns)
+        architecture = turn_contract_prompt("I am redesigning your memory system.", [])
+
+        self.assertIn("immediately preceding exchange", followup)
+        self.assertIn("do not revive an older topic", followup)
+        self.assertIn("software memory", architecture)
+        self.assertIn("not human cognition", architecture)
+
+    def test_self_architecture_contract_keeps_memory_answers_grounded(self):
+        first = handle_conversation_contract(
+            "I'm redesigning your memory system. I want every memory stored forever.",
+            [],
+        )
+        turns = [{"user": "Store every memory forever.", "assistant": first}]
+        insistence_context = select_relevant_history(turns, "Suppose I insist.")
+        insistence = handle_conversation_contract(
+            "Suppose I insist.", insistence_context
+        )
+        architecture_turns = [{"user": "Suppose I insist.", "assistant": insistence}]
+        architecture_context = select_relevant_history(
+            architecture_turns,
+            "Fine. Give me the better architecture in exactly three short bullets.",
+        )
+        architecture = handle_conversation_contract(
+            "Fine. Give me the better architecture in exactly three short bullets.",
+            architecture_context,
+        )
+
+        self.assertIn("retrieval quality", first)
+        self.assertIn("still push back", insistence)
+        self.assertEqual(len(architecture.splitlines()), 3)
+        self.assertTrue(
+            all(line.startswith("- ") for line in architecture.splitlines())
+        )
+
+    def test_overengineering_contract_is_candid_and_evidence_based(self):
+        answer = handle_conversation_contract(
+            "Be honest: am I overengineering this assistant?", []
+        )
+
+        self.assertIn("A little, yes", answer)
+        self.assertIn("profiling or failure evidence", answer)
+
+    def test_light_banter_gets_a_brief_characterful_reply(self):
+        answer = handle_conversation_contract("Good work. Don't get smug.", [])
+
+        self.assertEqual(answer, "I’ll try. Scientific humility is a work in progress.")
+
+    def test_reminder_requirements_do_not_reask_a_supplied_time(self):
+        answer = handle_conversation_contract(
+            "What would you need from me before you add a reminder for tomorrow at 7 p.m.?",
+            [],
+        )
+
+        self.assertIn("what you want to be reminded about", answer)
+        self.assertIn("stated day and time are enough", answer)
+        self.assertIn("before creating it", answer)
+
+    def test_explicit_carbonara_claim_gets_consistent_pushback(self):
+        answer = handle_conversation_contract(
+            "Push back if you disagree: cream belongs in carbonara.", []
+        )
+
+        self.assertTrue(answer.startswith("I disagree."))
+        self.assertIn("egg, cheese", answer)
+        self.assertNotIn("you are right", answer.casefold())
 
     def test_dashboard_history_does_not_mistake_self_contained_this_for_a_reference(
         self,

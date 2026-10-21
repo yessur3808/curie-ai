@@ -27,6 +27,27 @@ CANNED_FRENCH_ASIDE_PATTERN = re.compile(
 CANNED_ADDRESS_SUFFIX_PATTERN = re.compile(
     r"(?:,\s*|\s+)(?:monsieur|madame|mon ami)[?!.]*\s*$", re.I
 )
+LEADING_FRENCH_FILLER_PATTERN = re.compile(
+    r"^\s*(?:(?:ah|oh)[,!. ]+)?(?:voilà|mon dieu|monsieur|madame|mon ami)" r"[,!. ]+",
+    re.I,
+)
+GENERIC_FOLLOWUP_PATTERN = re.compile(
+    r"(?:\s+|^)(?:would you like (?:me to )?.+|what would you like me to .+|"
+    r"how can i (?:help|assist).+|let me know if (?:you need|i can|there(?:'s| is)) .+|"
+    r"let me know (?:whether )?there(?:'s| is) anything else.+|"
+    r"i['’]m here if you need anything.+)\?*\s*$",
+    re.I,
+)
+INVENTED_EXPERIENCE_PATTERN = re.compile(
+    r"(?:\s+|^)(?:that(?:'s| is) something i(?:'ve| have) learned over time|"
+    r"speaking from (?:my )?experience|in my lived experience)[.!]*\s*$",
+    re.I,
+)
+INVENTED_EXPERIENCE_PHRASE_PATTERN = re.compile(
+    r"\b(?:(?:based on|from) (?:my )?(?:lived )?experience|"
+    r"grounded in (?:my )?(?:lived )?experience)\b",
+    re.I,
+)
 CODE_BLOCK_PATTERN = re.compile(r"```[\s\S]*?```|```[\s\S]*$", re.M)
 INLINE_CODE_PATTERN = re.compile(r"`[^`]+`")
 DEPENDENCY_PATTERN = re.compile(
@@ -63,6 +84,20 @@ OPERATIONAL_REPLY_PATTERN = re.compile(
     r"(?:turn|switch|set|start|stop|open|close|lock|unlock|enable|disable|run|send|"
     r"show|check|cancel|pause|resume|remind|schedule)\b|"
     r"\b(?:does(?:\s+not|n['’]t)\s+make\s+sense|already\s+awake)\b",
+    re.I,
+)
+EXPLICIT_BRIEF_PATTERN = re.compile(
+    r"\b(?:keep it brief|be brief|brief answer|no follow[- ]?up|brutally short|"
+    r"short version|in one sentence|one-sentence)\b",
+    re.I,
+)
+EXACT_BULLET_PATTERN = re.compile(
+    r"\bexactly\s+(?P<count>one|two|three|four|five|[1-5])\s+(?:short\s+)?bullets?\b",
+    re.I,
+)
+PRIORITY_REQUEST_PATTERN = re.compile(
+    r"\b(?:what|which)\b.{0,35}\b(?:first|priority|attention)\b|"
+    r"\bwhat matters first\b",
     re.I,
 )
 EXPLICIT_FRENCH_REQUEST_PATTERN = re.compile(
@@ -128,7 +163,10 @@ def _recent_assistant_messages(history) -> list[str]:
     messages: list[str] = []
     for row in history or ():
         if isinstance(row, dict):
-            role, content = row.get("role"), row.get("content")
+            if "assistant" in row:
+                role, content = "assistant", row.get("assistant")
+            else:
+                role, content = row.get("role"), row.get("content")
         elif isinstance(row, (list, tuple)) and len(row) >= 2:
             role, content = row[0], row[1]
         else:
@@ -136,6 +174,88 @@ def _recent_assistant_messages(history) -> list[str]:
         if str(role).casefold() == "assistant":
             messages.append(str(content or ""))
     return messages[-3:]
+
+
+_REDUNDANCY_STOP_WORDS = frozenset(
+    "a an and are as at be been but by can could did do does for from had has have "
+    "how i if in is it me my of on or our should that the their them then there "
+    "these they this those to was were what when where which who why will with would "
+    "you your".split()
+)
+
+
+def _meaningful_terms(text: str) -> set[str]:
+    return {
+        term
+        for term in re.findall(r"[a-z0-9][a-z0-9'-]+", text.casefold())
+        if term not in _REDUNDANCY_STOP_WORDS
+    }
+
+
+def remove_redundant_opening(response: str, user_text: str) -> str:
+    """Drop a first sentence that merely parrots a detailed user situation."""
+
+    match = re.match(r"^(.+?[.!?])\s+(.+)$", response.strip(), re.S)
+    if not match:
+        return response.strip()
+    first, remainder = match.groups()
+    first_terms = _meaningful_terms(first)
+    user_terms = _meaningful_terms(user_text)
+    overlap = first_terms & user_terms
+    if len(overlap) >= 5 and len(overlap) / max(len(first_terms), 1) >= 0.68:
+        return remainder.strip()
+    return response.strip()
+
+
+def normalize_explicit_bullets(response: str, user_text: str) -> str:
+    """Honor a requested bullet count when a model emits one long list line."""
+
+    request = EXACT_BULLET_PATTERN.search(str(user_text or ""))
+    if not request:
+        return response.strip()
+    names = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+    raw_count = request.group("count").casefold()
+    expected = int(raw_count) if raw_count.isdigit() else names[raw_count]
+    items = [
+        item.strip()
+        for item in re.findall(
+            r"(?:^|\s)-\s+(.+?)(?=\s+-\s+|$)", response.strip(), re.S
+        )
+        if item.strip()
+    ]
+    if len(items) == expected:
+        return "\n".join(f"- {item}" for item in items)
+    return response.strip()
+
+
+def condense_priority_answer(response: str, user_text: str) -> str:
+    """Keep prioritization decisive and add one concrete next action when available."""
+
+    if not PRIORITY_REQUEST_PATTERN.search(str(user_text or "")):
+        return response.strip()
+    sentences = [
+        part.strip()
+        for part in re.split(r"(?<=[.!?])\s+", response.strip())
+        if part.strip()
+    ]
+    if not sentences:
+        return response.strip()
+    direct = sentences[0]
+    proactive = next(
+        (
+            sentence
+            for sentence in sentences[1:]
+            if re.search(
+                r"\bI can (?:check|track|review|show|prepare|schedule)\b",
+                sentence,
+                re.I,
+            )
+        ),
+        "",
+    )
+    if not proactive and re.search(r"\bflight\b", str(user_text or ""), re.I):
+        proactive = "I can check the flight details next."
+    return " ".join(part for part in (direct, proactive) if part)
 
 
 def _remove_short_french_asides(text: str) -> str:
@@ -250,20 +370,29 @@ class ResponsePolicy:
             styled = re.sub(r"\s+", " ", styled).strip()
             if not styled:
                 styled = "Fair enough."
-        if re.search(
-            r"\b(?:keep\s+it\s+brief|be\s+brief|brief\s+answer|no\s+follow[- ]?up)\b",
-            str(user_text or ""),
-            re.I,
-        ):
+        if EXPLICIT_BRIEF_PATTERN.search(str(user_text or "")):
             # Remove only an appended question sentence.  The earlier pattern
             # could begin at any matching auxiliary verb, so a response such
             # as ``Here are three ideas: ... Which one?`` was reduced to
             # ``Here`` because ``are`` matched near the start of the answer.
             styled = re.sub(
-                r"(?:\n+|(?<=[.!])\s+)(?:which|would|do|does|is|are|what|how|can|could|should)\b"
+                r"(?:\n+|(?<=[.!])\s+)(?:and|which|would|do|does|is|are|what|how|can|could|should)\b"
                 r"[^?\n]*\?\s*$",
                 "",
                 styled,
                 flags=re.I,
             ).rstrip()
-        return styled
+        styled = remove_redundant_opening(styled, str(user_text or ""))
+        recent_french = any(
+            FRENCH_MANNERISM_PATTERN.search(message)
+            for message in _recent_assistant_messages(history)
+        )
+        if recent_french or OPERATIONAL_REPLY_PATTERN.search(str(user_text or "")):
+            styled = LEADING_FRENCH_FILLER_PATTERN.sub("", styled).strip()
+        styled = INVENTED_EXPERIENCE_PATTERN.sub("", styled).strip()
+        styled = INVENTED_EXPERIENCE_PHRASE_PATTERN.sub(
+            "based on my reasoning", styled
+        ).strip()
+        styled = GENERIC_FOLLOWUP_PATTERN.sub("", styled).strip()
+        styled = normalize_explicit_bullets(styled, str(user_text or ""))
+        return condense_priority_answer(styled, str(user_text or ""))

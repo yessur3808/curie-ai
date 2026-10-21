@@ -24,14 +24,20 @@ from utils.persona import load_persona
 from llm import manager
 from agent.orchestration.model_service import ModelConversationService
 from agent.orchestration.response_policy import ResponsePolicy
+from agent.orchestration.social_service import SocialConversationService
 from agent.personality_context import PersonalityContext
 from .voice_persona import (
     dashboard_scope_prompt,
     finalize_live_response,
+    handle_conversation_contract,
     live_conversation_prompt,
+    max_recent_response_similarity,
     needs_english_rewrite,
     persona_prompt,
     select_relevant_history,
+    is_unhelpful_repeat,
+    is_topic_regression,
+    turn_contract_prompt,
     delivery_settings,
     persona_revision,
 )
@@ -57,6 +63,7 @@ import uvicorn
 app = FastAPI(title="Curie Dashboard Conversation Bridge")
 persona = load_persona()
 model = ModelConversationService(manager)
+social = SocialConversationService()
 persona_file = os.getenv("PERSONA_FILE", "curie.json")
 if not persona_file.endswith(".json"):
     persona_file += ".json"
@@ -553,6 +560,7 @@ async def chat(req: Message, request: Request):
             + persona_prompt(active, directives, briefing=req.ephemeral)
             + "\n"
             + dashboard_scope_prompt(bool(snapshot.strip()))
+            + turn_contract_prompt(user, context_turns)
             + "\n"
             + snapshot
             + "\nDirectly relevant previous conversation:\n"
@@ -572,10 +580,19 @@ async def chat(req: Message, request: Request):
             else str(uuid.uuid4())
         )
         grounded = handle_capabilities_command(user)
+        grounded_model = "capability_discovery"
+        if grounded is None:
+            grounded = handle_conversation_contract(user, context_turns)
+            grounded_model = "conversation_contract"
+        if grounded is None:
+            social_candidate = social.handle(user)
+            if social_candidate is not None:
+                grounded = social_candidate.text
+                grounded_model = social_candidate.model_used
         grounded_response = grounded is not None
         if grounded is not None:
             text = grounded
-            model_used = "capability_discovery"
+            model_used = grounded_model
         else:
             candidate = await until_disconnect(
                 request,
@@ -626,12 +643,62 @@ async def chat(req: Message, request: Request):
             text = (
                 response_policy.sanitize(text)
                 if grounded_response
-                else response_policy.finalize(text, user, history=context_turns)
+                else response_policy.finalize(text, user, history=turns)
             )
             if req.live:
                 text = finalize_live_response(
                     text, user, has_snapshot=bool(snapshot.strip())
                 )
+            repeated_reply = is_unhelpful_repeat(text, turns, user)
+            topic_regression = is_topic_regression(text, context_turns, turns, user)
+            if not grounded_response and (repeated_reply or topic_regression):
+                original_similarity = max_recent_response_similarity(text, turns)
+                repair_prompt = (
+                    "System: "
+                    + persona_prompt(active, directives)
+                    + "\n"
+                    + dashboard_scope_prompt(bool(snapshot.strip()))
+                    + turn_contract_prompt(user, context_turns)
+                    + "\nThe draft below either repeats an earlier answer or answers "
+                    "an older subject instead of the immediately preceding exchange. "
+                    "Answer the owner's newest message directly with new, relevant wording. "
+                    "Do not recap the old answer, restart the old topic, apologize, or mention "
+                    "this repair instruction.\nRecent conversation:\n"
+                    + json.dumps(turns[-3:], ensure_ascii=False)
+                    + "\nNewest owner message: "
+                    + user
+                    + "\nRepeated draft: "
+                    + text
+                    + "\nReplacement answer:"
+                )
+                repaired = await until_disconnect(
+                    request,
+                    model.generate(
+                        repair_prompt,
+                        user,
+                        0.25,
+                        owner_id="dashboard:" + req.user_id,
+                        request_id=request_id + ":continuity-repair",
+                    ),
+                )
+                repaired_text = re.sub(
+                    r"<think>[\s\S]*?</think>", "", repaired.text or ""
+                ).strip()
+                if repaired_text and not repaired_text.startswith("[Error"):
+                    repaired_text = response_policy.finalize(
+                        repaired_text, user, history=turns
+                    )
+                    repaired_similarity = max_recent_response_similarity(
+                        repaired_text, turns
+                    )
+                    repaired_regression = is_topic_regression(
+                        repaired_text, context_turns, turns, user
+                    )
+                    if (
+                        repeated_reply and repaired_similarity < original_similarity
+                    ) or (topic_regression and not repaired_regression):
+                        text = repaired_text
+                        model_used = repaired.model_used + ":continuity_repair"
         if not req.ephemeral:
             turns = (turns + [{"user": user[:2000], "assistant": text[:3000]}])[-4:]
             if sessions is not None:
