@@ -32,6 +32,10 @@ the release is blocked.
   operational failures without touching production services.
 - `phase10_hardening_suite.py` validates the trace, SLO, backpressure,
   redaction, and recovery contracts used by the final five release gates.
+- `conversation_templates/` stores reusable live multi-turn scripts and
+  deterministic assertions. `conversation_template_runner.py` runs them with a
+  unique synthetic identity and always closes the native session afterward, so
+  test dialogue is retained in Git but never in Curie's memory.
 
 ## Evaluation layers
 

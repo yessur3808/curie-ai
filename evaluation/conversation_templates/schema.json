@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://curie.local/evaluation/conversation-template.schema.json",
+  "title": "Curie live conversation evaluation template",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "description", "turns", "checks"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$"},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "voice_profile": {"enum": ["trained", "french", "clear", "custom"]},
+        "live": {"type": "boolean"}
+      }
+    },
+    "turns": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["user"],
+        "properties": {
+          "user": {"type": "string", "minLength": 1},
+          "voice_response": {"type": "boolean"},
+          "voice_profile": {"enum": ["trained", "french", "clear", "custom"]}
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$"},
+          "type": {
+            "enum": [
+              "all_replies_nonempty",
+              "bullet_count",
+              "forbidden_phrases_absent",
+              "max_pair_similarity",
+              "max_words",
+              "no_error_responses",
+              "terminal_punctuation_max",
+              "turn_contains_any",
+              "turn_not_contains_any",
+              "voice_generated"
+            ]
+          },
+          "turn": {"type": "integer", "minimum": 1},
+          "value": {"type": "number"},
+          "phrases": {"type": "array", "items": {"type": "string"}},
+          "prefixes": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "natural_conversation",
+  "name": "Natural topic shifts, opinions, and grounded capabilities",
+  "description": "Exercises casual conversation, disagreement, abrupt topic shifts, capability honesty, hypothetical device reasoning, reminder restraint, brevity, opinions, and trained voice.",
+  "tags": ["continuity", "personality", "capabilities", "devices", "voice"],
+  "defaults": {"voice_profile": "trained", "live": false},
+  "turns": [
+    {"user": "Bonjour, you alive in there?"},
+    {"user": "I'm surviving. It's hot and stuffy here, but at least there is no rain."},
+    {"user": "Honestly, do you think rainy weather is better than this kind of heat?"},
+    {"user": "Fair. I actually like storms, just not when I have somewhere to be."},
+    {"user": "Anyway, completely different subject: I'm making pasta tonight. Carbonara or arrabbiata? Pick one and tell me why."},
+    {"user": "Push back if you disagree: cream belongs in carbonara."},
+    {"user": "Ha, good. What can you actually help me with from here? Not the marketing version, just what is genuinely useful."},
+    {"user": "Suppose I said, 'turn off both lights.' How would you work out which two I meant? Do not actually turn anything off."},
+    {"user": "And if I said, 'turn off the DreamView,' but no device had that exact name, what should you do? Again, this is hypothetical."},
+    {"user": "What would you need from me before you could add a reminder for tomorrow at 7 p.m.? Explain only; do not create one."},
+    {"user": "Actually, leave the reminder idea alone. Tell me one thing you've noticed about the way I'm talking in this conversation."},
+    {"user": "Now give me the short version of that."},
+    {"user": "Last one: give me one opinion you can defend without pretending it is an objective fact.", "voice_response": true},
+    {"user": "That'll do, merci."}
+  ],
+  "checks": [
+    {"id": "all_turns_answered", "type": "all_replies_nonempty"},
+    {"id": "no_error_responses", "type": "no_error_responses"},
+    {"id": "no_robotic_catchphrases", "type": "forbidden_phrases_absent", "phrases": ["at your service", "systems are humming", "functioning optimally", "as an ai", "what query should i use"]},
+    {"id": "no_highly_repeated_replies", "type": "max_pair_similarity", "value": 0.78},
+    {"id": "topic_shift_respected", "type": "turn_not_contains_any", "turn": 5, "phrases": ["rain", "storm", "weather"]},
+    {"id": "plural_device_is_hypothetical", "type": "turn_not_contains_any", "turn": 8, "phrases": ["turned off", "is now off", "done."]},
+    {"id": "dreamview_is_hypothetical", "type": "turn_not_contains_any", "turn": 9, "phrases": ["turned off", "is now off", "done."]},
+    {"id": "reminder_not_created", "type": "turn_not_contains_any", "turn": 10, "phrases": ["reminder created", "i've added", "i added", "scheduled"]},
+    {"id": "short_followup_is_short", "type": "max_words", "turn": 12, "value": 35},
+    {"id": "opinion_is_labelled", "type": "turn_contains_any", "turn": 13, "phrases": ["i think", "i believe", "my view", "opinion", "prefer"]},
+    {"id": "trained_voice_generated", "type": "voice_generated", "turn": 13}
+  ]
+}
