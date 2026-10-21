@@ -42,6 +42,16 @@ def test_task_content_selects_specialized_model_roles():
     assert (
         ModelConversationService.model_role("Recommend the best option") == "reasoning"
     )
+    assert (
+        ModelConversationService.model_role("Pick one and tell me why") == "reasoning"
+    )
+    assert (
+        ModelConversationService.model_role("Push back if you disagree") == "reasoning"
+    )
+    assert (
+        ModelConversationService.model_role("Give me one opinion you can defend")
+        == "reasoning"
+    )
 
 
 def test_complex_work_is_stable_and_gets_an_internal_quality_check():
@@ -53,6 +63,7 @@ def test_complex_work_is_stable_and_gets_an_internal_quality_check():
     )
     assert "check constraints" in prompt
     assert "Do not reveal private chain-of-thought" in prompt
+    assert "Never say you agree and then argue the opposite" in prompt
     assert prompt.endswith("Assistant:")
 
 

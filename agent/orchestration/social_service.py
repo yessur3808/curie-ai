@@ -17,6 +17,11 @@ class SocialConversationService:
         r"(?:[,!. ]+(?:how are you(?: doing)?|how(?:'s| is) it going))?[,!.? ]*$",
         re.I,
     )
+    _PRESENCE_CHECK = re.compile(
+        r"^\s*(?:hi|hello|hey|bonjour|salut)[,!. ]+"
+        r"(?:are\s+)?you\s+(?:alive|awake|there)(?:\s+in\s+there)?[?!. ]*$",
+        re.I,
+    )
     _TECHNICAL_WIN = re.compile(
         r"\b(?:finally\s+)?(?:fixed|solved|resolved|squashed)\b.{0,60}"
         r"\b(?:bug|issue|error)\b|"
@@ -59,8 +64,24 @@ class SocialConversationService:
         r"(?:raining|rainy|snowing))\b[^?]*[.! ]*$",
         re.I,
     )
+    _HOT_NO_RAIN_UPDATE = re.compile(
+        r"^[^?]{0,180}\b(?:hot|warm|humid|muggy|stuffy)\b[^?]{0,120}"
+        r"\b(?:no rain|not raining|isn['’]t raining)\b[^?]*[.! ]*$",
+        re.I,
+    )
+    _CASUAL_CLOSE = re.compile(
+        r"^\s*(?:that(?:'ll| will) do|enough for now|we['’]re done)"
+        r"(?:[,!. ]+(?:thanks|thank you|merci))?[.! ]*$",
+        re.I,
+    )
 
     def handle(self, text: str) -> ResponseCandidate | None:
+        if self._PRESENCE_CHECK.fullmatch(text.strip()):
+            return ResponseCandidate(
+                "Bonjour. Awake and ready.", "social:presence_check"
+            )
+        if self._CASUAL_CLOSE.fullmatch(text.strip()):
+            return ResponseCandidate("Anytime.", "social:casual_close")
         if self._FRENCH_WELLBEING.fullmatch(text.strip()):
             return ResponseCandidate(
                 "Ça va bien, merci. Et toi?", "social:french_check_in"
@@ -69,7 +90,9 @@ class SocialConversationService:
             return ResponseCandidate(
                 "Got it. No query needed.", "social:no_tool_acknowledgement"
             )
-        if self._WEATHER_CORRECTION.fullmatch(text.strip()):
+        if self._WEATHER_CORRECTION.fullmatch(
+            text.strip()
+        ) or self._HOT_NO_RAIN_UPDATE.fullmatch(text.strip()):
             reply = (
                 "Ah, got it. Hot and stuffy, not rainy."
                 if re.search(r"\b(?:hot|warm|humid|muggy|stuffy)\b", text, re.I)

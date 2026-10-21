@@ -52,7 +52,9 @@ class ModelConversationService:
             r"diagnose|why does|root cause|step by step|correlate|infer|deduce|"
             r"cause and effect|pros and cons|best approach|best option|recommend|"
             r"prioriti[sz]e|decision|implications?|constraints?|contradiction|"
-            r"troubleshoot|what follows|what would happen|if .+ then)\b",
+            r"troubleshoot|what follows|what would happen|if .+ then|"
+            r"do you think|(?:your|one|an) opinion|pick one|push back|agree|disagree|"
+            r"be honest|terrible idea|visionary|what gets .+ first)\b",
             text,
         ):
             return "reasoning"
@@ -86,7 +88,9 @@ class ModelConversationService:
             "contradictions, calculations, and tool evidence; then return only the "
             "direct final answer. Do not reveal private chain-of-thought. Distinguish "
             "verified facts from assumptions and ask only when an unresolved ambiguity "
-            "would materially change the result."
+            "would materially change the result. When asked to choose or give an opinion, "
+            "take a defensible position instead of listing both sides. Never say you agree "
+            "and then argue the opposite."
         )
         stripped = prompt.rstrip()
         if stripped.endswith("Assistant:"):

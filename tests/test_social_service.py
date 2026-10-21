@@ -83,3 +83,17 @@ def test_weather_and_no_tool_corrections_get_brief_human_acknowledgements():
         asyncio.run(route_request("No rain, quite hot and stuffy actually")).intent
         == "social"
     )
+
+
+def test_natural_presence_weather_update_and_close_use_the_social_fast_path():
+    service = SocialConversationService()
+
+    presence = service.handle("Bonjour, you alive in there?")
+    weather = service.handle(
+        "I'm surviving. It's hot and stuffy here, but at least there is no rain."
+    )
+    closing = service.handle("That'll do, merci.")
+
+    assert presence.text == "Bonjour. Awake and ready."
+    assert weather.text == "Ah, got it. Hot and stuffy, not rainy."
+    assert closing.text == "Anytime."
