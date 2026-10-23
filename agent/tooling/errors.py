@@ -14,6 +14,19 @@ class ToolExecutionError(RuntimeError):
         self.retryable = retryable
 
 
+class ProviderAccessError(ToolExecutionError):
+    """Allowlisted provider diagnostics, never response bodies or auth material."""
+
+    def __init__(self, *, provider, status, code, user_message, retryable=False):
+        super().__init__(
+            f"{provider}: {code} (HTTP {status})",
+            user_message=user_message,
+            retryable=retryable,
+        )
+        self.error_code = code
+        self.http_status = status
+
+
 class SandboxCommandError(ToolExecutionError):
     """A command that failed inside, or while starting, the secure sandbox."""
 

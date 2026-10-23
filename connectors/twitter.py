@@ -26,6 +26,54 @@ _POSTING_SCOPES = (
 _DM_SCOPES = ("dm.read", "dm.write")
 
 
+def _check_response(response):
+    """Expose useful access failures without echoing sensitive HTTP details."""
+    if not response.is_error:
+        return
+    from agent.tooling.errors import ProviderAccessError
+
+    status = response.status_code
+    try:
+        kind = str(response.json().get("type", "")).rsplit("/", 1)[-1]
+    except (ValueError, AttributeError):
+        kind = ""
+    if status == 402:
+        code = "credits_depleted" if kind == "credits-depleted" else "payment_required"
+        reason = (
+            "the API credits are depleted"
+            if code == "credits_depleted"
+            else "the API requires payment"
+        )
+        message = f"X returned HTTP 402: {reason}. This is an API access issue, not proof of a login problem. I couldn't retrieve the posts. I can search the public web for the news instead."
+    elif status == 401:
+        code, message = (
+            "authorization_failed",
+            "X rejected the authorization (HTTP 401). The account needs to be reconnected before I can use its API.",
+        )
+    elif status == 403:
+        code, message = (
+            "access_denied",
+            "X denied this API operation (HTTP 403). The app's permissions or API access tier may not allow it.",
+        )
+    elif status == 429:
+        code, message = (
+            "rate_limited",
+            "X has rate-limited this request (HTTP 429). I haven't retrieved the results. We can try again later or use a public-web search.",
+        )
+    else:
+        code, message = (
+            "provider_error",
+            f"X returned HTTP {status}, so I couldn't complete the request.",
+        )
+    raise ProviderAccessError(
+        provider="X",
+        status=status,
+        code=code,
+        user_message=message,
+        retryable=status == 429 or status >= 500,
+    )
+
+
 def requested_scopes() -> tuple[str, ...]:
     """Request only posting scopes unless DM access is explicitly enabled."""
     allow_dms = os.getenv("X_OAUTH_DM_SCOPES_ENABLED", "false").strip().casefold()
@@ -101,7 +149,7 @@ async def exchange_authorization_code(state: str, code: str) -> str:
                 "code_verifier": pending["verifier"],
             },
         )
-        response.raise_for_status()
+        _check_response(response)
         token = response.json()
     token["expires_at"] = (
         datetime.now(timezone.utc).timestamp() + int(token.get("expires_in", 7200)) - 60
@@ -129,7 +177,7 @@ async def _access_token(owner_id: str) -> str:
                 "refresh_token": token["refresh_token"],
             },
         )
-        response.raise_for_status()
+        _check_response(response)
         refreshed = response.json()
     token.update(refreshed)
     token["expires_at"] = (
@@ -147,7 +195,7 @@ async def _request(owner_id: str, method: str, path: str, **kwargs) -> dict:
         response = await client.request(
             method, f"{_API}{path}", headers=headers, **kwargs
         )
-        response.raise_for_status()
+        _check_response(response)
         return response.json()
 
 

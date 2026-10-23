@@ -280,7 +280,7 @@ def test_recent_assistant_question_restores_direct_answer_after_restart():
     assert transition.kind is TransitionClass.DIRECT_ANSWER
 
 
-def test_new_goal_drops_stale_history_and_pending_question_from_prompt():
+def test_new_goal_releases_pending_question_without_erasing_recent_dialogue():
     workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Helpful."})
     _observe(
         workflow.dialogue_state,
@@ -308,10 +308,10 @@ def test_new_goal_drops_stale_history_and_pending_question_from_prompt():
     candidate_ids = {item.candidate_id for item in envelope.decisions}
 
     assert transition.kind is TransitionClass.INTERRUPTION
-    assert prompt_history == []
+    assert len(prompt_history) == 2
     assert "active-goal" not in candidate_ids
     assert "unresolved-question" not in candidate_ids
-    assert not any(item.startswith("history-") for item in candidate_ids)
+    assert any(item.startswith("history-") for item in candidate_ids)
 
 
 def test_dialogue_state_round_trip_survives_process_restart():

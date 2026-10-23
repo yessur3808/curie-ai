@@ -707,6 +707,9 @@ async def execute_request(
             capability=req.action,
             verification_status="failed",
             error_type=type(exc).__name__,
+            error_code=getattr(exc, "error_code", "internal_error"),
+            http_status=getattr(exc, "http_status", None),
+            user_message=user_facing_tool_error(exc, req.action),
             retryable=bool(getattr(exc, "retryable", False))
             or isinstance(exc, (TimeoutError, ConnectionError)),
         )

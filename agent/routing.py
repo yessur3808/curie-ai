@@ -217,6 +217,15 @@ async def route_request(
     allow_model_inference: bool = True,
 ) -> RoutingDecision:
     """Return exactly one explainable decision; model inference is read-only only."""
+    from agent.conversation_context import discussion_only
+
+    if discussion_only(text):
+        decision = _decision(
+            "conversation",
+            explanation="Discussing a prior result, not requesting another action.",
+        )
+        _record(owner_id, text, decision)
+        return decision
     clauses = [part for part in _MULTI_SPLIT.split(text.strip()) if part]
     if len(clauses) > 1:
         clause_decisions = [_deterministic_clause(part, history) for part in clauses]

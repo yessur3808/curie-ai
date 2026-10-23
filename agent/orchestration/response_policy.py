@@ -433,7 +433,12 @@ class ResponsePolicy:
         if not self.minimal_sanitization:
             response = CODE_BLOCK_PATTERN.sub("", response).strip()
             response = INLINE_CODE_PATTERN.sub("", response).strip()
-        response = re.sub(r" +", " ", response)
+        # Collapse prose spacing without corrupting code or line indentation.
+        parts = re.split(r"(```[\s\S]*?(?:```|$)|`[^`\n]+`)", response)
+        response = "".join(
+            part if index % 2 else re.sub(r"(?<=\S) {2,}(?=\S)", " ", part)
+            for index, part in enumerate(parts)
+        )
         response = re.sub(r"\n\n\n+", "\n\n", response)
         return response.strip()
 

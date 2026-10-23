@@ -392,6 +392,13 @@ def classify_transition(
             TransitionClass.CONTINUATION, "explicit continuation wording"
         )
 
+    from agent.conversation_context import context_followup
+
+    if context_followup(clean, history):
+        return DialogueTransition(
+            TransitionClass.CONTINUATION, "reference to the recent exchange", 0.9
+        )
+
     if _EXPLICIT_REQUEST.search(clean):
         if _slot_value(current.pending_task):
             return DialogueTransition(
@@ -431,7 +438,7 @@ def classify_transition(
 class DialogueStateStore:
     """Bounded explicit dialogue state; durable memories remain a separate layer."""
 
-    def __init__(self, *, ttl_seconds: int = 7200, max_sessions: int = 1000):
+    def __init__(self, *, ttl_seconds: int = 86400, max_sessions: int = 1000):
         self.ttl_seconds = max(60, int(ttl_seconds))
         self.max_sessions = max(1, int(max_sessions))
         self._items: OrderedDict[str, DialogueState] = OrderedDict()
@@ -752,10 +759,15 @@ class DialogueStateStore:
             updated.pending_approval = None
         elif failed:
             updated.last_failed_goal = _slot(
-                goal,
+                {
+                    **goal,
+                    "response": response_text[:1600],
+                    "execution_status": execution_status,
+                    "diagnostic": dict(result.get("tool_diagnostic") or {}),
+                },
                 source_turn=source_turn,
                 owner_scope=owner,
-                ttl=3600,
+                ttl=86400,
                 source="execution_result",
                 now=now,
             )

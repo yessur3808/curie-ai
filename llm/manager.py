@@ -295,6 +295,7 @@ def _load_model_with_fallback(
                     n_gpu_layers=layers,
                     verbose=verbose,
                 )
+                _configure_thinking_template(model)
                 logger.info(
                     "Successfully loaded model %s using %s", model_name, backend
                 )
@@ -432,6 +433,29 @@ def start_background_preload() -> Thread:
     return t
 
 
+def _configure_thinking_template(model):
+    """Use the model's template switch, not an unsupported magic user phrase."""
+    template = model.metadata.get("tokenizer.chat_template", "")
+    if "enable_thinking" not in template:
+        return
+    from llama_cpp.llama_chat_format import Jinja2ChatFormatter
+
+    disabled = os.getenv("LLM_DISABLE_THINKING", "true").lower() in {"1", "true", "yes"}
+    enabled = "false" if disabled else "true"
+    eos, bos = model.token_eos(), model.token_bos()
+    formatter = Jinja2ChatFormatter(
+        template="{% set enable_thinking = " + enabled + " %}" + template,
+        eos_token=(
+            model.detokenize([eos], special=True).decode("utf-8") if eos >= 0 else ""
+        ),
+        bos_token=(
+            model.detokenize([bos], special=True).decode("utf-8") if bos >= 0 else ""
+        ),
+        stop_token_ids=[eos] if eos >= 0 else [],
+    )
+    model.chat_handler = formatter.to_chat_handler()
+
+
 def _apply_generation_controls(prompt: str, model_name: str = "") -> str:
     """Apply model controls that keep private reasoning out of responses."""
     # /no_think is a Qwen-specific switch. Other families use their native
@@ -442,12 +466,22 @@ def _apply_generation_controls(prompt: str, model_name: str = "") -> str:
     # control phrase would become ordinary user text rather than a control.
     if "instruct-2507" in model_name.lower():
         return prompt
+    if (
+        re.search(r"qwen3[._-][568]", model_name, re.I)
+        or "saluki" in model_name.lower()
+    ):
+        # These checkpoints use enable_thinking in their Jinja template.
+        return prompt
     disable_thinking = os.getenv("LLM_DISABLE_THINKING", "true").lower() in (
         "1",
         "true",
         "yes",
     )
     if disable_thinking and "/no_think" not in prompt:
+        from llm.chat_prompt import ChatPrompt
+
+        if isinstance(prompt, ChatPrompt):
+            return prompt.with_system_guidance("/no_think")
         stripped = prompt.rstrip()
         # The control belongs to the user/instruction context, before the
         # assistant generation marker. Appending it after ``Assistant:`` makes
@@ -460,6 +494,10 @@ def _apply_generation_controls(prompt: str, model_name: str = "") -> str:
 
 def _prompt_to_chat_messages(prompt: str) -> list[dict[str, str]]:
     """Convert Curie's tagged prompt into messages for the model chat template."""
+    from llm.chat_prompt import ChatPrompt
+
+    if isinstance(prompt, ChatPrompt):
+        return prompt.messages
     marker = "\nUser:"
     if marker in prompt:
         context, user_turn = prompt.rsplit(marker, 1)
@@ -945,87 +983,20 @@ def clean_assistant_reply(reply: str) -> str:
     for pattern in line_anchored_patterns:
         reply = re.sub(pattern, "", reply, flags=re.IGNORECASE | re.MULTILINE)
 
-    # Remove lines that look like system prompts or instructions
-    lines = [line.strip() for line in reply.splitlines() if line.strip()]
-    filtered_lines = []
-    for line in lines:
-        # Skip lines that look like instructions/prompts
-        lower_line = line.lower()
-        if any(
-            marker in lower_line
-            for marker in [
-                # Identity/role instructions
-                "you are an",
-                "you are a",
-                "you are the",
-                "your name is",
-                "your role is",
-                "you must",
-                "you should",
-                "you will",
-                "you have to",
-                "you need to",
-                # System/instruction markers
-                "system:",
-                "instruction:",
-                "instructions:",
-                "assistant:",
-                "user:",
-                "human:",
-                # Behavioral directives
-                "respond as",
-                "act as",
-                "roleplay as",
-                "pretend to be",
-                "behave as",
-                "speak as",
-                "reply as",
-                "answer as",
-                # Rule/guideline indicators
-                "here are the rules",
-                "follow these guidelines",
-                "follow these rules",
-                "follow these instructions",
-                "according to the rules",
-                "as per the guidelines",
-                "you must follow",
-                "remember to",
-                "make sure to",
-                "always remember",
-                "never forget",
-                # Meta-commentary about response
-                "i am programmed to",
-                "i am designed to",
-                "i am an ai",
-                "i am a language model",
-                "as an ai",
-                "as a language model",
-                "my programming",
-                "my instructions",
-                # Prompt leakage indicators
-                "in this scenario",
-                "in this roleplay",
-                "for this conversation",
-                "in this context",
-                "based on my prompt",
-                "according to my prompt",
-            ]
+    # Sanitization must not destroy the answer. Advice such as "you should"
+    # and repeated code lines are legitimate content, not prompt leakage.
+    # Preserve Markdown paragraphs, lists, table rows and code indentation.
+    cleaned = []
+    fenced = False
+    for line in reply.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        if not fenced and re.match(
+            r"^\s*(?:Your (?:name|role) is|You are (?:Curie|an AI|a helpful assistant)\b|"
+            r"My (?:system )?instructions (?:say|are)|As (?:an AI|a language model)\b)",
+            line,
+            re.I,
         ):
             continue
-        filtered_lines.append(line)
-
-    # Remove repeated lines (basic de-duplication)
-    seen = set()
-    cleaned_lines = []
-    for line in filtered_lines:
-        if line not in seen:
-            cleaned_lines.append(line)
-            seen.add(line)
-
-    # Join lines again
-    result = " ".join(cleaned_lines)
-
-    # Final cleanup: remove excessive whitespace
-    result = re.sub(r"\s+", " ", result).strip()
-
-    return result
+        cleaned.append(line.rstrip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned)).strip()

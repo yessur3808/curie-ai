@@ -8,6 +8,7 @@ import pytest
 
 
 def test_resource_governor_enforces_budget_and_downgrades(monkeypatch, tmp_path):
+    monkeypatch.setenv("CURIE_CONVERSATION_ALLOW_MODEL_DOWNGRADE", "true")
     from services.resource_governor import ResourceGovernor
 
     monkeypatch.setenv("CURIE_BUDGET_OPEN_SOURCE_PLANNING_TOKENS_DAY", "1000")

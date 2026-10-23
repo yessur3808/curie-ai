@@ -28,7 +28,17 @@ class ModelConversationService:
             r"engineering|statistics|research|diagnos(?:e|is)|risk analysis)\b",
             text,
         )
-        return bool(asks_for_opinion and not complex_domain and len(text.split()) <= 32)
+        everyday_activity_choice = re.search(
+            r"\b(?:after work|before bed|another hour|call it a (?:day|night)|take a break|wind down)\b",
+            text,
+        ) and not re.search(
+            r"\b(?:root cause|architecture|benchmark|diagnos\w*|implement)\b", text
+        )
+        return bool(
+            asks_for_opinion
+            and (not complex_domain or everyday_activity_choice)
+            and len(text.split()) <= 32
+        )
 
     @staticmethod
     def token_budget(user_text: str, role: str | None = None) -> int:
@@ -56,6 +66,23 @@ class ModelConversationService:
     def model_role(user_text: str) -> str:
         """Select a model specialty from the user's actual task."""
         text = user_text.strip().casefold()
+        if ModelConversationService.is_lightweight_opinion(user_text):
+            return "general"
+        if re.search(
+            r"\b(?:http\s+[45]\d\d|api credits|login problem|logged out)\b", text
+        ) and not re.search(r"\b(?:fix|debug|implement|write|code|refactor)\b", text):
+            return "general"
+        if (
+            re.search(
+                r"\b(?:would|should|why|tradeoffs?|first step|first measure|root cause)\b",
+                text,
+            )
+            and re.search(
+                r"\b(?:api|database|latency|architecture|performance|p95)\b", text
+            )
+            and not re.search(r"\b(?:write|implement|refactor|fix|debug)\b", text)
+        ):
+            return "reasoning"
         if (
             re.search(
                 r"\b(?:code|coding|program|function|class|api|endpoint|debug|bug|"
@@ -66,8 +93,6 @@ class ModelConversationService:
             or len(re.findall(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", text)) >= 2
         ):
             return "coding"
-        if ModelConversationService.is_lightweight_opinion(user_text):
-            return "general"
         if re.search(
             r"\b(?:reason|analyse|analyze|evaluate|compare|tradeoffs?|prove|math|"
             r"calculate|architecture|design|strategy|plan|research|investigate|"
@@ -87,6 +112,26 @@ class ModelConversationService:
         ):
             return "fast"
         return "general"
+
+    @staticmethod
+    def contextual_role(user_text: str, prompt: str) -> str:
+        """Keep an analytical follow-up with its specialist, not an old topic."""
+        from agent.conversation_context import context_followup
+        from llm.chat_prompt import ChatPrompt
+
+        role = ModelConversationService.model_role(user_text)
+        if role != "general" or not isinstance(prompt, ChatPrompt):
+            return role
+        history = prompt.messages[1:-1]
+        if not context_followup(user_text, history):
+            return role
+        previous_users = [m["content"] for m in history if m["role"] == "user"]
+        if any(
+            ModelConversationService.model_role(text) == "reasoning"
+            for text in previous_users[-2:]
+        ):
+            return "reasoning"
+        return role
 
     @staticmethod
     def reasoning_temperature(role: str, requested: float) -> float:
@@ -112,6 +157,8 @@ class ModelConversationService:
                 "would materially change the result. When asked to choose or give an opinion, "
                 "take a defensible position instead of listing both sides. Never say you agree "
                 "and then argue the opposite."
+                " For diagnosis, distinguish hypotheses from measured causes. Prefer evidence "
+                "that separates competing explanations before recommending a system change."
             )
         else:
             guidance = (
@@ -120,6 +167,18 @@ class ModelConversationService:
                 "is requested, and do not add flattery, a generic offer to help, or a trailing "
                 "question. Do not infer a personality trait beyond the conversation evidence."
             )
+        guidance += (
+            " When drafting or editing, output the requested text itself, keeping the "
+            "requested length. A short note normally means one or two sentences, not an "
+            "email with a subject and sign-off. Do not invent reasons, excuses, relationships, "
+            "or events. Keep the speaker, recipient, and requested action unchanged."
+            " Distinguish the original request from a later question about it: explaining "
+            "or quoting an earlier command does not retroactively change what was asked."
+        )
+        from llm.chat_prompt import ChatPrompt
+
+        if isinstance(prompt, ChatPrompt):
+            return prompt.with_system_guidance(guidance)
         stripped = prompt.rstrip()
         if stripped.endswith("Assistant:"):
             return (
@@ -137,7 +196,7 @@ class ModelConversationService:
         request_id: str | None = None,
         priority: str = "active",
     ) -> ResponseCandidate:
-        role = self.model_role(user_text)
+        role = self.contextual_role(user_text, prompt)
         max_tokens = self.token_budget(user_text, role)
         from services.resource_governor import resource_governor
         from services.self_diagnostics import diagnostic_monitor

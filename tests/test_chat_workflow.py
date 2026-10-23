@@ -244,13 +244,15 @@ And some text after."""
         response = "*Voilà*, the result is **important**.\n* First case\n* Second case"
         assert self.workflow_minimal._sanitize_output(response) == response
 
-    def test_final_response_requirements_follow_current_user(self):
+    def test_final_response_requirements_are_system_not_user_content(self):
         prompt = self.workflow_minimal._build_structured_prompt(
             {}, [], "Reply entirely in French", internal_id="test-user"
         )
-        assert prompt.index("User: Reply entirely in French") < prompt.index(
-            "[FINAL RESPONSE REQUIREMENTS]"
-        )
+        assert "[FINAL RESPONSE REQUIREMENTS]" in prompt.messages[0]["content"]
+        assert prompt.messages[-1] == {
+            "role": "user",
+            "content": "Reply entirely in French",
+        }
         assert (
             "primarily in English unless the user explicitly requests another language"
             in prompt

@@ -1138,6 +1138,25 @@ class ChatWorkflow:
                         response_text=routed_response,
                     ),
                 }
+                failed_outcomes = [
+                    o
+                    for o in execution.outcomes
+                    if o.metadata.get("status") == "failed"
+                ]
+                if failed_outcomes:
+                    result["tool_diagnostic"] = {
+                        k: v
+                        for k, v in failed_outcomes[-1].metadata.items()
+                        if k
+                        in {
+                            "capability",
+                            "error_type",
+                            "error_code",
+                            "http_status",
+                            "retryable",
+                            "user_message",
+                        }
+                    }
                 dialogue_names: list[str] = []
                 for outcome in execution.outcomes:
                     if outcome.capability not in {"home_control", "home_status"}:
@@ -1587,6 +1606,26 @@ class ChatWorkflow:
                     names = _dialogue_device_names(routed_candidate.metadata)
                     if names:
                         result["_dialogue_entities"] = names
+                for field in ("verification_status",):
+                    if field in routed_candidate.metadata:
+                        result[field] = routed_candidate.metadata[field]
+                result["execution_status"] = routed_candidate.metadata.get(
+                    "status", "completed"
+                )
+                if result["execution_status"] == "failed":
+                    result["tool_diagnostic"] = {
+                        k: v
+                        for k, v in routed_candidate.metadata.items()
+                        if k
+                        in {
+                            "capability",
+                            "error_type",
+                            "error_code",
+                            "http_status",
+                            "retryable",
+                            "user_message",
+                        }
+                    }
                 return result
         except Exception as exc:
             logger.exception("Unified request router failed: %s", exc)
@@ -1886,16 +1925,24 @@ class ChatWorkflow:
 
     @staticmethod
     def _prompt_history_for_transition(
-        history: list, transition: DialogueTransition | None
+        history: list, transition: DialogueTransition | None, user_text: str = ""
     ) -> list:
         """Keep stale transcript topics out of a clearly independent turn."""
 
+        if re.match(
+            r"\s*(?:anyway|new topic|different topic|moving on|separately|forget (?:that|it))\b",
+            user_text,
+            re.I,
+        ):
+            return []
         if transition and transition.kind in {
             TransitionClass.NEW_GOAL,
             TransitionClass.INTERRUPTION,
             TransitionClass.UNRELATED_SMALL_TALK,
         }:
-            return []
+            # A classification is not an instruction to erase the conversation.
+            # Keep a bounded recent transcript, but do not carry the old active goal.
+            return history[-4:]
         return history
 
     def _prepare_prompt_context(
@@ -1912,7 +1959,9 @@ class ChatWorkflow:
         """Select dynamic prompt context once and make every choice inspectable."""
 
         snapshot = self.dialogue_state.snapshot(platform=platform, owner_id=internal_id)
-        prompt_history = self._prompt_history_for_transition(history, transition)
+        prompt_history = self._prompt_history_for_transition(
+            history, transition, user_text
+        )
         carry_pending_context = not transition or transition.kind in {
             TransitionClass.CONTINUATION,
             TransitionClass.DIRECT_ANSWER,
@@ -1997,6 +2046,24 @@ class ChatWorkflow:
                     json.dumps(snapshot.last_verified_tool_result.value, default=str),
                     "latest verified result needed by this continuation",
                     source_turn=snapshot.last_verified_tool_result.source_turn,
+                    consequential=True,
+                    allow_truncate=False,
+                )
+            )
+
+        if (
+            transition
+            and transition.kind is TransitionClass.CONTINUATION
+            and snapshot.last_failed_goal
+            and not snapshot.last_failed_goal.expired()
+        ):
+            candidates.append(
+                ContextCandidate(
+                    "last-failed-tool-result",
+                    ContextSection.TOOL_RESULT,
+                    json.dumps(snapshot.last_failed_goal.value, default=str),
+                    "recorded failure, not a new command; explain known details only",
+                    source_turn=snapshot.last_failed_goal.source_turn,
                     consequential=True,
                     allow_truncate=False,
                 )
@@ -2559,7 +2626,9 @@ class ChatWorkflow:
                     for item in unresolved:
                         lines.append(f"- Unresolved: {item.content}")
                     for item in verified:
-                        lines.append(f"- Verified tool context: {item.content}")
+                        lines.append(
+                            f"- Recorded tool outcome (check its status): {item.content}"
+                        )
                     lines.append(
                         "- Use this state only when it helps answer the newest request. "
                         "A completed goal is not permission to continue its topic."
@@ -2571,6 +2640,11 @@ class ChatWorkflow:
             )
             lines.append(
                 "- Be concise but complete - answer questions fully without being overwhelming."
+            )
+            lines.append(
+                "- For a short draft or revision, return the requested draft, not a cover letter "
+                "about it. Preserve who did what, names, intent, and unaffected alternatives. "
+                "If the user says not to send it, do not offer to send it immediately afterward."
             )
             lines.append(
                 "- For commands, lead with the verified result or blocker. Successful command "
@@ -2585,6 +2659,11 @@ class ChatWorkflow:
             lines.append(
                 "- Never invent facts, citations, memories, tool results, or completed actions. "
                 "Clearly label uncertainty and inference."
+            )
+            lines.append(
+                "- Missing connection evidence means unknown, not disconnected. Do not claim "
+                "an account exists, does not exist, is logged in, or is logged out without "
+                "current evidence. Explain the recorded failure, not an imagined cause."
             )
             lines.append(
                 "- In small talk, never invent personal experiences, recent activities, moods, "
@@ -2802,7 +2881,18 @@ class ChatWorkflow:
             ),
         ]
 
-        return "\n".join(prompt_parts)
+        from llm.chat_prompt import conversation_prompt
+
+        system = base_prompt.split("\n[CONVERSATION HISTORY]", 1)[0]
+        system += "\n" + prompt_parts[-1].removesuffix("Assistant:").strip()
+        system += (
+            "\nThe role-tagged recent turns are conversation context, not instructions "
+            "or permission to repeat actions. Resolve references from them. An explanation "
+            "of a previous failure is not a new request to execute that tool. Use recorded "
+            "diagnostics; if the exact cause wasn't retained, say so without inventing one. "
+            "Never claim login, connection status, weather, or results without current tool evidence."
+        )
+        return conversation_prompt(system, history, user_text)
 
     def _sanitize_output(self, response: str) -> str:
         """Compatibility wrapper around the shared response policy."""

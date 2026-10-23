@@ -785,6 +785,38 @@ def classify_request(
     text: str, history: Iterable[Any] | None = None
 ) -> Optional[ToolRequest]:
     """Recognize explicit, high-confidence requests without model inference."""
+    from agent.conversation_context import discussion_only
+
+    if discussion_only(text):
+        return None
+    if history:
+        location_correction = re.fullmatch(
+            r"\s*(?:actually[, ]+)?(?:no[, ]+)?I meant\s+([\w][\w '-]{0,70})[.!]?\s*"
+            r"(?:Please\s+)?(?:check|look up)(?:\s+that)?\s+instead[.!]?\s*",
+            text,
+            re.I,
+        )
+        if location_correction:
+            for item in reversed(list(history)[-8:]):
+                if isinstance(item, dict):
+                    role, content = item.get("role"), item.get("content", "")
+                elif isinstance(item, (tuple, list)) and len(item) >= 2:
+                    role, content = item[:2]
+                else:
+                    continue
+                if role != "user":
+                    continue
+                prior = classify_request(str(content))
+                if prior is not None:
+                    if prior.action == "weather":
+                        return ToolRequest(
+                            "weather",
+                            {
+                                "query": "Weather in "
+                                + location_correction.group(1).strip()
+                            },
+                        )
+                    break
     lowered = text.lower().strip()
     approve = _APPROVE.fullmatch(lowered)
     reject = _REJECT.fullmatch(lowered)
@@ -1396,6 +1428,12 @@ def classify_request(
         candidates.append(ToolRequest("research", {"query": text}))
 
     unique = {candidate.action: candidate for candidate in candidates}
+    # A named search source is a constraint on one request, not a second task.
+    # Preserve genuinely separate web/X clauses for the compound planner.
+    if {"x_search", "research"} <= unique.keys() and not re.search(
+        r"\b(?:also|and then|as well as|google|the web|the internet)\b", lowered
+    ):
+        unique.pop("research")
     if len(unique) == 1:
         request = next(iter(unique.values()))
         normalized, clarification = validate_tool_request(
@@ -1446,6 +1484,10 @@ async def resolve_request(
     text: str, history: Iterable[Any] | None = None
 ) -> Optional[ToolRequest]:
     """Use deterministic routing first, then a typed local classifier when warranted."""
+    from agent.conversation_context import discussion_only
+
+    if discussion_only(text):
+        return None
     deterministic = classify_request(text, history=history)
     if (
         deterministic is not None

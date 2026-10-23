@@ -59,7 +59,10 @@ class ResourceGovernor:
 
     def __init__(self, path: Path | None = None):
         instance = os.getenv("CURIE_INSTANCE", "default").strip().casefold()
-        self.path = path or Path.home() / ".curie" / f"resource-budgets-{instance}.json"
+        self.path = path or Path(
+            os.getenv("CURIE_RESOURCE_BUDGET_PATH")
+            or Path.home() / ".curie" / f"resource-budgets-{instance}.json"
+        )
         self._lock = threading.RLock()
         self._events: list[dict[str, Any]] = []
         self._load()
@@ -190,7 +193,12 @@ class ResourceGovernor:
         downgraded = False
         model = preferred_model
         reason = "within budget"
-        if mode == "constrained" or remaining < requested * 2:
+        preserve_conversation_quality = feature == "conversation" and os.getenv(
+            "CURIE_CONVERSATION_ALLOW_MODEL_DOWNGRADE", "false"
+        ).lower() not in {"1", "true", "yes"}
+        if (
+            mode == "constrained" or remaining < requested * 2
+        ) and not preserve_conversation_quality:
             ceiling = max(
                 budget.minimum_tokens,
                 min(ceiling, max(budget.minimum_tokens, requested // 2)),
