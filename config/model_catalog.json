@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-10-24",
+  "local_candidates": [
+    {
+      "name": "Qwen3.8-27B",
+      "model_card": "https://huggingface.co/Qwen/Qwen3.8-27B",
+      "quant_repository": "unsloth/Qwen3.8-27B-GGUF",
+      "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+      "filename": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+      "bytes": 16464440224,
+      "sha256": "322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482"
+    },
+    {
+      "name": "GLM-4.7-Flash",
+      "model_card": "https://huggingface.co/zai-org/GLM-4.7-Flash",
+      "quant_repository": "unsloth/GLM-4.7-Flash-GGUF",
+      "revision": "0d32489ecb9db6d2a4fc93bd27ef01519f95474d",
+      "filename": "GLM-4.7-Flash-UD-Q4_K_XL.gguf",
+      "bytes": 17520169312,
+      "sha256": "b0d4fbc1211f891b4cfbf2a497160bfe06a49412420068904d426b7a13f4ba7f"
+    }
+  ],
+  "remote_opt_in": {
+    "qwen": {"model": "qwen3.8-flash", "enabled_by_default": false},
+    "zai": {"model": "glm-5.3-flash", "enabled_by_default": false}
+  }
+}

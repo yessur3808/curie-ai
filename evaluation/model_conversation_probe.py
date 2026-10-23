@@ -74,6 +74,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--report", required=True)
+    parser.add_argument("--gpu-layers", type=int, default=0)
     args = parser.parse_args()
     from llama_cpp import Llama
     from llm.manager import _configure_thinking_template, clean_assistant_reply
@@ -83,7 +84,7 @@ def main():
         model_path=args.model,
         n_ctx=4096,
         n_threads=12,
-        n_gpu_layers=0,
+        n_gpu_layers=args.gpu_layers,
         verbose=False,
         seed=42,
     )
@@ -127,7 +128,7 @@ def main():
         print(json.dumps(row, ensure_ascii=False), flush=True)
     report = {
         "model": Path(args.model).name,
-        "backend": "CPU, 12 threads",
+        "backend": f"12 CPU threads, requested GPU layers={args.gpu_layers}",
         "load_seconds": round(load_seconds, 2),
         "peak_rss_mb": round(
             resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1

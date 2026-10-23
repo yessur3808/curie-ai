@@ -88,13 +88,28 @@ def behavioral_checks(row):
         )
     if key == ("tool_followup", 4):
         checks["latest_city_reference"] = "osaka" in reply.casefold()
+    if key == ("device_flow", 3):
+        checks["does_not_deny_verified_action"] = not any(
+            phrase in reply.casefold()
+            for phrase in (
+                "didn't turn",
+                "did not turn",
+                "no record",
+                "cannot control",
+                "can't control",
+            )
+        )
+        checks["attributes_owner_request"] = any(
+            phrase in reply.casefold()
+            for phrase in ("you asked", "your request", "you told")
+        )
     return checks
 
 
 async def run_probe(report):
     from agent.chat_workflow import ChatWorkflow
     from agent.tooling import get_runtime_registry
-    from agent.tooling.contracts import ToolResult
+    from agent.tooling.contracts import CapabilityDefinition, ToolResult
     from agent.tooling.errors import ProviderAccessError
     from memory import local_store
     from memory.session_store import get_session_manager
@@ -136,6 +151,19 @@ async def run_probe(report):
 
     results = []
     with ExitStack() as stack:
+        # Availability belongs to the fixture too; never borrow real credentials
+        # merely to exercise the normal planner and execution boundary.
+        sandbox_capabilities = {"x_search", "weather", "home_control", "home_status"}
+        stack.enter_context(
+            patch.object(
+                CapabilityDefinition,
+                "availability",
+                new=lambda item: (
+                    item.name in sandbox_capabilities,
+                    "sandboxed evaluation capability",
+                ),
+            )
+        )
         stack.enter_context(
             patch("cli.tasks.TASKS_FILE", local_store._PATH.parent / "tasks.json")
         )
@@ -175,6 +203,7 @@ async def run_probe(report):
                     "seconds": round(time.monotonic() - started, 2),
                     "execution_status": result.get("execution_status"),
                     "routing": result.get("routing"),
+                    "coordination": result.get("coordination"),
                     "tool_calls": calls[before:],
                 }
                 row["behavioral_checks"] = behavioral_checks(row)
@@ -192,6 +221,10 @@ async def run_probe(report):
                         indent=2,
                     )
                 )
+                if not all(row["behavioral_checks"].values()):
+                    raise RuntimeError(
+                        f"Behavioral gate failed: {flow} turn {index + 1}"
+                    )
             get_session_manager().reset_session("telegram", owner)
     Path(report).write_text(
         json.dumps(
