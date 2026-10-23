@@ -36,6 +36,8 @@ from .voice_persona import (
     select_relevant_history,
     is_unhelpful_repeat,
     is_topic_regression,
+    is_speaker_role_reversal,
+    grounded_owner_request_quote,
     turn_contract_prompt,
     delivery_settings,
     persona_revision,
@@ -658,25 +660,31 @@ async def chat(req: Message, request: Request):
                 )
             repeated_reply = is_unhelpful_repeat(text, turns, user)
             topic_regression = is_topic_regression(text, context_turns, turns, user)
-            if not grounded_response and (repeated_reply or topic_regression):
+            reversed_speakers = is_speaker_role_reversal(text, user)
+            if not grounded_response and (
+                repeated_reply or topic_regression or reversed_speakers
+            ):
                 original_similarity = max_recent_response_similarity(text, turns)
-                repair_prompt = (
-                    "System: "
-                    + persona_prompt(active, directives)
+                repair_system = (
+                    persona_prompt(active, directives)
                     + "\n"
                     + dashboard_scope_prompt(bool(snapshot.strip()))
                     + turn_contract_prompt(user, context_turns)
-                    + "\nThe draft below either repeats an earlier answer or answers "
-                    "an older subject instead of the immediately preceding exchange. "
+                    + "\nThe invalid draft below repeats an earlier answer, answers an older "
+                    "subject, or reverses who made a request. Attribute user-role instructions "
+                    "to the owner and assistant-role replies to yourself. "
                     "Answer the owner's newest message directly with new, relevant wording. "
                     "Do not recap the old answer, restart the old topic, apologize, or mention "
-                    "this repair instruction.\nRecent conversation:\n"
-                    + json.dumps(turns[-3:], ensure_ascii=False)
-                    + "\nNewest owner message: "
-                    + user
-                    + "\nRepeated draft: "
-                    + text
-                    + "\nReplacement answer:"
+                    "this repair instruction.\nInvalid draft (not facts): " + text
+                )
+                repair_prompt = conversation_prompt(
+                    repair_system,
+                    [
+                        (role, turn.get(key, ""))
+                        for turn in context_turns
+                        for role, key in (("user", "user"), ("assistant", "assistant"))
+                    ],
+                    user,
                 )
                 repaired = await until_disconnect(
                     request,
@@ -702,10 +710,20 @@ async def chat(req: Message, request: Request):
                         repaired_text, context_turns, turns, user
                     )
                     if (
-                        repeated_reply and repaired_similarity < original_similarity
-                    ) or (topic_regression and not repaired_regression):
+                        (repeated_reply and repaired_similarity < original_similarity)
+                        or (topic_regression and not repaired_regression)
+                        or (
+                            reversed_speakers
+                            and not is_speaker_role_reversal(repaired_text, user)
+                        )
+                    ):
                         text = repaired_text
                         model_used = repaired.model_used + ":continuity_repair"
+                if reversed_speakers and is_speaker_role_reversal(text, user):
+                    grounded_quote = grounded_owner_request_quote(context_turns)
+                    if grounded_quote:
+                        text = grounded_quote
+                        model_used = "grounded_history_reference"
         if not req.ephemeral:
             turns = (turns + [{"user": user[:2000], "assistant": text[:3000]}])[-12:]
             if sessions is not None:

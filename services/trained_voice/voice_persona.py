@@ -120,12 +120,16 @@ def needs_english_rewrite(response, user_text):
         user_french_hits >= 2 and user_french_hits / max(len(user_words), 1) >= 0.25
     ):
         return False
-    words = re.findall(r"[A-Za-zÀ-ÿ']+", str(response or "").casefold())
-    if len(words) < 5:
-        return False
-    hits = sum(word.strip("'") in _FRENCH_FUNCTION_WORDS for word in words)
-    density = hits / len(words)
-    return (hits >= 3 and density >= 0.30) or (hits >= 4 and density >= 0.14)
+    # English wrappers must not conceal an entire French draft inside a reply.
+    for passage in [str(response or ""), *str(response or "").splitlines()]:
+        words = re.findall(r"[A-Za-zÀ-ÿ']+", passage.casefold())
+        if len(words) < 5:
+            continue
+        hits = sum(word.strip("'") in _FRENCH_FUNCTION_WORDS for word in words)
+        density = hits / len(words)
+        if (hits >= 3 and density >= 0.30) or (hits >= 4 and density >= 0.14):
+            return True
+    return False
 
 
 def select_relevant_history(turns, user_text, max_turns=4):
@@ -287,6 +291,33 @@ def is_unhelpful_repeat(response, turns, user_text, *, threshold=0.82):
     if _REPEAT_REQUEST.search(str(user_text or "")):
         return False
     return max_recent_response_similarity(response, turns) >= float(threshold)
+
+
+def is_speaker_role_reversal(response, user_text):
+    """Flag an explicit inversion of who made the request, not its content."""
+    asks_about_own_request = re.search(
+        r"\b(?:what|which)\b.{0,80}\b(?:did|have)\s+i\s+(?:ask(?:ed)?|tell|told|request(?:ed)?)\b",
+        str(user_text or ""),
+        re.I,
+    )
+    inverted_sender = re.match(
+        r"\s*i\s+(?:asked|told|instructed)\s+you\b",
+        str(response or ""),
+        re.I,
+    )
+    return bool(asks_about_own_request and inverted_sender)
+
+
+def grounded_owner_request_quote(turns):
+    """Use actual history if a bounded model repair still reverses the speakers."""
+    for turn in reversed(turns or ()):
+        user, _ = _turn_parts(turn)
+        if user and not re.search(
+            r"\b(?:did|have)\s+i\s+(?:ask|tell|request)", user, re.I
+        ):
+            excerpt = user if len(user) <= 600 else user[:600].rstrip() + "…"
+            return f"You asked me: “{excerpt}”"
+    return None
 
 
 def is_topic_regression(response, context_turns, turns, user_text):
