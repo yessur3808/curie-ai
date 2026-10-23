@@ -118,6 +118,35 @@ def _cleanup_excess_models():
         _trigger_garbage_collection()
 
 
+def _evict_for_shared_worker(preferred_model):
+    """Keep at most one GPU-resident model; a CPU reviewer may remain warm."""
+    from llm.accelerators import select_llama_gpu_layers
+
+    wants_gpu = select_llama_gpu_layers(preferred_model) != 0
+    while llama_models_cache:
+        gpu_names = [
+            name
+            for name, model in llama_models_cache.items()
+            if getattr(model, "_curie_gpu_layers", 0) != 0
+        ]
+        if wants_gpu and gpu_names:
+            old_name = gpu_names[0]
+        elif len(llama_models_cache) >= MAX_MODELS_IN_CACHE:
+            old_name = next(iter(llama_models_cache))
+        else:
+            break
+        old_model = llama_models_cache.pop(old_name)
+        _model_inference_locks.pop(old_name, None)
+        if hasattr(old_model, "close"):
+            old_model.close()
+        from services.runtime_kernel import model_supervisor
+
+        supervisor = model_supervisor()
+        if supervisor is not None:
+            supervisor.remove(old_name, False)
+    gc.collect()
+
+
 class ResponseCache:
     """Simple TTL-based cache for LLM responses."""
 
@@ -130,7 +159,22 @@ class ResponseCache:
         owner_scope: str = "public",
     ) -> str:
         """Create a hash key from prompt + parameters."""
-        key_str = f"{owner_scope}||{model_name}||{prompt}||{temperature}||{max_tokens}"
+        import json
+        from llm.chat_prompt import as_chat_prompt
+
+        structured = as_chat_prompt(prompt)
+        key_str = json.dumps(
+            [
+                owner_scope,
+                model_name,
+                structured.messages,
+                structured.evidence,
+                temperature,
+                max_tokens,
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
         return hashlib.sha256(key_str.encode()).hexdigest()
 
     @staticmethod
@@ -230,7 +274,8 @@ def _load_model_with_fallback(
     candidates = []
     if preferred:
         candidates.append(preferred)
-    candidates.extend(AVAILABLE_MODELS)
+    if os.getenv("CURIE_INFERENCE_WORKER") != "1":
+        candidates.extend(AVAILABLE_MODELS)
 
     # Try each candidate in order
     seen = set()
@@ -240,7 +285,6 @@ def _load_model_with_fallback(
     # still verifies backend compatibility while loading and falls back below.
     from llm.accelerators import select_llama_gpu_layers
 
-    n_gpu_layers = select_llama_gpu_layers()
     # Suppress llama.cpp's own verbose init output unless DEBUG logging is on.
     verbose = logger.isEnabledFor(logging.DEBUG)
 
@@ -253,6 +297,8 @@ def _load_model_with_fallback(
         if not os.path.exists(model_path):
             logger.warning(f"Model file not found: {model_path}")
             continue
+
+        n_gpu_layers = select_llama_gpu_layers(model_name)
 
         supervisor = None
         try:
@@ -296,6 +342,7 @@ def _load_model_with_fallback(
                     verbose=verbose,
                 )
                 _configure_thinking_template(model)
+                model._curie_gpu_layers = layers
                 logger.info(
                     "Successfully loaded model %s using %s", model_name, backend
                 )
@@ -361,6 +408,12 @@ def preload_llama_model():
     skipped, or the load failed) so that any ``ask_llm()`` callers waiting on
     the event are unblocked.
     """
+    if (
+        os.getenv("CURIE_INFERENCE_SOCKET")
+        and os.getenv("CURIE_INFERENCE_WORKER") != "1"
+    ):
+        _model_load_event.set()
+        return
     # Honour LLM_PROVIDER_PRIORITY to skip local GGUF loading for cloud-only
     # configurations.  LLM_PROVIDER is treated as a legacy override, but we
     # normalise it to lowercase and only fall back to "llama.cpp" when both
@@ -597,6 +650,23 @@ def ask_llm(
     repetitive, the call is retried once with a slightly higher temperature to
     encourage more diverse token generation.
     """
+    if (
+        os.getenv("CURIE_INFERENCE_SOCKET")
+        and os.getenv("CURIE_INFERENCE_WORKER") != "1"
+    ):
+        from llm.local_gateway import request
+
+        try:
+            return request(
+                prompt,
+                model_name=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                role=role,
+                owner_scope=owner_scope,
+            )
+        except (OSError, ValueError, KeyError):
+            return "[Error: shared local inference gateway unavailable]"
     # Periodically trigger garbage collection
     _trigger_garbage_collection()
 
@@ -640,6 +710,10 @@ def ask_llm(
             or llm_config.get("model_path")
             or DEFAULT_LLAMA_MODEL
         )
+        if os.getenv("CURIE_INFERENCE_WORKER") == "1" and not os.path.isfile(
+            os.path.join("models", preferred_model)
+        ):
+            return "[Error: configured model is unavailable in shared inference worker]"
         prompt = _apply_generation_controls(prompt, preferred_model)
 
         # Model identity is part of the cache key: parallel specialists must
@@ -700,6 +774,8 @@ def ask_llm(
                         selected_model = cached_name
                         break
                 if llama_model is None:
+                    if os.getenv("CURIE_INFERENCE_WORKER") == "1":
+                        _evict_for_shared_worker(preferred_model)
                     logger.info(
                         f"No cached model, attempting to load with fallback (preferred: {preferred_model})"
                     )
@@ -708,6 +784,12 @@ def ask_llm(
                     )
                     if model is None or model_name_loaded is None:
                         return "[Error: Failed to load any available model]"
+                    if (
+                        os.getenv("CURIE_INFERENCE_WORKER") == "1"
+                        and model_name_loaded != preferred_model
+                    ):
+                        model.close()
+                        return "[Error: configured model failed; model substitution refused]"
                     llama_models_cache[model_name_loaded] = model
                     _model_inference_locks.setdefault(model_name_loaded, Lock())
                     llama_model = model

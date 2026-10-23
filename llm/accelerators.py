@@ -65,13 +65,27 @@ def hardware_status() -> dict:
     }
 
 
-def select_llama_gpu_layers() -> int:
+def select_llama_gpu_layers(model_name: str | None = None) -> int:
     """Choose llama.cpp offload according to policy and device availability.
 
     ``-1`` asks llama.cpp to offload every supported layer. Because an iGPU
     uses unified memory, llama.cpp still uses the CPU for orchestration and
     unsupported operations, giving an effective CPU+iGPU hybrid path.
     """
+    if model_name:
+        try:
+            overrides = json.loads(_env("LLM_GPU_LAYERS_BY_MODEL", "{}"))
+            value = overrides.get(model_name) if isinstance(overrides, dict) else None
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and -1 <= value <= 512
+            ):
+                return value
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid model-specific GPU layer configuration; using default"
+            )
     configured = _env("LLM_GPU_LAYERS", "auto").lower()
     if configured not in {"", "auto"}:
         try:

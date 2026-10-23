@@ -41,6 +41,7 @@ import re
 from typing import Optional
 
 from dotenv import load_dotenv
+from llm.chat_prompt import as_chat_prompt
 
 load_dotenv()
 
@@ -91,7 +92,65 @@ PROVIDER_CHECKS = {
     "anthropic": _anthropic_available,
     "gemini": _gemini_available,
     "llama.cpp": _llama_available,
+    "qwen": lambda: _remote_enabled() and bool(_env("QWEN_API_KEY")),
+    "zai": lambda: _remote_enabled() and bool(_env("ZAI_API_KEY")),
 }
+
+
+def _remote_enabled() -> bool:
+    """New remote services require deliberate data-sharing opt-in."""
+    return _env("CURIE_REMOTE_MODELS_ENABLED", "false").lower() == "true"
+
+
+def _call_compatible(provider, prompt, temperature, max_tokens, role=None):
+    """Explicit Qwen/Z.ai adapters; never send data merely because a key exists."""
+    if not _remote_enabled():
+        return None
+    import httpx
+
+    settings = {
+        "qwen": (
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            "qwen3.8-flash",
+        ),
+        "zai": ("https://api.z.ai/api/paas/v4", "glm-5.3-flash"),
+    }
+    base_url, default_model = settings[provider]
+    prefix = provider.upper()
+    if not _env(prefix + "_API_KEY"):
+        return None
+    model = _env(f"{prefix}_{str(role).upper()}_MODEL") or _env(
+        f"{prefix}_MODEL", default_model
+    )
+    payload = {
+        "model": model,
+        "messages": as_chat_prompt(prompt).messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens or 1024,
+    }
+    if provider == "zai":
+        payload.update(thinking={"type": "enabled"}, reasoning_effort="low")
+    else:
+        payload["enable_thinking"] = False
+        if "max" in model:
+            payload.pop("enable_thinking")
+            payload["reasoning_effort"] = "low"
+    try:
+        response = httpx.post(
+            base_url + "/chat/completions",
+            json=payload,
+            headers={"Authorization": "Bearer " + _env(prefix + "_API_KEY")},
+            timeout=90,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+        return (
+            str(response.json()["choices"][0]["message"]["content"] or "").strip()
+            or None
+        )
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+        logger.warning("%s model request failed; no private payload logged", provider)
+        return None
 
 
 def get_active_providers() -> list[str]:
@@ -133,7 +192,7 @@ def _call_openai(
     try:
         kwargs: dict = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": as_chat_prompt(prompt).messages,
             "temperature": temperature,
         }
         if max_tokens is not None:
@@ -169,13 +228,15 @@ def _call_anthropic(
     model = _env("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
 
     try:
+        messages = as_chat_prompt(prompt).messages
         message = client.messages.create(
             model=model,
             max_tokens=(
                 max_tokens if max_tokens is not None else _CLOUD_DEFAULT_MAX_TOKENS
             ),
             temperature=temperature,
-            messages=[{"role": "user", "content": prompt}],
+            system="\n".join(m["content"] for m in messages if m["role"] == "system"),
+            messages=[m for m in messages if m["role"] != "system"],
         )
         text = message.content[0].text if message.content else ""
         logger.debug("Anthropic response received (model=%s)", model)
@@ -201,12 +262,28 @@ def _call_gemini(
     model_name = _env("GEMINI_MODEL", "gemini-1.5-flash")
 
     try:
-        model = genai.GenerativeModel(model_name)
+        messages = as_chat_prompt(prompt).messages
+        model = genai.GenerativeModel(
+            model_name,
+            system_instruction="\n".join(
+                m["content"] for m in messages if m["role"] == "system"
+            ),
+        )
         gen_config_kwargs: dict = {"temperature": temperature}
         if max_tokens is not None:
             gen_config_kwargs["max_output_tokens"] = max_tokens
         gen_config = genai.types.GenerationConfig(**gen_config_kwargs)
-        response = model.generate_content(prompt, generation_config=gen_config)
+        response = model.generate_content(
+            [
+                {
+                    "role": "model" if m["role"] == "assistant" else "user",
+                    "parts": [m["content"]],
+                }
+                for m in messages
+                if m["role"] != "system"
+            ],
+            generation_config=gen_config,
+        )
         text = response.text if hasattr(response, "text") else ""
         logger.debug("Gemini response received (model=%s)", model_name)
         return text.strip()
@@ -374,7 +451,11 @@ def ask_best_provider(
     for provider in providers_to_try:
         logger.debug("Trying provider: %s", provider)
 
-        if provider in CLOUD_CALLERS:
+        if provider in {"qwen", "zai"}:
+            result = _call_compatible(provider, prompt, temperature, max_tokens, role)
+            if result is not None:
+                return result
+        elif provider in CLOUD_CALLERS:
             result = CLOUD_CALLERS[provider](prompt, temperature, max_tokens)
             if result is not None:
                 return result
