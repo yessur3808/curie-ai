@@ -54,7 +54,7 @@ class ModelConversationService:
         ):
             return 1024
         selected_role = role or ModelConversationService.model_role(user_text)
-        if selected_role in {"reasoning", "coding"}:
+        if selected_role in {"reasoning", "deep_reasoning", "coding"}:
             return 640
         if selected_role == "fast":
             return 192
@@ -69,12 +69,19 @@ class ModelConversationService:
         if ModelConversationService.is_lightweight_opinion(user_text):
             return "general"
         if re.search(
+            r"\b(?:deep dive|in depth|thorough|comprehensive)\b", text
+        ) and re.search(
+            r"\b(?:analy\w*|reason\w*|review|design|architecture|compar\w*|research|investigat\w*)\b",
+            text,
+        ):
+            return "deep_reasoning"
+        if re.search(
             r"\b(?:http\s+[45]\d\d|api credits|login problem|logged out)\b", text
         ) and not re.search(r"\b(?:fix|debug|implement|write|code|refactor)\b", text):
             return "general"
         if (
             re.search(
-                r"\b(?:would|should|why|tradeoffs?|first step|first measure|root cause)\b",
+                r"\b(?:would|should|why|analy[sz]e|investigate|evaluate|tradeoffs?|first step|first measure|root cause)\b",
                 text,
             )
             and re.search(
@@ -127,7 +134,7 @@ class ModelConversationService:
             return role
         previous_users = [m["content"] for m in history if m["role"] == "user"]
         if any(
-            ModelConversationService.model_role(text) == "reasoning"
+            ModelConversationService.model_role(text) in {"reasoning", "deep_reasoning"}
             for text in previous_users[-2:]
         ):
             return "reasoning"
@@ -136,7 +143,7 @@ class ModelConversationService:
     @staticmethod
     def reasoning_temperature(role: str, requested: float) -> float:
         """Keep analytical work stable while preserving personality in casual chat."""
-        if role == "reasoning":
+        if role in {"reasoning", "deep_reasoning"}:
             return min(requested, 0.25)
         if role == "coding":
             return min(requested, 0.20)
@@ -147,7 +154,7 @@ class ModelConversationService:
     @staticmethod
     def quality_prompt(prompt: str, role: str) -> str:
         """Add one-pass internal verification for complex work, without extra calls."""
-        if role in {"reasoning", "coding"}:
+        if role in {"reasoning", "deep_reasoning", "coding"}:
             guidance = (
                 "Internal answer-quality policy: identify the user's actual goal and all "
                 "referenced entities; silently form a concise plan; check constraints, "
@@ -206,7 +213,11 @@ class ModelConversationService:
             owner_id,
             max_tokens,
             preferred_model=role,
-            fallback_model="general" if role in {"reasoning", "coding"} else "fast",
+            fallback_model=(
+                "general"
+                if role in {"reasoning", "deep_reasoning", "coding"}
+                else "fast"
+            ),
             diagnostics=diagnostic_monitor.snapshot(owner_id=owner_id, limit=50),
         )
         if not decision.allowed:
@@ -229,24 +240,94 @@ class ModelConversationService:
             "provider": self.local_manager.DEFAULT_LLAMA_MODEL,
             "fallback": False,
         }
+        from llm.coordination import context_digest, coordinated_answer, verify_answer
+
+        coordination = {
+            "context_id": context_digest(effective_prompt, owner_id),
+            "mode": "direct",
+            "model_calls": 0,
+            "usage_estimate": 0,
+            "roles": [],
+        }
+
+        def measured_ask(model_prompt, **kwargs):
+            if cancel_signal is not None and cancel_signal.is_set():
+                raise RuntimeError("coordination_cancelled")
+            coordination["model_calls"] += 1
+            coordination["roles"].append(kwargs.get("role", "general"))
+            # Count all specialist work, not just the final visible answer.
+            coordination["usage_estimate"] += max(1, len(str(model_prompt)) // 4)
+            import os
+
+            provider = os.getenv(
+                f"LLM_{str(kwargs.get('role', '')).upper()}_PROVIDER", "local"
+            )
+            result = None
+            if provider in {"qwen", "zai"}:
+                from llm.providers import _call_compatible
+
+                result = _call_compatible(
+                    provider,
+                    model_prompt,
+                    kwargs.get("temperature", 0.2),
+                    kwargs.get("max_tokens"),
+                    kwargs.get("role"),
+                )
+            if result is None:
+                result = self.local_manager.ask_llm(model_prompt, **kwargs)
+            coordination["usage_estimate"] += max(0, len(str(result or "")) // 4)
+            return result
+
+        cancel_signal = None
 
         async def operation(emit, cancelled):
+            nonlocal cancel_signal
+            cancel_signal = cancelled
             response = None
             try:
-                from llm.ensemble import ask_ensemble, should_use_ensemble
+                from llm.ensemble import should_use_ensemble
 
-                if should_use_ensemble(user_text):
-                    response = ask_ensemble(effective_prompt, max_tokens=max_tokens)
-                    outcome["provider"] = "ensemble"
+                if should_use_ensemble(user_text) or role == "deep_reasoning":
+                    coordination["mode"] = "specialist_review"
+                    verified = await asyncio.to_thread(
+                        coordinated_answer,
+                        effective_prompt,
+                        user_text,
+                        ask=measured_ask,
+                        owner_scope=owner_id,
+                        max_tokens=max_tokens,
+                        solver_role=(
+                            role
+                            if role in {"reasoning", "deep_reasoning", "coding"}
+                            else "reasoning"
+                        ),
+                        cancelled=cancelled,
+                    )
+                    response = verified.answer
+                    coordination.update(
+                        verification=verified.status,
+                        issues=list(verified.issues),
+                        evidence_ids=list(verified.evidence_ids),
+                    )
+                    outcome["provider"] = "coordinated:" + role
                 else:
                     from llm.providers import ask_best_provider
 
-                    response = ask_best_provider(
+                    coordination["model_calls"] += 1
+                    coordination["roles"].append(role)
+                    coordination["usage_estimate"] += max(
+                        1, len(str(effective_prompt)) // 4
+                    )
+                    response = await asyncio.to_thread(
+                        ask_best_provider,
                         effective_prompt,
                         temperature=effective_temperature,
                         max_tokens=max_tokens,
                         role=role,
                         owner_scope=owner_id,
+                    )
+                    coordination["usage_estimate"] += max(
+                        0, len(str(response or "")) // 4
                     )
                     outcome["provider"] = f"best_provider:{role}"
             except Exception:
@@ -255,7 +336,8 @@ class ModelConversationService:
                 raise asyncio.CancelledError
             if response is None or response.startswith("[Error"):
                 outcome["fallback"] = True
-                response = self.local_manager.ask_llm(
+                response = await asyncio.to_thread(
+                    measured_ask,
                     effective_prompt,
                     max_tokens=max_tokens,
                     temperature=effective_temperature,
@@ -263,6 +345,27 @@ class ModelConversationService:
                     owner_scope=owner_id,
                 )
                 outcome["provider"] = f"{self.local_manager.DEFAULT_LLAMA_MODEL}:{role}"
+            if cancelled.is_set():
+                raise asyncio.CancelledError
+            if "verification" not in coordination:
+                verified = await asyncio.to_thread(
+                    verify_answer,
+                    effective_prompt,
+                    response,
+                    user_text,
+                    ask=measured_ask,
+                    owner_scope=owner_id,
+                    max_tokens=max_tokens,
+                    cancelled=cancelled,
+                )
+                response = verified.answer
+                coordination.update(
+                    verification=verified.status,
+                    issues=list(verified.issues),
+                    evidence_ids=list(verified.evidence_ids),
+                )
+            if cancelled.is_set():
+                raise asyncio.CancelledError
             await emit(response)
             return None
 
@@ -278,7 +381,7 @@ class ModelConversationService:
         resource_governor.record(
             "conversation",
             owner_id,
-            tokens=int(managed.output_tokens or 0),
+            tokens=max(int(managed.output_tokens or 0), coordination["usage_estimate"]),
             wall_seconds=float(managed.total_ms or 0) / 1000,
             model=str(outcome["provider"]),
         )
@@ -287,8 +390,10 @@ class ModelConversationService:
             str(outcome["provider"]),
             {
                 "role": role,
-                "reasoning_effort": (
-                    "high" if role in {"reasoning", "coding"} else "efficient"
+                "reasoning_policy": (
+                    "constraint_checked"
+                    if role in {"reasoning", "deep_reasoning", "coding"}
+                    else "conversational"
                 ),
                 "temperature": effective_temperature,
                 "max_tokens": max_tokens,
@@ -302,5 +407,8 @@ class ModelConversationService:
                 "total_ms": managed.total_ms,
                 "output_tokens": managed.output_tokens,
                 "tokens_per_second": managed.tokens_per_second,
+                "coordination": coordination,
+                "delivery_mode": "verified_complete_answer",
+                "first_token_is_complete_answer": True,
             },
         )

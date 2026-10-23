@@ -103,6 +103,7 @@ class DialogueState:
     expected_answer_type: StateValue | None = None
     referenced_entities: StateValue | None = None
     last_verified_tool_result: StateValue | None = None
+    last_verified_action_result: StateValue | None = None
     pending_approval: StateValue | None = None
     pending_task: StateValue | None = None
     topic_rejections: StateValue | None = None
@@ -162,6 +163,7 @@ _STATE_FIELDS = (
     "expected_answer_type",
     "referenced_entities",
     "last_verified_tool_result",
+    "last_verified_action_result",
     "pending_approval",
     "pending_task",
     "topic_rejections",
@@ -873,6 +875,8 @@ class DialogueStateStore:
 
         verification = str(result.get("verification_status") or "")
         if verification in {"verified", "already_satisfied"}:
+            from utils.redaction import redact_text
+
             updated.last_verified_tool_result = _slot(
                 {
                     "goal_id": state.goal.id,
@@ -883,6 +887,13 @@ class DialogueStateStore:
                         if item.capability
                     ],
                     "entity_count": len(result_entities),
+                    "response": redact_text(response_text)[:1600],
+                    "request": redact_text(text)[:500],
+                    "entities": [
+                        {"name": redact_text(item.resolved_name), "kind": item.kind}
+                        for item in observed_entities[:16]
+                    ],
+                    "execution_status": execution_status,
                 },
                 source_turn=source_turn,
                 owner_scope=owner,
@@ -890,6 +901,13 @@ class DialogueStateStore:
                 source="verified_tool_result",
                 now=now,
             )
+            # A subsequent status read must not erase who performed the action.
+            from llm.coordination import _ACTION_CAPABILITIES
+
+            if any(
+                item.capability in _ACTION_CAPABILITIES for item in state.goal.subgoals
+            ):
+                updated.last_verified_action_result = updated.last_verified_tool_result
         return updated
 
     def observe(

@@ -9,6 +9,7 @@ import re
 from typing import Iterable
 
 from llm import manager
+from llm.chat_prompt import as_chat_prompt
 
 _ENSEMBLE_REQUEST = re.compile(
     r"\b(?:use (?:multiple|several) (?:agents?|models?)|parallel agents?|"
@@ -47,7 +48,14 @@ def should_use_ensemble(user_text: str) -> bool:
         evaluated_gain, minimum_gain = 0.0, 0.03
     return enabled and bool(
         _ENSEMBLE_REQUEST.search(user_text)
-        or _HIGH_STAKES_TASK.search(user_text)
+        or (
+            _HIGH_STAKES_TASK.search(user_text)
+            and re.search(
+                r"\b(?:safe|assess|review|should|recommend|risk|diagnos\w*|evaluate|decide|verify|audit)\b",
+                user_text,
+                re.I,
+            )
+        )
         or (
             automatic
             and evaluated_gain >= minimum_gain
@@ -63,6 +71,7 @@ class LocalTask:
     role: str = "general"
     temperature: float = 0.2
     max_tokens: int = 512
+    owner_scope: str | None = None
 
 
 def run_parallel(
@@ -81,6 +90,7 @@ def run_parallel(
             temperature=task.temperature,
             max_tokens=task.max_tokens,
             role=task.role,
+            owner_scope=task.owner_scope,
         )
 
     results: dict[str, str] = {}
@@ -101,31 +111,36 @@ def ask_ensemble(
     prompt: str,
     perspectives: tuple[str, ...] = ("reasoning", "critic"),
     max_tokens: int = 512,
+    owner_scope: str | None = None,
 ) -> str:
     """Run independent perspectives in parallel and synthesize one final answer."""
-    critic_backend = os.getenv("LLM_ENSEMBLE_CRITIC_BACKEND", "fast")
+    critic_backend = os.getenv("LLM_ENSEMBLE_CRITIC_BACKEND", "critic")
+    prompt = as_chat_prompt(prompt)
     tasks = [
         LocalTask(
             name=role,
             role=critic_backend if role == "critic" else role,
-            prompt=(
+            prompt=prompt.with_system_guidance(
                 f"Act as the {role} specialist. Independently solve or assess the "
-                f"request. Return concise findings only.\n\nRequest:\n{prompt}"
+                "request. Return concise findings only. Preserve conversation roles "
+                "and authoritative evidence. Do not execute tools."
             ),
             max_tokens=max_tokens,
+            owner_scope=owner_scope,
         )
         for role in perspectives
     ]
     findings = run_parallel(tasks)
     evidence = "\n\n".join(f"[{name}]\n{text}" for name, text in findings.items())
-    synthesis_prompt = (
+    synthesis_prompt = prompt.with_system_guidance(
         "Synthesize the specialist findings into one accurate, concise final answer. "
-        "Resolve disagreements; do not mention the specialists or expose hidden reasoning.\n\n"
-        f"Original request:\n{prompt}\n\nFindings:\n{evidence}"
-    )
+        "Resolve disagreements against evidence, not majority vote. Do not mention "
+        "the specialists or expose hidden reasoning."
+    ).with_reference({"findings": evidence, "evidence": prompt.evidence})
     return manager.ask_llm(
         synthesis_prompt,
         temperature=0.2,
         max_tokens=max_tokens,
         role="general",
+        owner_scope=owner_scope,
     )

@@ -564,8 +564,6 @@ async def chat(req: Message, request: Request):
             + "\n"
             + dashboard_scope_prompt(bool(snapshot.strip()))
             + turn_contract_prompt(user, context_turns)
-            + "\n"
-            + snapshot
         )
         if req.live:
             system_prompt += "\n" + live_conversation_prompt()
@@ -578,6 +576,10 @@ async def chat(req: Message, request: Request):
             ],
             user,
         )
+        if snapshot:
+            # Dashboard content is reference data, not system instructions or
+            # authenticated execution evidence.
+            prompt = prompt.with_reference({"dashboard_snapshot": snapshot})
         request_id = (
             f"voice:{session_id}:{session_token}"
             if session_id is not None
@@ -599,6 +601,7 @@ async def chat(req: Message, request: Request):
                 grounded = social_candidate.text
                 grounded_model = social_candidate.model_used
         grounded_response = grounded is not None
+        coordination = {"mode": "grounded", "model_calls": 0}
         if grounded is not None:
             text = grounded
             model_used = grounded_model
@@ -614,17 +617,17 @@ async def chat(req: Message, request: Request):
                 ),
             )
             text = candidate.text or "No response was available."
+            coordination = dict(candidate.metadata.get("coordination", {}))
             text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
             if text.startswith("[Error"):
                 raise HTTPException(503, "Curie’s configured model could not answer")
             model_used = candidate.model_used
             if needs_english_rewrite(text, user):
-                rewrite_prompt = (
+                rewrite_prompt = prompt.with_system_guidance(
                     "Rewrite this reply in natural, grammatically correct English. Preserve "
                     "its meaning, warmth, brevity, and Curie's understated personality. Do "
                     "not add facts, advice, a question, or French. Return only the reply.\n\n"
-                    f"Reply:\n{text}\n\nNatural English reply:"
-                )
+                ).with_reference({"reply_to_rewrite": text})
                 rewritten = await until_disconnect(
                     request,
                     model.generate(
@@ -724,6 +727,13 @@ async def chat(req: Message, request: Request):
                     if grounded_quote:
                         text = grounded_quote
                         model_used = "grounded_history_reference"
+        if not grounded_response:
+            from llm.coordination import deterministic_issues, grounded_fallback
+
+            final_issues = deterministic_issues(prompt, text, user)
+            if final_issues:
+                text = grounded_fallback(prompt, final_issues)
+                coordination.update(verification="blocked", issues=list(final_issues))
         if not req.ephemeral:
             turns = (turns + [{"user": user[:2000], "assistant": text[:3000]}])[-12:]
             if sessions is not None:
@@ -752,6 +762,7 @@ async def chat(req: Message, request: Request):
             "processing_time_ms": round((time.perf_counter() - started) * 1000),
             "voice_url": voice_url,
             "session_id": session_id,
+            "coordination": coordination,
         }
 
 

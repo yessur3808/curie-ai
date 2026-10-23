@@ -198,6 +198,61 @@ def test_dialogue_state_values_always_include_provenance_expiry_and_owner_scope(
         assert len(value.owner_scope) == 16
 
 
+def test_selected_tool_context_preserves_provenance_for_model_handoff():
+    envelope = ContextBudgeter().assemble(
+        [
+            ContextCandidate(
+                "receipt",
+                ContextSection.TOOL_RESULT,
+                '{"status":"verified"}',
+                "verified action receipt",
+                source_turn="tool-turn",
+                consequential=True,
+            )
+        ]
+    )
+    decision = envelope.included(ContextSection.TOOL_RESULT)[0]
+    assert decision.source_turn == "tool-turn"
+    assert decision.as_dict()["source_turn"] == "tool-turn"
+
+
+def test_status_read_preserves_previous_verified_action_receipt():
+    store = DialogueStateStore()
+    _observe(
+        store,
+        "Turn off the desk lamp",
+        {
+            "text": "Desk Lamp is off.",
+            "verification_status": "verified",
+            "execution_status": "completed",
+            "_dialogue_entities": ["Desk Lamp"],
+        },
+    )
+    action = store.snapshot(
+        platform="telegram", owner_id="owner"
+    ).last_verified_action_result
+    assert action is not None
+    _observe(
+        store,
+        "Is the desk lamp off?",
+        {
+            "text": "It is still off.",
+            "verification_status": "verified",
+            "execution_status": "completed",
+            "_dialogue_entities": ["Desk Lamp"],
+        },
+    )
+    snapshot = store.snapshot(platform="telegram", owner_id="owner")
+    assert snapshot.last_verified_action_result == action
+    assert snapshot.last_verified_tool_result.value["response"] == "It is still off."
+    assert (
+        store.snapshot(
+            platform="telegram", owner_id="someone-else"
+        ).last_verified_action_result
+        is None
+    )
+
+
 def test_explicit_device_correction_invalidates_stale_reference():
     store = DialogueStateStore()
     _observe(
@@ -209,6 +264,12 @@ def test_explicit_device_correction_invalidates_stale_reference():
             "verification_status": "verified",
         },
     )
+    outcome = store.snapshot(
+        platform="telegram", owner_id="owner"
+    ).last_verified_tool_result.value
+    assert outcome["response"] == "DreamView is off."
+    assert outcome["request"] == "Turn off DreamView"
+    assert outcome["entities"][0]["name"] == "DreamView"
     _observe(store, "There is no device called DreamView", {"text": "Got it."})
 
     resolution = store.resolve_references(

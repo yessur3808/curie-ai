@@ -88,6 +88,7 @@ class ContextDecision:
     truncated: bool = False
     content: str = field(default="", repr=False, compare=False)
     payload: Any = field(default=None, repr=False, compare=False)
+    source_turn: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +98,7 @@ class ContextDecision:
             "reason": self.reason,
             "estimated_tokens": self.estimated_tokens,
             "truncated": self.truncated,
+            "source_turn": self.source_turn,
         }
 
 
@@ -185,6 +187,7 @@ class ContextBudgeter:
                         "excluded: contradicted by newer explicit information",
                         original_tokens,
                         payload=candidate.payload,
+                        source_turn=candidate.source_turn,
                     )
                 )
                 continue
@@ -197,6 +200,7 @@ class ContextBudgeter:
                         "excluded: topic was explicitly rejected",
                         original_tokens,
                         payload=candidate.payload,
+                        source_turn=candidate.source_turn,
                     )
                 )
                 continue
@@ -243,6 +247,7 @@ class ContextBudgeter:
                             "excluded: section or total token budget exhausted",
                             original_tokens,
                             payload=candidate.payload,
+                            source_turn=candidate.source_turn,
                         )
                     )
                     continue
@@ -259,6 +264,7 @@ class ContextBudgeter:
                     truncated,
                     selected,
                     candidate.payload,
+                    source_turn=candidate.source_turn,
                 )
             )
 

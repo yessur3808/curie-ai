@@ -28,7 +28,10 @@ def test_ensemble_synthesizes_parallel_findings():
         patch.object(ensemble.manager, "ask_llm", return_value="final") as ask,
     ):
         assert ensemble.ask_ensemble("question") == "final"
-        assert "[reasoning]\nfact" in ask.call_args.args[0]
+        import json
+
+        reference = ask.call_args.args[0].messages[-1]["content"].split("\n", 1)[1]
+        assert json.loads(reference)["findings"] == "[reasoning]\nfact"
 
 
 def test_selected_complex_reviews_use_ensemble_automatically(monkeypatch):
