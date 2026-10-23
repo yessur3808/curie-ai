@@ -29,7 +29,6 @@ from agent.personality_context import PersonalityContext
 from .voice_persona import (
     dashboard_scope_prompt,
     finalize_live_response,
-    handle_conversation_contract,
     live_conversation_prompt,
     max_recent_response_similarity,
     needs_english_rewrite,
@@ -555,7 +554,9 @@ async def chat(req: Message, request: Request):
                 "mode", "casual"
             )
         )
-        prompt = (
+        from llm.chat_prompt import conversation_prompt
+
+        system_prompt = (
             "System: "
             + persona_prompt(active, directives, briefing=req.ephemeral)
             + "\n"
@@ -563,17 +564,18 @@ async def chat(req: Message, request: Request):
             + turn_contract_prompt(user, context_turns)
             + "\n"
             + snapshot
-            + "\nDirectly relevant previous conversation:\n"
-            + json.dumps(context_turns, ensure_ascii=False)
-            + "\nUser: "
-            + user
-            + "\nAssistant:"
         )
         if req.live:
-            prompt = prompt.replace(
-                "\nUser: ",
-                "\n" + live_conversation_prompt() + "\nUser: ",
-            )
+            system_prompt += "\n" + live_conversation_prompt()
+        prompt = conversation_prompt(
+            system_prompt,
+            [
+                (role, turn.get(key, ""))
+                for turn in context_turns
+                for role, key in (("user", "user"), ("assistant", "assistant"))
+            ],
+            user,
+        )
         request_id = (
             f"voice:{session_id}:{session_token}"
             if session_id is not None
@@ -582,8 +584,13 @@ async def chat(req: Message, request: Request):
         grounded = handle_capabilities_command(user)
         grounded_model = "capability_discovery"
         if grounded is None:
-            grounded = handle_conversation_contract(user, context_turns)
-            grounded_model = "conversation_contract"
+            from services.trained_voice.action_boundary import (
+                unavailable_action_response,
+            )
+
+            grounded = unavailable_action_response(user, context_turns)
+            if grounded is not None:
+                grounded_model = "dashboard_execution_boundary"
         if grounded is None:
             social_candidate = social.handle(user)
             if social_candidate is not None:
@@ -700,7 +707,7 @@ async def chat(req: Message, request: Request):
                         text = repaired_text
                         model_used = repaired.model_used + ":continuity_repair"
         if not req.ephemeral:
-            turns = (turns + [{"user": user[:2000], "assistant": text[:3000]}])[-4:]
+            turns = (turns + [{"user": user[:2000], "assistant": text[:3000]}])[-12:]
             if sessions is not None:
                 sessions.append_history(session_id, user, text)
             else:

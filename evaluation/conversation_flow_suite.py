@@ -214,14 +214,8 @@ def run() -> dict:
                 "mention one specific next action",
             )
         ),
-        "self_memory_answer_is_grounded_in_software_design": bool(
-            memory_answer
-            and "retrieval quality" in memory_answer
-            and "human brain" not in memory_answer
-        ),
-        "reminder_requirements_use_supplied_time": bool(
-            reminder_answer and "stated day and time are enough" in reminder_answer
-        ),
+        "self_memory_question_requires_real_inference": memory_answer is None,
+        "reminder_discussion_requires_real_inference": reminder_answer is None,
         "prefaced_capability_question_uses_registry": bool(
             natural_capabilities
             and "What is genuinely useful right now" in natural_capabilities
