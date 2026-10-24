@@ -4,13 +4,14 @@
 class ChatPrompt(str):
     """A text prompt with explicitly constructed messages, never parsed user labels."""
 
-    def __new__(cls, text, messages, *, evidence=()):
+    def __new__(cls, text, messages, *, evidence=(), json_output=False):
         obj = super().__new__(cls, text)
         obj._messages = tuple((m["role"], str(m["content"])) for m in messages)
         # Evidence is attached by the application, never parsed from user text.
         import json
 
         obj._evidence = json.dumps(list(evidence), ensure_ascii=False)
+        obj.json_output = bool(json_output)
         return obj
 
     @property
@@ -24,7 +25,15 @@ class ChatPrompt(str):
         return json.loads(self._evidence)
 
     def with_evidence(self, evidence):
-        return ChatPrompt(str(self), self.messages, evidence=evidence)
+        return ChatPrompt(
+            str(self), self.messages, evidence=evidence, json_output=self.json_output
+        )
+
+    def with_json_output(self):
+        """Request constrained machine output, separately from prompt wording."""
+        return ChatPrompt(
+            str(self), self.messages, evidence=self.evidence, json_output=True
+        )
 
     def with_system_guidance(self, guidance):
         messages = self.messages
@@ -33,7 +42,12 @@ class ChatPrompt(str):
         else:
             messages.insert(0, {"role": "system", "content": guidance})
         # Keep legacy completion clients readable, too.
-        return ChatPrompt(str(self) + "\n" + guidance, messages, evidence=self.evidence)
+        return ChatPrompt(
+            str(self) + "\n" + guidance,
+            messages,
+            evidence=self.evidence,
+            json_output=self.json_output,
+        )
 
     def with_reference(self, reference):
         """Append non-authoritative specialist data without promoting it to system."""
@@ -52,6 +66,7 @@ class ChatPrompt(str):
             str(self) + "\n" + messages[-1]["content"],
             messages,
             evidence=self.evidence,
+            json_output=self.json_output,
         )
 
 

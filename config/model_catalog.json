@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_on": "2026-10-24",
+  "reviewed_on": "2026-10-25",
   "local_candidates": [
     {
       "name": "Qwen3.8-27B",
@@ -13,6 +13,8 @@
     },
     {
       "name": "GLM-4.7-Flash",
+      "promotion_status": "not_promoted",
+      "promotion_reason": "Local reviewer failed schema and attribution gates; GPU trial hung. Keep CPU-only for isolated evaluation, not production review.",
       "model_card": "https://huggingface.co/zai-org/GLM-4.7-Flash",
       "quant_repository": "unsloth/GLM-4.7-Flash-GGUF",
       "revision": "0d32489ecb9db6d2a4fc93bd27ef01519f95474d",

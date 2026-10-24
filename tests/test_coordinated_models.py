@@ -77,6 +77,8 @@ def test_solver_and_verifier_receive_same_roles_evidence_and_owner():
         assert kwargs["owner_scope"] == "owner-a"
         assert prompt.messages[1:4] == base.messages[1:4]
         assert prompt.evidence == base.evidence
+    assert calls[1][0].json_output is True
+    assert calls[0][0].json_output is False
 
 
 @pytest.mark.parametrize(
@@ -202,6 +204,21 @@ def test_dense_deep_reasoner_is_not_used_for_ordinary_analysis():
     )
 
 
+@pytest.mark.parametrize(
+    ("user_text", "limit"),
+    [
+        ("A thorough comparison, in two sentences", 256),
+        ("Explain API latency in one sentence", 160),
+        ("Give a candid short answer about database latency", 256),
+        ("Give a comprehensive architecture review", 1024),
+    ],
+)
+def test_requested_brevity_is_independent_of_reasoning_role(user_text, limit):
+    from agent.orchestration.model_service import ModelConversationService
+
+    assert ModelConversationService.token_budget(user_text, "deep_reasoning") == limit
+
+
 def test_unavailable_model_is_never_reported_as_checked_answer():
     result = verify_answer(
         as_chat_prompt("hi"), "[Error: offline]", "hi", ask=None, owner_scope="a"
@@ -242,6 +259,7 @@ def test_socket_wire_preserves_messages_and_evidence():
         {"model_name": "../../private.gguf"},
         {"max_tokens": 999999},
         {"role": "shell"},
+        {"json_output": "yes"},
         {"messages": [{"role": "tool", "content": "x"}]},
     ],
 )
@@ -307,9 +325,50 @@ def test_response_cache_distinguishes_roles_and_receipts():
     evidence = first.with_evidence(evidence_prompt().evidence)
     keys = {
         ResponseCache._make_key(p, 0.2, 100, "model", "owner")
-        for p in (first, second, evidence)
+        for p in (first, second, evidence, first.with_json_output())
     }
-    assert len(keys) == 3
+    assert len(keys) == 4
+
+
+def test_structured_output_survives_prompt_and_gateway_handoffs():
+    prompt = evidence_prompt().with_json_output().with_reference({"draft": "Hello"})
+    prompt = prompt.with_system_guidance("Check it").with_evidence(prompt.evidence)
+    assert prompt.json_output
+    received = []
+    execute(
+        {"messages": prompt.messages, "evidence": prompt.evidence, "json_output": True},
+        lambda p, **kw: received.append(p) or "{}",
+    )
+    assert received[0].json_output
+    assert received[0].evidence == prompt.evidence
+
+
+def test_local_verifier_requests_constrained_json(monkeypatch):
+    from collections import OrderedDict
+    from llm import manager
+
+    observed = []
+    raw = '{"answer":"[Note: keep this literal]", "verdict":"pass"}'
+
+    def completion(**kwargs):
+        observed.append(kwargs)
+        return {"choices": [{"message": {"content": raw}}]}
+
+    fixture = SimpleNamespace(tokenize=lambda _: [1], create_chat_completion=completion)
+    monkeypatch.delenv("CURIE_INFERENCE_SOCKET", raising=False)
+    monkeypatch.delenv("CURIE_INFERENCE_WORKER", raising=False)
+    monkeypatch.setenv("CURIE_MODEL_SUPERVISOR", "off")
+    monkeypatch.setenv("LLM_USE_CHAT_TEMPLATE", "true")
+    monkeypatch.setattr("llm.accelerators.should_use_npu", lambda _: False)
+    monkeypatch.setattr(manager, "Llama", object())
+    monkeypatch.setattr(
+        manager, "llama_models_cache", OrderedDict([("fixture.gguf", fixture)])
+    )
+    answer = manager.ask_llm(
+        as_chat_prompt("Check this").with_json_output(), model_name="fixture.gguf"
+    )
+    assert observed[0]["response_format"] == {"type": "json_object"}
+    assert answer == raw
 
 
 def test_worker_fails_closed_instead_of_using_another_role_model(monkeypatch):
@@ -379,3 +438,52 @@ def test_gateway_rejects_public_socket(monkeypatch):
         monkeypatch.setenv("CURIE_INFERENCE_SOCKET", str(endpoint))
         with pytest.raises(PermissionError):
             request("Hello")
+
+
+def test_dashboard_probe_closes_session_after_failed_behavior(monkeypatch, tmp_path):
+    import httpx
+    from evaluation import dashboard_coordination_probe as probe
+
+    posts, deleted = [], []
+
+    def handle(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"status": "healthy"})
+        if request.method == "DELETE":
+            deleted.append(request.url.path)
+            return httpx.Response(200, json={"closed": True})
+        posts.append(json.loads(request.content))
+        answer = (
+            "A: Sorry, Nora. B: Thanks, Nora."
+            if len(posts) == 1
+            else "I've sent it to Nora."
+        )
+        return httpx.Response(
+            200, json={"text": answer, "session_id": "synthetic-session"}
+        )
+
+    client = httpx.Client
+    monkeypatch.setattr(
+        probe.httpx,
+        "Client",
+        lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs),
+    )
+    assert not probe.run("http://127.0.0.1:8012", tmp_path / "report.json")
+    assert len(posts) == 2
+    assert deleted == ["/voice-sessions/session/synthetic-session"]
+    assert posts[0]["user_id"].startswith("dashboard-coordination-test-")
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Because you asked me to.",
+        "You explicitly asked me to turn it off.",
+        "I followed your request.",
+    ],
+)
+def test_attribution_gate_accepts_natural_variations(reply):
+    from evaluation.contextual_assistant_probe import behavioral_checks
+
+    row = {"flow": "device_flow", "turn": 3, "assistant": reply, "tool_calls": []}
+    assert behavioral_checks(row)["attributes_owner_request"]

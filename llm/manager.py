@@ -169,6 +169,7 @@ class ResponseCache:
                 model_name,
                 structured.messages,
                 structured.evidence,
+                structured.json_output,
                 temperature,
                 max_tokens,
             ],
@@ -836,6 +837,11 @@ def ask_llm(
                 "yes",
             )
             if use_chat_template and hasattr(llama_model, "create_chat_completion"):
+                output_options = (
+                    {"response_format": {"type": "json_object"}}
+                    if getattr(prompt, "json_output", False)
+                    else {}
+                )
                 result = llama_model.create_chat_completion(
                     messages=_prompt_to_chat_messages(prompt),
                     max_tokens=effective_max_tokens,
@@ -843,9 +849,12 @@ def ask_llm(
                     repeat_penalty=1.1,
                     top_p=0.95,
                     top_k=40,
+                    **output_options,
                 )
                 raw = result["choices"][0]["message"]["content"] or ""
                 raw = raw.strip()
+            elif getattr(prompt, "json_output", False):
+                return "[Error: constrained JSON requires a chat-template backend]"
             else:
                 result = llama_model(
                     prompt,
@@ -862,7 +871,13 @@ def ask_llm(
                     raw = result.choices[0].text.strip()
                 else:
                     raw = str(result)
-            return _sanity_filter_response(raw)
+            # Presentation cleanup must not rewrite a machine-readable verdict.
+            # The coordinator validates the entire JSON object before delivery.
+            return (
+                raw
+                if getattr(prompt, "json_output", False)
+                else _sanity_filter_response(raw)
+            )
 
         supervisor = None
         supervisor_acquired = False

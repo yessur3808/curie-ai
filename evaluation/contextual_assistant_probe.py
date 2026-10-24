@@ -13,9 +13,11 @@ from contextlib import ExitStack
 from datetime import datetime, timezone
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import time
+import uuid
 from unittest.mock import patch
 
 FLOWS = {
@@ -99,9 +101,12 @@ def behavioral_checks(row):
                 "can't control",
             )
         )
-        checks["attributes_owner_request"] = any(
-            phrase in reply.casefold()
-            for phrase in ("you asked", "your request", "you told")
+        checks["attributes_owner_request"] = bool(
+            re.search(
+                r"\byou\s+(?:(?:explicitly|specifically|directly|originally)\s+)?(?:asked|told)\b|\byour request\b",
+                reply,
+                re.I,
+            )
         )
     return checks
 
@@ -150,6 +155,7 @@ async def run_probe(report):
         raise PermissionError("External capabilities are disabled in this evaluation")
 
     results = []
+    run_id = uuid.uuid4().hex
     with ExitStack() as stack:
         # Availability belongs to the fixture too; never borrow real credentials
         # merely to exercise the normal planner and execution boundary.
@@ -177,7 +183,7 @@ async def run_probe(report):
             )
         )
         for flow, turns in FLOWS.items():
-            owner = "evaluation-" + flow
+            owner = "evaluation-" + run_id + "-" + flow
             workflow = ChatWorkflow(max_history=8)
             workflow.learning_service.submit = lambda *a, **k: None
             for index, text in enumerate(turns):

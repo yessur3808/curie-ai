@@ -8,9 +8,11 @@ import argparse
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import time
+import uuid
 
 
 async def run(report):
@@ -20,6 +22,7 @@ async def run(report):
     from llm.inference_service import close_inference_service
 
     service = ModelConversationService(manager)
+    run_id = uuid.uuid4().hex
     cases = [
         (
             "casual",
@@ -83,7 +86,7 @@ async def run(report):
             ).with_evidence(evidence)
             started = time.monotonic()
             result = await service.generate(
-                prompt, user, 0.3, owner_id="coordination-eval-" + name
+                prompt, user, 0.3, owner_id="coordination-eval-" + run_id + "-" + name
             )
             meta = result.metadata.get("coordination", {})
             delegated = name != "casual"
@@ -104,9 +107,12 @@ async def run(report):
                 checks["cites_correct_evidence"] = meta.get("evidence_ids") == [
                     "sandbox-action"
                 ]
-                checks["attributes_request"] = any(
-                    p in result.text.casefold()
-                    for p in ("you asked", "your request", "you told")
+                checks["attributes_request"] = bool(
+                    re.search(
+                        r"\byou\s+(?:(?:explicitly|specifically|directly|originally)\s+)?(?:asked|told)\b|\byour request\b",
+                        result.text,
+                        re.I,
+                    )
                 )
                 checks["separate_verifier_role"] = meta.get("roles") == [
                     "reasoning",
@@ -132,10 +138,12 @@ async def run(report):
                     {"complete": False, "cases": rows}, ensure_ascii=False, indent=2
                 )
             )
+            if not all(checks.values()):
+                break
     finally:
         await close_inference_service()
     result = {
-        "complete": True,
+        "complete": len(rows) == len(cases),
         "cases": rows,
         "passed": all(all(r["checks"].values()) for r in rows),
     }

@@ -70,7 +70,12 @@ def request(prompt, **kwargs):
         connection.connect(path)
         send(
             connection,
-            {"messages": prompt.messages, "evidence": prompt.evidence, **kwargs},
+            {
+                "messages": prompt.messages,
+                "evidence": prompt.evidence,
+                "json_output": prompt.json_output,
+                **kwargs,
+            },
         )
         result = receive(connection)
     if not isinstance(result, dict) or not isinstance(result.get("text"), str):
@@ -122,13 +127,18 @@ def execute(payload, ask):
     }:
         raise ValueError("invalid_gateway_role")
     temperature = float(payload.get("temperature", 0.3))
+    json_output = payload.get("json_output", False)
+    if not isinstance(json_output, bool):
+        raise ValueError("invalid_gateway_output_format")
     tokens = payload.get("max_tokens")
     if not 0 <= temperature <= 2 or (
         tokens is not None and (not isinstance(tokens, int) or not 1 <= tokens <= 8192)
     ):
         raise ValueError("invalid_gateway_budget")
     text = "\n".join(m["role"] + ": " + m["content"] for m in messages)
-    prompt = ChatPrompt(text, messages, evidence=payload.get("evidence", []))
+    prompt = ChatPrompt(
+        text, messages, evidence=payload.get("evidence", []), json_output=json_output
+    )
     return ask(
         prompt,
         model_name=name,

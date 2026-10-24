@@ -48,6 +48,13 @@ class ModelConversationService:
             r"(?:hi|hello|hey|bonjour)(?:\s+(?:curie|there))?[!,.? ]*", text
         ) or re.search(r"\bhow are you(?: doing)?\b", text):
             return 96
+        # Requested delivery length is independent of the model's reasoning role.
+        if re.search(r"\b(?:one|1) sentence\b", text):
+            return 160
+        if re.search(r"\b(?:two|2) sentences\b", text):
+            return 256
+        if re.search(r"\b(?:brief|short (?:answer|reply|note)|keep it short)\b", text):
+            return 256
         if re.search(
             r"\b(?:in detail|detailed|deep dive|thorough|comprehensive|step by step)\b",
             text,
@@ -178,7 +185,7 @@ class ModelConversationService:
             " When drafting or editing, output the requested text itself, keeping the "
             "requested length. A short note normally means one or two sentences, not an "
             "email with a subject and sign-off. Do not invent reasons, excuses, relationships, "
-            "or events. Keep the speaker, recipient, and requested action unchanged."
+            "events, arrival estimates, or promises. Keep the speaker, recipient, and requested action unchanged."
             " Distinguish the original request from a later question about it: explaining "
             "or quoting an earlier command does not retroactively change what was asked."
         )
