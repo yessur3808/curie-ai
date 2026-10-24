@@ -6,9 +6,9 @@ Curie's Telegram workflow and dashboard conversation adapter share the model con
 
 1. Normalize the owner request and select relevant, unexpired, owner-scoped dialogue context.
 2. Preserve system, user and assistant roles in `ChatPrompt`. Attach application-selected tool receipts separately from conversational text. Retain the previous verified action when a subsequent status read updates the latest observation.
-3. Route ordinary conversation to one model. Explicit independent review, a substantive high-stakes judgement, or an explicit request for a deep analytical review selects a specialist followed by a critic. The `deep_reasoning` role is reserved for explicit depth, not every analytical follow-up. Other automatic complex-task delegation additionally requires a recorded evaluation gain; keep `LLM_ENSEMBLE_EVAL_GAIN=0` until a controlled comparison justifies changing it.
+3. Route ordinary conversation to one model. Explicit independent review, a substantive high-stakes judgement, or an explicit request for a deep analytical review selects a specialist followed by a critic. Drafting/editing also receives a targeted factual-details review; a question about a draft does not automatically receive one. The `deep_reasoning` role is reserved for explicit depth, not every analytical follow-up. Other automatic complex-task delegation additionally requires a recorded evaluation gain; keep `LLM_ENSEMBLE_EVAL_GAIN=0` until a controlled comparison justifies changing it.
 4. Give both passes the same conversation, constraints and evidence. Treat specialist drafts and dashboard snapshots as untrusted reference data, not system instructions.
-5. Check action and authentication claims deterministically. Evidence-bearing answers and selected specialist work also receive a structured critic check. Reject malformed reviews and invented evidence IDs. A failed review produces an honest evidence-based response, not the unverified draft.
+5. Check action and authentication claims deterministically. Evidence-bearing answers and selected specialist work also receive a structured critic check. Local reviewers use constrained JSON generation, followed by schema and evidence-ID validation. A failed review produces an honest evidence-based response, not the unverified draft. Explain an action's initiating request, not just its completion receipt, when asked why it happened.
 6. Apply output policy and recheck prohibited claims before storing history or replying.
 
 The normal reviewed path has two model-service calls. Provider fallback and existing presentation repair paths can add work; metadata reports service calls, roles and estimated token usage. These are not exact provider-billed tokens, nor a guarantee that a native runtime never retries generation internally. Deterministic checks are conservative guards, not proof of arbitrary natural-language correctness. A critic can also make mistakes: keep held-out conversational evaluation alongside unit tests.
@@ -30,7 +30,7 @@ Cancellation stops queued work and prevents the next coordination stage or reply
 5. Restart `curie-main` through `ecosystem.config.js` with updated environment, then restart the dashboard adapter. Both must use the same socket. The worker's role configuration is authoritative for local requests.
 6. Check socket permissions, `llm.local_gateway.status()`, process memory, dashboard `/health`, an ephemeral `/chat` request, and the sandboxed Telegram workflow. Remove only test sessions afterwards.
 
-Rollback is explicit: restore the previous role settings and restart the worker. To remove the shared worker entirely, remove `CURIE_INFERENCE_SOCKET` from both client environments and restart both clients before stopping it. Do not leave clients pointed at a stopped worker. Keep previous weights available until rollout evaluation completes.
+Rollback is explicit: restore the previous role settings and restart the worker. To remove the shared worker entirely, clear `CURIE_INFERENCE_SOCKET` in the file and actual PM2 client environments, then restart both clients before stopping it. PM2 can retain omitted environment keys; explicitly setting an empty value with `--update-env` clears this routing setting. Do not leave clients pointed at a stopped worker. Keep previous weights available until rollout evaluation completes.
 
 ## Remote models
 
@@ -40,14 +40,29 @@ Large frontier model families are not automatically downloaded just because an a
 
 ## Repeatable evaluation
 
-Run `pytest -q` for regression coverage. `evaluation.model_conversation_probe` compares raw GGUF responses on eight synthetic prompts. `evaluation.contextual_assistant_probe` exercises 21 turns through the actual Telegram workflow, replacing only external capability availability and execution with fixtures. It uses temporary memory and stops on failed behavioral gates. `evaluation.coordinated_system_probe` checks real model handoffs, selective call counts, role audit metadata, draft-only boundaries and historical action attribution.
+Run `pytest -q` for regression coverage. `evaluation.model_conversation_probe` compares raw GGUF responses on eight synthetic prompts. `evaluation.contextual_assistant_probe` exercises 21 turns through the actual Telegram workflow, replacing only external capability availability and execution with fixtures. It uses temporary memory and stops on failed behavioral gates. `evaluation.coordinated_system_probe` checks real model handoffs, selective call counts, role audit metadata, draft-only boundaries and historical action attribution. `evaluation.dashboard_coordination_probe` exercises six real HTTP exchanges against a loopback test adapter and closes its synthetic session even on failed checks. Each run uses a unique owner identity to avoid cached replies from previous runs.
 
 Store generated JSON reports outside Git or under ignored `evaluation/reports/`. Mechanical checks establish a behavioral floor; manually read replies for invented details, unnecessary verbosity, awkwardness and overconfident hypotheses. Keep production conversations out of benchmark artifacts.
 
-## Rollout status on 24 October 2026
+## Selected local profile
 
-The server regression suite passed 1,838 tests before the additional GPU-residency guard. The final focused coordinator suite, including that guard and socket permissions, passed 35 tests locally. The Qwen specialist/reviewer probe passed all four original scenarios, and the sandboxed 21-turn Telegram workflow passed its behavioral checks. Formatting, lint and secret scanning passed; the only newly allowlisted strings are public model repository revisions and file checksums.
+| Work | Model | Backend |
+| --- | --- | --- |
+| Normal chat, coding, fast edits and reviewer | Qwen 3.6 35B-A3B, UD-Q4_K_M | GPU |
+| Explicit deep analysis | Qwen 3.8 27B, UD-Q4_K_M | CPU |
 
-Both new downloads passed their pinned SHA-256 checks. Raw eight-prompt trials completed for Qwen 3.8 on CPU/GPU, Qwen 3.6 on GPU, and GLM 4.7 Flash on CPU. GLM was fast on CPU but its subsequent GPU review trial stalled the native process with SIGKILL pending. This is a server-recovery blocker, not a passed model promotion gate. The default example therefore keeps GLM on CPU and the worker prevents simultaneous GPU model residency.
+The normal reviewer is a separate pass of the same checkpoint, not an independent source of truth. Deep analysis uses the other checkpoint before review. Keeping the deep model CPU-only avoids GPU model churn. GLM 4.7 Flash remains an unpromoted candidate: its GPU trial hung, and CPU review failed schema and attribution gates. Its download is retained for isolated evaluation, not used for production review. Larger remote Qwen/Z.ai adapters remain opt-in and were not exercised with private conversations.
 
-Production source/configuration has not been changed. Final Qwen-to-GLM coordination, dashboard HTTP verification, restart and rollout remain pending server recovery. Do not treat the successful standalone benchmarks or earlier same-family handoff as proof that the final cross-family deployment has passed.
+## Rollout evidence on 25 October 2026
+
+- 1,851 regression tests passed, with two opt-in tests deselected and seven passing subtests.
+- Five live model-coordination cases passed 24 behavioral checks.
+- The 21-turn sandboxed Telegram workflow passed 57 checks. The changed draft/edit flow was rerun separately: four turns, 12 checks.
+- Six dashboard HTTP cases passed 19 checks, including the regression for invented traffic/ETA details and explicit session closure.
+- Formatting, lint, high-severity Bandit scanning and tracked-file secret scanning passed. The only model-related baseline allowances are public revisions/checksums.
+- The production main process, both dashboard adapters and shared inference worker were restarted. Both dashboard health endpoints responded, and an ephemeral production chat returned a model-generated reply and its synthetic session was closed.
+- Worker metadata confirmed one GPU-resident Qwen 3.6 model alongside CPU Qwen 3.8 in staging. Synthetic reports are retained locally under ignored `evaluation/reports/coordination-2026-10-25/`; test memory is temporary and staging workers are stopped.
+
+These are behavioral floors, not a 9/10 quality rating. Manual review still observed a missed invented excuse in a Telegram draft, occasional unnecessary apologies, overconfident technical hypotheses, and imperfect sentence-count compliance. The stricter dashboard draft regression passed, but that does not prove every draft is grounded. Keep human approval before sending/publishing generated content and continue held-out evaluation. No real device was switched by these synthetic tests, and Telegram desktop delivery was not manually exercised during this rollout.
+
+The shared status endpoint is serialized with inference and can time out while a long generation is active; query it while idle. Native generation itself is not forcibly interrupted by a client timeout. GitHub CI results must be checked separately from these server-side results.
