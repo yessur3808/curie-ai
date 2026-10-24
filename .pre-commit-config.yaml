@@ -17,7 +17,7 @@ repos:
   # Runs on pre-commit (fast) to block badly-formatted commits.
   # ---------------------------------------------------------------------------
   - repo: https://github.com/psf/black
-    rev: 25.1.0
+    rev: 26.10.1
     hooks:
       - id: black
         language_version: python3
