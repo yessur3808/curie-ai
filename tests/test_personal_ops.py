@@ -5,9 +5,11 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from agent.tooling import policies
+from connectors import google_oauth
 from connectors.google_oauth import CALENDAR_READ_SCOPE, authorization_url
 from memory import local_store
 from memory.repositories import reset_repositories
+from services.oauth_state import consume_oauth_state
 from services.personal_ops import (
     add_birthday,
     agenda,
@@ -43,9 +45,25 @@ def isolated(tmp_path, monkeypatch):
 def test_calendar_oauth_defaults_to_minimum_read_scope(isolated, monkeypatch):
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client")
     monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "https://curie.example/callback")
+    requested_bytes = []
+    # A random token can coincidentally contain the short owner ID. Assert that
+    # the state is exactly the opaque random value, not a substring heuristic.
+    opaque_state = "opaque-u1-random-state"
+
+    def fake_token_urlsafe(nbytes):
+        requested_bytes.append(nbytes)
+        return {64: "synthetic-pkce-verifier", 32: opaque_state}[nbytes]
+
+    monkeypatch.setattr(google_oauth.secrets, "token_urlsafe", fake_token_urlsafe)
     query = parse_qs(urlsplit(authorization_url("u1", product="calendar")).query)
     assert query["scope"] == [CALENDAR_READ_SCOPE]
-    assert "u1" not in query["state"][0]
+    assert requested_bytes == [64, 32]
+    assert query["state"] == [opaque_state]
+    owner_id, pending = consume_oauth_state(opaque_state, provider="google")
+    assert owner_id == "u1"
+    assert pending["product"] == "calendar"
+    assert pending["write"] is False
+    assert pending["verifier"] == "synthetic-pkce-verifier"
 
 
 def test_birthdays_are_explicit_private_and_owner_scoped(isolated):
