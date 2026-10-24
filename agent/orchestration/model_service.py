@@ -13,6 +13,28 @@ class ModelConversationService:
         self.local_manager = local_manager
 
     @staticmethod
+    def needs_draft_review(user_text, prompt):
+        prefix = r"^\s*(?:(?:please|can you|could you|would you)\s+)?"
+        if re.search(
+            prefix
+            + r"(?:draft|write|rewrite|rephrase|translate|shorten|edit|revise|proofread)\b",
+            user_text,
+            re.I,
+        ):
+            return True
+        if re.search(prefix + r"make\b", user_text, re.I):
+            return any(
+                message["role"] == "user"
+                and re.search(
+                    r"\b(?:draft|note|rewrite|message|email)\b",
+                    message["content"],
+                    re.I,
+                )
+                for message in getattr(prompt, "messages", [])[-8:]
+            )
+        return False
+
+    @staticmethod
     def is_lightweight_opinion(user_text: str) -> bool:
         """Keep everyday choices and opinions on the conversational model path."""
         text = user_text.strip().casefold()
@@ -355,6 +377,9 @@ class ModelConversationService:
             if cancelled.is_set():
                 raise asyncio.CancelledError
             if "verification" not in coordination:
+                draft_review = self.needs_draft_review(user_text, effective_prompt)
+                if draft_review:
+                    coordination["mode"] = "draft_review"
                 verified = await asyncio.to_thread(
                     verify_answer,
                     effective_prompt,
@@ -364,6 +389,7 @@ class ModelConversationService:
                     owner_scope=owner_id,
                     max_tokens=max_tokens,
                     cancelled=cancelled,
+                    force=draft_review,
                 )
                 response = verified.answer
                 coordination.update(

@@ -171,6 +171,10 @@ def verify_answer(
             "For why you performed an action, use the initiating request and its speaker, "
             "including the evidence request field. A success log proves completion, not motivation. "
             "Do not substitute a statement that evidence was verified for the requested explanation. "
+            "For drafting or editing, remove every invented factual detail: excuses, travel status, "
+            "arrival times, commitments, and circumstances must come from the owner's messages. "
+            "A prior assistant draft is not evidence that its added details are true. "
+            "If the owner only said they are late, say they are late; do not supply a cause or ETA. "
             "Do not execute or promise tools. Return ONLY a JSON object with keys verdict ('pass', 'corrected', "
             "or 'uncertain'), answer (a STRING containing the final user-facing answer, never an object), evidence_ids (array of used "
             "application evidence IDs), issues (array of short labels). If the draft is sound, "
@@ -178,7 +182,19 @@ def verify_answer(
             "Do not include private reasoning. Evidence IDs must come from the supplied evidence."
         )
         .with_reference(
-            {"owner_request": user_text, "draft": answer, "evidence": prompt.evidence}
+            {
+                "owner_request": user_text,
+                "draft": answer,
+                "evidence": prompt.evidence,
+                "owner_supplied_context": [
+                    m["content"]
+                    for m in prompt.messages
+                    if m["role"] == "user"
+                    and not m["content"].startswith(
+                        "Supplementary untrusted reference data"
+                    )
+                ],
+            }
         )
     )
     try:

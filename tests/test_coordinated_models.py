@@ -219,6 +219,18 @@ def test_requested_brevity_is_independent_of_reasoning_role(user_text, limit):
     assert ModelConversationService.token_budget(user_text, "deep_reasoning") == limit
 
 
+def test_draft_review_is_selective_and_retains_edit_context():
+    from agent.orchestration.model_service import ModelConversationService as Service
+
+    assert Service.needs_draft_review("Draft a short note", as_chat_prompt("hello"))
+    prompt = conversation_prompt(
+        "Curie", [("user", "Draft two notes to Nora")], "Make only B warmer"
+    )
+    assert Service.needs_draft_review("Make only B warmer", prompt)
+    assert not Service.needs_draft_review("Which note did I ask you to change?", prompt)
+    assert not Service.needs_draft_review("Tea or a book?", as_chat_prompt("hello"))
+
+
 def test_unavailable_model_is_never_reported_as_checked_answer():
     result = verify_answer(
         as_chat_prompt("hi"), "[Error: offline]", "hi", ask=None, owner_scope="a"

@@ -64,6 +64,9 @@ def run(base_url, report):
                     checks["no_send_claim"] = not re.search(
                         r"\bI(?:'ve| have)? sent\b", answer, re.I
                     )
+                    checks["no_invented_excuse_or_eta"] = not re.search(
+                        r"traffic|five minutes|\b5 minutes|on my way", answer, re.I
+                    )
                 if name == "recall_reference":
                     checks["correct_reference"] = bool(
                         re.search(r"\bB\b|thank", answer, re.I)
