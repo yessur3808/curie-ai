@@ -537,9 +537,10 @@ class DynamicScraper:
 
 async def search_sources_web(query):
     """Bounded public search with the same SSRF boundary as page fetching."""
-    from duckduckgo_search import DDGS
 
     def search():
+        from duckduckgo_search import DDGS
+
         with DDGS(timeout=12) as client:
             return list(client.text(str(query)[:1800], max_results=6))
 

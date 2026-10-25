@@ -125,6 +125,8 @@ async def test_read_only_browser_cannot_submit_post_forms():
 
 @pytest.mark.asyncio
 async def test_real_search_filters_private_urls_without_model_fallback():
+    from types import SimpleNamespace
+
     from agent.skills.find_info import search_sources_web
 
     search = Mock()
@@ -135,7 +137,10 @@ async def test_real_search_filters_private_urls_without_model_fallback():
         {"href": "http://127.0.0.1"},
     ]
     with (
-        patch("duckduckgo_search.DDGS", return_value=search),
+        patch.dict(
+            "sys.modules",
+            {"duckduckgo_search": SimpleNamespace(DDGS=Mock(return_value=search))},
+        ),
         patch(
             "agent.skills.find_info.is_safe_url",
             side_effect=lambda url: "127.0.0.1" not in url,
@@ -146,3 +151,15 @@ async def test_real_search_filters_private_urls_without_model_fallback():
             "https://example.org/report"
         ]
     ask.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_missing_optional_search_package_is_unavailable_not_model_guessed():
+    from agent.skills.find_info import search_sources_web
+
+    with (
+        patch.dict("sys.modules", {"duckduckgo_search": None}),
+        patch("agent.skills.find_info.manager.ask_llm") as ask,
+    ):
+        assert await search_sources_web("battery technology") == []
+        ask.assert_not_called()
