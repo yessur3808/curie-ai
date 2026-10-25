@@ -1037,6 +1037,17 @@ class ChatWorkflow:
             logger.debug("Could not apply deterministic time arithmetic: %s", exc)
 
         # Job-management commands must run before the operational research route.
+        from services.x_research import controls as x_research_controls
+
+        x_research_response = x_research_controls(str(internal_id), user_text)
+        if x_research_response is not None:
+            return {
+                "text": x_research_response,
+                "timestamp": datetime.now(timezone.utc),
+                "model_used": "x_browser_research_controls",
+                "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+            }
+
         from services.research_followup import controls as research_controls
 
         research_response = research_controls(str(internal_id), user_text)
@@ -3022,6 +3033,11 @@ class ChatWorkflow:
             awareness = awareness_context(str(internal_id), user_profile, now=now)
             if awareness:
                 prompt = prompt.with_reference({"current_awareness": awareness})
+            from services.x_research import research_context
+
+            x_discoveries = research_context(str(internal_id), user_text)
+            if x_discoveries:
+                prompt = prompt.with_reference({"x_research": x_discoveries})
         except Exception as exc:
             logger.debug("Awareness snapshot unavailable: %s", type(exc).__name__)
         return prompt
