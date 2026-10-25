@@ -854,7 +854,14 @@ def generate_helpful_prediction(
         "yes",
     ):
         return None
+    from utils.temporal_context import temporal_guidance
+
     context = "\n".join(f"{role}: {msg[:300]}" for role, msg in history[-10:])
+    relevant_profile = {
+        key: profile[key]
+        for key in ("interests", "projects", "routines")
+        if key in profile
+    }
     task_prompt = (
         "Predict one small, concrete way a personal assistant might help next. Base it only "
         "on repeated or explicit evidence below. Return JSON with keys suggestion, reason, "
@@ -863,7 +870,8 @@ def generate_helpful_prediction(
         "Do not suggest purchases, financial/medical/legal decisions, contacting others, deleting "
         "data, executing commands, or claiming certainty about the user's needs. Return {} when "
         "there is insufficient evidence.\n\n"
-        f"Profile: {json.dumps(profile, default=str)[:3000]}\nHistory:\n{context}\n\nJSON only:"
+        f"{temporal_guidance(profile)}\n"
+        f"Profile: {json.dumps(relevant_profile, default=str)[:3000]}\nHistory:\n{context}\n\nJSON only:"
     )
     try:
         from agent.persona_contract import apply_persona_contract

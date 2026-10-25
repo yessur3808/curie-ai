@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import aiohttp
 import httpx
 from utils.ttl_cache import TTLCache
@@ -125,14 +126,25 @@ async def get_weather(city: str, unit: str = "metric", day_offset: int = 0):
                 },
             )
             response.raise_for_status()
-            current = response.json()["current"]
+            payload = response.json()
+            current = payload["current"]
             code = int(current["weather_code"])
             rain = float(current.get("rain", 0) or 0) + float(
                 current.get("showers", 0) or 0
             )
             temperature = current["temperature_2m"]
             result = {
-                "observed_at": current.get("time"),
+                "observed_at": (
+                    datetime.fromisoformat(current["time"])
+                    .replace(
+                        tzinfo=timezone(
+                            timedelta(seconds=int(payload.get("utc_offset_seconds", 0)))
+                        )
+                    )
+                    .isoformat()
+                    if current.get("time")
+                    else None
+                ),
                 "apparent_temperature": current.get("apparent_temperature"),
                 "relative_humidity": current.get("relative_humidity_2m"),
             }
@@ -173,19 +185,18 @@ async def get_weather_range(
     """Return one bounded daily forecast range in a single provider request."""
     if end_date < start_date:
         raise ValueError("Forecast end date must not be before its start date")
-    today = date.today()
-    start_offset = (start_date - today).days
-    end_offset = (end_date - today).days
-    if start_offset < 0:
-        raise ValueError(
-            "Historical weather is not available through this forecast tool"
-        )
-    if end_offset > 15:
-        raise ValueError("Forecast is not available that far ahead")
-
     temp_unit = "fahrenheit" if unit == "imperial" else "celsius"
     async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=False) as client:
         place = await _geocode(client, city)
+        today = datetime.now(ZoneInfo(place.get("timezone") or "UTC")).date()
+        start_offset = (start_date - today).days
+        end_offset = (end_date - today).days
+        if start_offset < 0:
+            raise ValueError(
+                "Historical weather is not available through this forecast tool"
+            )
+        if end_offset > 15:
+            raise ValueError("Forecast is not available that far ahead")
         response = await client.get(
             _FORECAST_URL,
             params={
@@ -204,7 +215,14 @@ async def get_weather_range(
         daily = response.json()["daily"]
 
     days = []
-    for index in range(start_offset, end_offset + 1):
+    indices = [
+        index
+        for index, value in enumerate(daily["time"])
+        if start_date.isoformat() <= value <= end_date.isoformat()
+    ]
+    if len(indices) != (end_date - start_date).days + 1:
+        raise ValueError("Provider did not return every requested forecast date")
+    for index in indices:
         code = int(daily["weather_code"][index])
         rain = float(daily["rain_sum"][index] or 0)
         days.append(

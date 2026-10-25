@@ -21,6 +21,8 @@ from connectors.twitter import _check_response
         'You previously mentioned "The x search tool ran into an internal error and stopped." Thus I was verifying the error',
         "You said 'turn off both lights' failed. What happened?",
         "You just reported that the calendar search failed. Explain.",
+        "Why would you check previous dates?",
+        "No, we're already on October 25. Why would you offer a forecast for past dates?",
     ],
 )
 def test_explanations_do_not_reexecute_quoted_actions(text):

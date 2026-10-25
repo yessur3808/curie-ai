@@ -229,7 +229,7 @@ def test_distant_trip_range_is_not_replaced_with_current_conditions(
     monkeypatch.setattr("utils.weather.get_weather", should_not_fetch_current)
     monkeypatch.setattr(
         "agent.tooling.weather_tool._requested_range",
-        lambda _query: (future, future + timedelta(days=4)),
+        lambda _query, today=None: (future, future + timedelta(days=4)),
     )
     request = router.classify_request(
         "What will the weather in Los Angeles be from October 1 to October 5?"

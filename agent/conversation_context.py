@@ -52,6 +52,12 @@ def discussion_only(text):
     )
     if reported_status and explains_status:
         return True
+    if re.search(
+        r"\bwhy\s+(?:would|did|do)\s+you\s+(?:offer|suggest|check|mention|ask about)\b",
+        clean,
+        re.I,
+    ):
+        return True
     return bool(_REPORT.search(clean) or _EXPLANATION.search(clean))
 
 

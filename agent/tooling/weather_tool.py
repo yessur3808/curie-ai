@@ -43,6 +43,13 @@ _DATE_RANGE = re.compile(
 
 
 def _requested_range(query: str, today: date | None = None) -> tuple[date, date] | None:
+    # Telegram shorthand and speech transcripts commonly put the day first.
+    query = re.sub(
+        r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+        r"\2 \1",
+        query,
+        flags=re.I,
+    )
     match = _DATE_RANGE.search(query)
     if not match:
         return None
@@ -53,7 +60,12 @@ def _requested_range(query: str, today: date | None = None) -> tuple[date, date]
     start = date(year, first_month, int(match.group("d1")))
     end_year = year + (second_month < first_month)
     end = date(end_year, second_month, int(match.group("d2")))
-    if end < today:
+    explicit_year = re.search(r"\b(20\d{2})\b", query)
+    if explicit_year:
+        year = int(explicit_year.group(1))
+        start = start.replace(year=year)
+        end = end.replace(year=year + (second_month < first_month))
+    elif re.search(r"\bnext year\b", query, re.I):
         start = start.replace(year=start.year + 1)
         end = end.replace(year=end.year + 1)
     return start, end
@@ -71,7 +83,9 @@ def _recent_weather_context(
         rows = get_session_manager().get_history(context.platform, context.internal_id)
         city = None
         requested = None
-        for row in reversed(rows[-12:]):
+        from utils.temporal_context import recent_rows
+
+        for row in reversed(recent_rows(rows[-12:])):
             if row.get("role") != "user":
                 continue
             content = str(row.get("content", ""))
@@ -97,11 +111,20 @@ class WeatherTool:
 
         query = str(params.get("query", ""))
         city = extract_city_from_message(query)
-        requested = _requested_range(query)
-        if not city or (not requested and re.search(r"\bthose dates\b", query, re.I)):
+        from utils.temporal_context import local_now
+
+        today = local_now(context.profile).date()
+        requested = _requested_range(query, today)
+        refers_back = bool(
+            re.search(
+                r"\b(?:there|that city|those dates|the trip|that trip)\b", query, re.I
+            )
+        )
+        if refers_back:
             recent_city, recent_range = _recent_weather_context(context)
             city = city or recent_city
-            requested = requested or recent_range
+            if re.search(r"\b(?:those dates|the trip|that trip)\b", query, re.I):
+                requested = requested or recent_range
         city = city or context.profile.get("location")
         if not city:
             return ToolResult(
@@ -110,7 +133,6 @@ class WeatherTool:
 
         if requested:
             start, end = requested
-            today = date.today()
             if end < today:
                 return ToolResult(
                     f"Those dates have passed. This tool provides forecasts, not historical weather, for {city}."
@@ -157,7 +179,7 @@ class WeatherTool:
         )
         if forward_rain_query:
             offset = 1 if "tomorrow" in query.casefold() else 0
-            target = date.today() + timedelta(days=offset)
+            target = today + timedelta(days=offset)
             forecast = await get_weather_range(city, target, target)
             day = forecast["days"][0]
             probability = int(day.get("precipitation_probability") or 0)

@@ -565,6 +565,9 @@ async def chat(req: Message, request: Request):
             + dashboard_scope_prompt(bool(snapshot.strip()))
             + turn_contract_prompt(user, context_turns)
         )
+        from utils.temporal_context import temporal_guidance
+
+        system_prompt += "\n" + temporal_guidance()
         if req.live:
             system_prompt += "\n" + live_conversation_prompt()
         prompt = conversation_prompt(
@@ -670,6 +673,8 @@ async def chat(req: Message, request: Request):
                 original_similarity = max_recent_response_similarity(text, turns)
                 repair_system = (
                     persona_prompt(active, directives)
+                    + "\n"
+                    + temporal_guidance()
                     + "\n"
                     + dashboard_scope_prompt(bool(snapshot.strip()))
                     + turn_contract_prompt(user, context_turns)
