@@ -123,6 +123,12 @@ def test_no_catchup_burst_or_replay_and_no_quiet_hour_scan():
     "url",
     [
         "https://api.x.com/2/users/me",
+        "https://api.x.com/1.1/statuses/home_timeline.json",
+        "https://api.x.com/1.1/flow/viewer.json/extra",
+        "http://api.x.com/1.1/flow/viewer.json",
+        "https://jf.x.com/2/tweets",
+        "https://jf.x.com.evil.test/onboarding/web/landing",
+        "https://api.x.com:8010/1.1/flow/viewer.json",
         "https://x.com/2/tweets",
         "http://x.com/home",
         "https://x.com.evil.test/",
@@ -140,6 +146,9 @@ def test_browser_never_routes_paid_api_or_arbitrary_hosts(url):
 def test_browser_can_render_normal_site_resources():
     assert xb.allowed_resource("https://x.com/home")
     assert xb.allowed_resource("https://abs.twimg.com/client-web/main.js")
+    assert xb.allowed_resource("https://jf.x.com/onboarding/web/landing")
+    assert xb.allowed_resource("https://api.x.com/1.1/flow/viewer.json")
+    assert xb.allowed_resource("https://api.x.com/1.1/graphql/viewer_context.json")
 
 
 def test_leads_filter_duplicates_stale_future_irrelevant_and_malformed_urls():

@@ -17,6 +17,13 @@ from services.credential_vault import get_credential, put_credential
 PROVIDER = "x_browser"
 HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 POST_PATH = re.compile(r"^/([A-Za-z0-9_]{1,15})/status/(\d+)$")
+# X's website now loads its login UI from jf.x.com and uses these two
+# website-session endpoints. These are browser-generated requests, never calls
+# made with Curie's paid developer API credentials.
+WEBSITE_SESSION_PATHS = {
+    "/1.1/flow/viewer.json",
+    "/1.1/graphql/viewer_context.json",
+}
 
 
 class BrowserAccessError(RuntimeError):
@@ -40,22 +47,27 @@ def session_metadata(owner):
 
 
 def allowed_resource(url):
-    """Only browser resources for X; never paid API hosts or external pages."""
+    """Allow X website resources and narrowly scoped website login requests."""
     try:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
-        return (
+        secure = (
             parsed.scheme == "https"
             and parsed.port in (None, 443)
             and not parsed.username
             and not parsed.password
-            and (
-                host in {"x.com", "www.x.com"}
-                or host == "twimg.com"
-                or host.endswith(".twimg.com")
-            )
-            and not parsed.path.startswith(("/2/", "/1.1/"))
         )
+        if not secure:
+            return False
+        if host == "api.x.com":
+            return parsed.path in WEBSITE_SESSION_PATHS
+        if host == "jf.x.com":
+            return parsed.path.startswith("/onboarding/")
+        return (
+            host in {"x.com", "www.x.com"}
+            or host == "twimg.com"
+            or host.endswith(".twimg.com")
+        ) and not parsed.path.startswith(("/2/", "/1.1/"))
     except ValueError:
         return False
 

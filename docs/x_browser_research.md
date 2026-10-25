@@ -4,6 +4,12 @@ This is a separate, opt-in research routine, not the API posting service. It has
 **no paid X API fallback**. X warns that scripted website automation may lead to
 account suspension. Enable only after the owner explicitly accepts that risk.
 
+The browser allows X's own website resources, including the `jf.x.com` onboarding
+UI and two specific website-session requests on `api.x.com`. Blocking every API
+hostname also blocks the normal login page. These browser-generated requests do
+not use Curie's developer API credentials. General API endpoints remain blocked;
+the collector never constructs or replays private API calls.
+
 ## Behaviour
 
 - Plans 2–6 stable, pseudo-random sessions per local calendar day, between 09:00
