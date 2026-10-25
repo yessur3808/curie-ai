@@ -47,6 +47,7 @@ class BudgetDecision:
 _DEFAULTS: dict[str, FeatureBudget] = {
     "conversation": FeatureBudget(250_000, 1_800, 240, 96),
     "autonomous_learning": FeatureBudget(32_000, 900, 24, 256, True),
+    "x_research": FeatureBudget(1_000, 300, 2, 96, True),
     "open_source_planning": FeatureBudget(8_000, 600, 8, 256, True),
     "open_source_coding": FeatureBudget(20_000, 1_200, 8, 512, True),
     "proactive_messaging": FeatureBudget(12_000, 300, 36, 96, True),
