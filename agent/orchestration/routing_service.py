@@ -82,6 +82,31 @@ class UnifiedRoutingService:
             )
             return ResponseCandidate(result, f"action_router:{request.action}", outcome)
         capability = str(decision.selected_capability)
+        if capability == "research":
+            from services.research_followup import (
+                acknowledgement,
+                queue_research,
+                should_defer,
+            )
+
+            if should_defer(text):
+                job = queue_research(
+                    internal_id,
+                    platform,
+                    text,
+                    profile,
+                    profile.get("_research_origin"),
+                )
+                if job:
+                    return ResponseCandidate(
+                        acknowledgement(job, profile),
+                        "research_followup",
+                        {
+                            "status": "queued",
+                            "verification_status": "not_run",
+                            "research_followup_id": job["job_id"],
+                        },
+                    )
         if capability.endswith("_skill"):
             return await self.specialist_router.handle_selected(
                 capability, text, internal_id, platform
@@ -106,4 +131,22 @@ class UnifiedRoutingService:
             {**profile, "_connector": platform},
             _outcome=outcome,
         )
+        if capability == "research" and (
+            outcome.get("status") == "failed" or "couldn't find any sources" in result
+        ):
+            from services.research_followup import acknowledgement, queue_research
+
+            job = queue_research(
+                internal_id, platform, text, profile, profile.get("_research_origin")
+            )
+            if job:
+                return ResponseCandidate(
+                    acknowledgement(job, profile),
+                    "research_followup",
+                    {
+                        "status": "queued",
+                        "verification_status": "not_run",
+                        "research_followup_id": job["job_id"],
+                    },
+                )
         return ResponseCandidate(result, f"action_router:{capability}", outcome)

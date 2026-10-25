@@ -42,8 +42,16 @@ async def test_prediction_is_permission_seeking_message():
     }
     sessions = MagicMock()
     sessions.get_history.return_value = [
-        {"role": "user", "content": "I study every evening"},
-        {"role": "user", "content": "My daily study routine matters"},
+        {
+            "role": "user",
+            "content": "I study every evening",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+        {
+            "role": "user",
+            "content": "My daily study routine matters",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
     ]
     with (
         patch(
@@ -342,7 +350,11 @@ async def test_companion_mode_generates_original_contextual_message():
     service = ProactiveMessagingService(SimpleNamespace(persona={}))
     sessions = MagicMock()
     sessions.get_history.return_value = [
-        {"role": "user", "content": "I have an idea for a local home dashboard"},
+        {
+            "role": "user",
+            "content": "I have an idea for a local home dashboard",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
         {"role": "assistant", "content": "What would you like it to show?"},
     ]
     with (
@@ -379,6 +391,7 @@ async def test_companion_mode_uses_grounded_work_followup_without_model():
         {
             "role": "user",
             "content": "I'm working now, and don't need lights on during the day",
+            "created_at": datetime.now(timezone.utc).isoformat(),
         },
         {"role": "assistant", "content": "Got it. They can stay off."},
     ]

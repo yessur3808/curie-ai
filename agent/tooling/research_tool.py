@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+import re
 
 from agent.tooling.contracts import ToolContext, ToolResult
 
@@ -19,6 +20,12 @@ class ResearchTool:
         query = str(params.get("query", "")).strip()
         if not query:
             raise ValueError("A research query is required")
+        if re.search(r"\b(?:news|headlines)\b", query, re.I):
+            from services.current_awareness import news_brief
+
+            brief = await news_brief(query, context.profile)
+            if brief:
+                return ToolResult(brief["answer"], brief, "live_news_headlines")
         result = await find_info(query, return_metadata=True)
         return ToolResult(
             text=result["answer"],

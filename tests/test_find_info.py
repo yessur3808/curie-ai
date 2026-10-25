@@ -271,8 +271,8 @@ async def test_cross_reference_llm_truncates_long_snippets():
 
 # Test DynamicScraper
 async def test_dynamic_scraper_find_sources():
-    """Test DynamicScraper.find_sources delegates to search_sources_llm"""
-    with patch("agent.skills.find_info.search_sources_llm") as mock_search:
+    """Source discovery must use actual web search, not model-generated URLs."""
+    with patch("agent.skills.find_info.search_sources_web") as mock_search:
         mock_search.return_value = ["https://example.com", "https://test.com"]
 
         scraper = DynamicScraper()
@@ -393,8 +393,9 @@ async def test_find_info_with_scraping_errors():
 
         result = await find_info("test query")
 
-        # Should still return a result even with scraping errors
-        assert result == "Answer despite errors"
+        # Missing evidence must not be replaced with a model-generated answer.
+        assert "couldn't find any sources" in result
+        mock_cross_ref.assert_not_called()
         # Error should be saved in pattern
         assert mock_adaptive.save_scraper_pattern.called
         call_args = mock_adaptive.save_scraper_pattern.call_args

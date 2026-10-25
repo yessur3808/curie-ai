@@ -514,8 +514,8 @@ async def fetch_google_news(query: str) -> list[dict[str, Any]]:
         title = _clean_text(node.findtext("title"), 240)
         publisher = _clean_text(source.text if source is not None else "", 100)
         publisher_url = source.attrib.get("url", "") if source is not None else ""
-        link = _clean_text(node.findtext("link"), 600)
-        if not title or not link:
+        link = _clean_text(node.findtext("link"), 4096)
+        if not title or not link or len(link) > 2048:
             continue
         items.append(
             {

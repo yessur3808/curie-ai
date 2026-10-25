@@ -121,3 +121,28 @@ async def test_read_only_browser_cannot_submit_post_forms():
             "https://example.com/account", method="POST", data={"admin": "true"}
         )
     assert "requires a separate approved capability" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_real_search_filters_private_urls_without_model_fallback():
+    from agent.skills.find_info import search_sources_web
+
+    search = Mock()
+    search.__enter__ = Mock(return_value=search)
+    search.__exit__ = Mock(return_value=False)
+    search.text.return_value = [
+        {"href": "https://example.org/report"},
+        {"href": "http://127.0.0.1"},
+    ]
+    with (
+        patch("duckduckgo_search.DDGS", return_value=search),
+        patch(
+            "agent.skills.find_info.is_safe_url",
+            side_effect=lambda url: "127.0.0.1" not in url,
+        ),
+        patch("agent.skills.find_info.manager.ask_llm") as ask,
+    ):
+        assert await search_sources_web("a public question") == [
+            "https://example.org/report"
+        ]
+    ask.assert_not_called()

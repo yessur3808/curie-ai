@@ -112,3 +112,29 @@ def test_sequential_executor_preserves_partial_results_and_skips_dependents():
     ]
     assert "completed ram_usage" in result.text
     assert "earlier step failed" in result.text
+
+
+def test_queued_work_is_not_completed_and_does_not_unlock_dependents():
+    analysis = _analysis("Check RAM usage and then check hardware specs")
+    plan = build_execution_plan(
+        analysis.state,
+        analysis.operational_decisions,
+        preserve_order=analysis.preserve_order,
+    )
+    called = []
+
+    async def execute(decision):
+        called.append(decision.selected_capability)
+        return ResponseCandidate(
+            "Saved the follow-up.",
+            "test:research",
+            {"status": "queued", "verification_status": "pending"},
+        )
+
+    result = asyncio.run(PlanExecutor().execute(plan, execute))
+    assert result.status == "queued"
+    assert called == ["ram_usage"]
+    assert [outcome.status for outcome in result.outcomes] == [
+        "queued",
+        "skipped_dependency",
+    ]

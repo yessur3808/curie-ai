@@ -61,6 +61,18 @@ def _build(workflow, user_profile: dict, user_text: str = "hello") -> str:
 
 
 class TestUserContextBlock:
+    def test_authoritative_clock_is_fresh_even_when_prompt_cache_hits(self):
+        from datetime import datetime, timezone
+
+        wf = _make_workflow()
+        first = datetime(2026, 10, 25, 2, 14, tzinfo=timezone.utc)
+        second = first.replace(minute=15)
+        with patch("utils.system_time.get_verified_now", side_effect=[first, second]):
+            _build(wf, {}, "today?")
+            prompt = _build(wf, {}, "today?")
+        assert "2026-10-25T02:15+00:00" in prompt
+        assert "Do not silently move a past trip into next year" in prompt
+
     def test_context_block_present_with_empty_profile(self):
         """Even a brand-new user with no profile sees the [USER CONTEXT] block."""
         wf = _make_workflow()

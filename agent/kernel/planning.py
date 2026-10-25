@@ -627,7 +627,7 @@ class PlanExecutor:
                                 step.capability,
                                 "skipped_dependency",
                                 "not_run",
-                                f"I didn't run {step.capability.replace('_', ' ')} because an earlier step failed.",
+                                f"I didn't run {step.capability.replace('_', ' ')} because an earlier step failed or is still pending.",
                                 "planner:dependency",
                             )
                         )
@@ -641,6 +641,7 @@ class PlanExecutor:
                         not in {
                             "waiting_approval",
                             "clarification",
+                            "queued",
                         }
                     ):
                         completed.add(step.id)
@@ -656,13 +657,13 @@ class PlanExecutor:
             item
             for item in outcomes
             if not item.failed
-            and item.status not in {"waiting_approval", "clarification"}
+            and item.status not in {"waiting_approval", "clarification", "queued"}
         ]
         waiting = next(
             (
                 item.status
                 for item in outcomes
-                if item.status in {"waiting_approval", "clarification"}
+                if item.status in {"waiting_approval", "clarification", "queued"}
             ),
             None,
         )

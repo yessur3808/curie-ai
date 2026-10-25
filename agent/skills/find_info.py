@@ -528,12 +528,29 @@ async def cross_reference_llm(query, snippets):
 
 class DynamicScraper:
     """
-    Minimal dynamic scraper that delegates source discovery to the LLM-based
-    `search_sources_llm` helper defined in this module.
+    Discover actual search results, never model-invented article URLs.
     """
 
     async def find_sources(self, query: str):
-        return await search_sources_llm(query)
+        return await search_sources_web(query)
+
+
+async def search_sources_web(query):
+    """Bounded public search with the same SSRF boundary as page fetching."""
+    from duckduckgo_search import DDGS
+
+    def search():
+        with DDGS(timeout=12) as client:
+            return list(client.text(str(query)[:1800], max_results=6))
+
+    try:
+        results = await asyncio.wait_for(asyncio.to_thread(search), timeout=16)
+    except Exception as exc:
+        logger.warning("Live search unavailable: %s", type(exc).__name__)
+        return []
+    urls = list(dict.fromkeys(str(item.get("href") or "") for item in results))[:6]
+    checks = await asyncio.gather(*[is_safe_url(url) for url in urls])
+    return [url for url, safe in zip(urls, checks) if safe][:MAX_SOURCES]
 
 
 class AdaptiveScraper:
@@ -623,14 +640,15 @@ async def find_info(query, *, return_metadata: bool = False):
     # 3. Cross-reference results and answer. Preserve the actual fetched URLs
     # so current-information answers are auditable instead of citation-shaped
     # prose generated solely by the model.
-    answer = await cross_reference_llm(query, results)
     successful_urls = [
         url
         for url, result in zip(urls, results)
         if isinstance(result, str) and "Error scraping" not in result
     ]
     if not successful_urls:
-        return {"answer": answer, "sources": []} if return_metadata else answer
+        message = "I couldn't find any sources I could read and verify for that."
+        return {"answer": message, "sources": []} if return_metadata else message
+    answer = await cross_reference_llm(query, results)
     sources = "\n".join(f"- {url}" for url in successful_urls)
     if not return_metadata:
         return f"{answer}\n\nSources:\n{sources}"
