@@ -19,6 +19,14 @@ def isolated_runtime(monkeypatch, tmp_path):
     from memory.session_store import reset_session_manager
     from utils import conversions, weather
     from agent.observability import reset_telemetry
+    from services.action_previews import preview_store
+    from services.contribution_learning import contribution_learning
+
+    # Preview and contribution tests must never touch the operator's live state.
+    monkeypatch.setattr(preview_store, "root", tmp_path / "action-previews")
+    monkeypatch.setattr(
+        contribution_learning, "root", tmp_path / "contribution-learning"
+    )
 
     monkeypatch.delenv("POSTGRES_HOST", raising=False)
     monkeypatch.delenv("MONGODB_URI", raising=False)
