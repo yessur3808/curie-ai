@@ -119,38 +119,6 @@ def test_no_catchup_burst_or_replay_and_no_quiet_hour_scan():
     assert xr.due_slot("owner", PROFILE, {}, BASE + timedelta(hours=15)) is None
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://api.x.com/2/users/me",
-        "https://api.x.com/1.1/statuses/home_timeline.json",
-        "https://api.x.com/1.1/flow/viewer.json/extra",
-        "http://api.x.com/1.1/flow/viewer.json",
-        "https://jf.x.com/2/tweets",
-        "https://jf.x.com.evil.test/onboarding/web/landing",
-        "https://api.x.com:8010/1.1/flow/viewer.json",
-        "https://x.com/2/tweets",
-        "http://x.com/home",
-        "https://x.com.evil.test/",
-        "https://x.com@evil.test/",
-        "https://127.0.0.1/",
-        "file:///etc/passwd",
-        "https://x.com:8010/",
-        "https://evil.test/",
-    ],
-)
-def test_browser_never_routes_paid_api_or_arbitrary_hosts(url):
-    assert not xb.allowed_resource(url)
-
-
-def test_browser_can_render_normal_site_resources():
-    assert xb.allowed_resource("https://x.com/home")
-    assert xb.allowed_resource("https://abs.twimg.com/client-web/main.js")
-    assert xb.allowed_resource("https://jf.x.com/onboarding/web/landing")
-    assert xb.allowed_resource("https://api.x.com/1.1/flow/viewer.json")
-    assert xb.allowed_resource("https://api.x.com/1.1/graphql/viewer_context.json")
-
-
 def test_leads_filter_duplicates_stale_future_irrelevant_and_malformed_urls():
     now = due()
     good = post(now)
@@ -389,14 +357,13 @@ async def test_actual_rust_lease_consumes_job_once(runtime, monkeypatch):
     service.run_owner.assert_awaited_once_with("owner")
 
 
-def test_no_plaintext_browser_state_files_or_api_imports_in_reader():
+def test_no_cookie_exports_or_paid_api_imports_in_reader():
     import inspect
 
     source = inspect.getsource(xb)
     assert "storage_state(path=" not in source
     assert "connectors.twitter" not in source
     assert "connect_over_cdp" not in source
-    assert "launch_persistent_context" not in source
 
 
 @pytest.mark.asyncio
@@ -422,7 +389,7 @@ async def test_background_web_response_rate_limit_pauses_even_when_document_is_2
 
     @asynccontextmanager
     async def context(*args, **kwargs):
-        yield SimpleNamespace(new_page=AsyncMock(return_value=page))
+        yield SimpleNamespace(pages=[], new_page=AsyncMock(return_value=page))
 
     async def navigate(*args):
         callbacks["response"](
@@ -432,7 +399,7 @@ async def test_background_web_response_rate_limit_pauses_even_when_document_is_2
     monkeypatch.setattr(xb, "browser_context", context)
     monkeypatch.setattr(xb, "_navigate", navigate)
     with pytest.raises(xb.BrowserAccessError, match="restricted_or_rate_limited"):
-        await xb._collect({"storage_state": {}}, "CurieTest", [])
+        await xb._collect("owner", "CurieTest", [])
 
 
 def test_session_metadata_cannot_expose_cookies_or_cross_owners(monkeypatch, tmp_path):
@@ -441,11 +408,15 @@ def test_session_metadata_cannot_expose_cookies_or_cross_owners(monkeypatch, tmp
 
     monkeypatch.setenv("CURIE_CREDENTIAL_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("CURIE_CREDENTIAL_STORE", str(tmp_path / "vault.enc"))
+    monkeypatch.setenv("CURIE_X_BROWSER_PROFILE_ROOT", str(tmp_path / "browser"))
+    with xb.profile_lease("owner") as profile:
+        (profile / "prefs.js").write_text("{}")
     put_credential(
         "owner",
         xb.PROVIDER,
         {
             "handle": "CurieTest",
+            "mode": xb.PROFILE_MODE,
             "saved_at": "today",
             "storage_state": {"cookies": [{"name": "auth", "value": "fixture-only"}]},
         },

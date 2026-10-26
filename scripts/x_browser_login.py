@@ -12,9 +12,14 @@ def main():
     parser.add_argument("--handle", required=True)
     args = parser.parse_args()
     load_dotenv()
-    from connectors.x_browser import enroll_session
+    from connectors.x_browser import BrowserAccessError, enroll_session
 
-    asyncio.run(enroll_session(args.owner_id, args.handle.removeprefix("@")))
+    try:
+        asyncio.run(enroll_session(args.owner_id, args.handle.removeprefix("@")))
+    except KeyboardInterrupt:
+        print("\nLogin cancelled. Curie's browser profile is retained.")
+    except BrowserAccessError as exc:
+        raise SystemExit(f"Login not enrolled: {exc.code}") from None
 
 
 if __name__ == "__main__":
