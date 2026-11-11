@@ -209,6 +209,32 @@ def digest(findings):
 
 
 def research_context(owner, query):
+    from services.ai_scout import latest as ai_latest
+
+    if re.search(
+        r"\b(?:ai|llm|agents?|models?|harnesses?|codex)\b", query, re.I
+    ) and re.search(r"latest|news|updates|found|discover", query, re.I):
+        findings = ai_latest(owner)
+        if findings:
+            return {
+                "untrusted": True,
+                "evidence_level": "Source announcements and explicitly unverified social leads",
+                "findings": [
+                    {
+                        key: row[key]
+                        for key in (
+                            "topic",
+                            "title",
+                            "url",
+                            "evidence",
+                            "published_at",
+                            "observed_at",
+                            "expires_at",
+                        )
+                    }
+                    for row in findings[:3]
+                ],
+            }
     if not re.search(
         r"\b(?:news|latest|updates|twitter|discoveries)\b|what.*found", query, re.I
     ):
@@ -232,6 +258,11 @@ def research_context(owner, query):
 
 
 def controls(owner, text):
+    from services.ai_scout import controls as ai_controls
+
+    ai_response = ai_controls(owner, text)
+    if ai_response is not None:
+        return ai_response
     match = re.fullmatch(
         r"/?xresearch(?:\s+(status|latest|pause|resume))?", text.strip(), re.I
     )
@@ -300,7 +331,7 @@ class XResearchWorker:
         }
         for owner in owners - {""}:
             profile = UserManager.get_user_profile(owner) or {}
-            if permitted(profile):
+            if permitted(profile) or profile.get("ai_scout_enabled"):
                 task_engine.upsert_scheduled(
                     {
                         "id": f"x-research:{owner}",
@@ -331,6 +362,11 @@ class XResearchWorker:
     async def run_owner(self, owner, now=None):
         now = now or datetime.now(timezone.utc)
         profile = UserManager.get_user_profile(owner) or {}
+        if profile.get("ai_scout_enabled"):
+            from services.ai_scout import AIScoutWorker
+
+            await AIScoutWorker(self.send).run_owner(owner, now)
+            return
         if not permitted(profile):
             return
         state = state_for(owner)
