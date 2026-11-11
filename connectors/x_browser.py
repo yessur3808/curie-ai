@@ -228,8 +228,13 @@ async def _collect(owner, expected, queries):
             for q in queries[:3]
         ]
         for url in urls:
-            await _navigate(page, url, expected)
-            check_restrictions()
+            try:
+                await _navigate(page, url, expected)
+            finally:
+                # Chrome may raise before goto returns (for example when a
+                # blocked document is handled as a download). Preserve the
+                # observed 403/429 so the scheduler pauses instead of retrying.
+                check_restrictions()
             articles = page.locator('article[data-testid="tweet"]')
             try:
                 await articles.first.wait_for(timeout=10000)

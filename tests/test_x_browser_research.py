@@ -377,8 +377,12 @@ async def test_global_snooze_and_disable_are_respected(runtime):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("navigation_error", [False, True])
+@pytest.mark.parametrize("status", [403, 429])
 async def test_background_web_response_rate_limit_pauses_even_when_document_is_200(
     monkeypatch,
+    navigation_error,
+    status,
 ):
     from contextlib import asynccontextmanager
 
@@ -393,8 +397,10 @@ async def test_background_web_response_rate_limit_pauses_even_when_document_is_2
 
     async def navigate(*args):
         callbacks["response"](
-            SimpleNamespace(status=429, url="https://x.com/i/api/graphql/example")
+            SimpleNamespace(status=status, url="https://x.com/i/api/graphql/example")
         )
+        if navigation_error:
+            raise RuntimeError("Navigation could not display the blocked document")
 
     monkeypatch.setattr(xb, "browser_context", context)
     monkeypatch.setattr(xb, "_navigate", navigate)
