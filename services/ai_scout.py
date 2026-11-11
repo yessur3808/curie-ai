@@ -442,6 +442,25 @@ def controls(owner, text):
     return f"AI scout: {'enabled' if profile.get('ai_scout_enabled') else 'paused'}\n• Checks: {cadence} ({profile.get('timezone', 'UTC')})\n• Last run: {state.get('status', 'not_run')}\n• X: {state.get('coverage', {}).get('x', 'not_verified')}\n• Letta: {state.get('reviewer', 'not_run')}\n• No paid X API usage"
 
 
+def recent_diagnostics(snapshot, now):
+    """Historical slow turns must not keep background work paused forever."""
+    records = [
+        item
+        for item in snapshot.get("records", [])
+        if (stamp := parse_time(item.get("recorded_at")))
+        and now - timedelta(minutes=15) <= stamp <= now
+    ]
+    latencies = sorted(float(item.get("latency_ms") or 0) for item in records)
+    return {
+        "last": records[-1] if records else {},
+        "p95_latency_ms": (
+            latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
+            if latencies
+            else 0
+        ),
+    }
+
+
 class AIScoutWorker:
     def __init__(
         self, send, *, fetcher=None, collector=None, metadata=None, reviewer=None
@@ -474,10 +493,16 @@ class AIScoutWorker:
             "x_research",
             owner,
             128,
-            diagnostics=diagnostic_monitor.snapshot(owner_id=owner, limit=50),
+            diagnostics=recent_diagnostics(
+                diagnostic_monitor.snapshot(owner_id=owner, limit=50), now
+            ),
         )
-        if not decision.allowed:
+        if not decision.allowed and decision.reason not in {
+            "runtime pressure is severe",
+            "daily token budget reached",
+        }:
             return
+        heavy_allowed = decision.allowed and decision.max_tokens >= 128
         index, slot = due
         key = "ai-scout:" + slot.isoformat()
         if reserve_mutation_attempt(owner, key, STATE, "read-only"):
@@ -498,7 +523,7 @@ class AIScoutWorker:
             blocked = state.get("x_blocked_session") == metadata.get(
                 "saved_at"
             ) and bool(state.get("x_blocked_session"))
-            if metadata.get("ready") and allowed and not blocked:
+            if metadata.get("ready") and allowed and not blocked and heavy_allowed:
                 queries = [
                     list(TOPICS.values())[(index * 3 + n) % len(TOPICS)]
                     + f" since:{(now - timedelta(days=1)).date()}"
@@ -518,6 +543,8 @@ class AIScoutWorker:
                     coverage["x"] = "unavailable"
             elif blocked:
                 coverage["x"] = "paused_after_restriction"
+            elif metadata.get("ready") and allowed and not heavy_allowed:
+                coverage["x"] = "deferred_resource_pressure"
             items, errors = await asyncio.wait_for(
                 self.fetcher(now, state.setdefault("feed_cache", {})), timeout=45
             )
@@ -529,11 +556,13 @@ class AIScoutWorker:
             )
             # X leads remain explicitly unverified in all storage and output.
             # Agent suggestions cannot invent URLs, facts, sources, or access claims.
-            selected, reviewer = (
-                await self.reviewer(candidates, preferences(owner))
-                if candidates
-                else ([], "not_needed")
-            )
+            if candidates and heavy_allowed:
+                selected, reviewer = await self.reviewer(candidates, preferences(owner))
+            elif candidates:
+                selected = [item["id"] for item in candidates[:3]]
+                reviewer = "deferred_resource_budget_deterministic_ranking"
+            else:
+                selected, reviewer = [], "not_needed"
             if reviewer.startswith("letta_") and candidates:
                 reserved_output_tokens = 128
             state["model_output_tokens_reserved"] = reserved_output_tokens

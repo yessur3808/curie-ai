@@ -19,7 +19,11 @@ ambiguous sends are not repeated.
 There is one browser collector and one shared history for both agents. No new
 Letta inference runs occur without new candidates. At most three updates are sent
 per digest. Letta reviews have a small context/output budget and a deadline; invalid
-IDs or failures fall back to deterministic ranking. Its private local model adapter
+IDs or failures fall back to deterministic ranking. Recent resource pressure defers
+browser/model work while lightweight public feeds continue. Pressure uses only the
+last 15 minutes of diagnostics, so an old slow turn cannot pause research forever.
+The governor reserves the 128-token output ceiling per model attempt; the private
+gateway does not yet expose measured input-token usage. Its private local model adapter
 uses Curie's existing Unix-socket model worker and fast model, not a second model
 cache. The adapter binds only to 127.0.0.1, requires a generated private bearer key,
 and rejects tools, other model names and oversized requests.

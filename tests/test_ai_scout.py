@@ -349,3 +349,35 @@ def test_rank_prefers_substantive_stable_release_over_alpha_churn():
     )
     alpha = release("alpha.1", age=0)
     assert scout.rank_candidates([alpha, stable], {}, {}, NOW)[0]["id"] == "stable"
+
+
+def test_old_latency_does_not_permanently_pause_scout():
+    old = {"recorded_at": (NOW - timedelta(hours=2)).isoformat(), "latency_ms": 60000}
+    fresh = {"recorded_at": NOW.isoformat(), "latency_ms": 1000}
+    assert (
+        scout.recent_diagnostics({"records": [old, fresh]}, NOW)["p95_latency_ms"]
+        == 1000
+    )
+    assert scout.recent_diagnostics({"records": [old]}, NOW)["p95_latency_ms"] == 0
+
+
+@pytest.mark.asyncio
+async def test_current_pressure_keeps_public_coverage_without_browser_or_model(
+    runtime, monkeypatch
+):
+    monkeypatch.setattr(
+        "services.self_diagnostics.diagnostic_monitor.snapshot",
+        lambda **kw: {
+            "records": [{"recorded_at": NOW.isoformat(), "latency_ms": 60000}]
+        },
+    )
+    service = worker(metadata=lambda _: {"ready": True, "saved_at": "one"})
+    await service.run_owner("owner", NOW)
+    service.reviewer.assert_not_awaited()
+    service.collector.assert_not_awaited()
+    service.fetcher.assert_awaited_once()
+    service.send.assert_awaited_once()
+    assert (
+        scout.state_for("owner")["reviewer"]
+        == "deferred_resource_budget_deterministic_ranking"
+    )
