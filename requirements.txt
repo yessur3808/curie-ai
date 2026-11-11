@@ -6,7 +6,7 @@ cryptography>=44,<51
 llama-cpp-python==0.3.34
 
 psycopg2-binary==2.9.10
-pymongo==4.18.2
+pymongo==4.18.3
 
 GitPython==3.2.1
 PyGithub==2.6.1
