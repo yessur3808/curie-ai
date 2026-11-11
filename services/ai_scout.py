@@ -166,13 +166,12 @@ def preferences(owner):
 
 
 def slots(profile, now):
-    day = now.astimezone(_timezone(profile)).date()
-    start = datetime.combine(
-        day, time(11 if day.weekday() >= 5 else 9), tzinfo=_timezone(profile)
-    )
+    zone = _timezone(profile)
+    day = now.astimezone(zone).date()
     if profile.get("ai_scout_cadence") == "daily":
-        return [datetime.combine(day, time(19, 30), tzinfo=_timezone(profile))]
-    return [start + timedelta(minutes=210 * i) for i in range(4)]
+        return [datetime.combine(day, time(19, 30), tzinfo=zone)]
+    hours = (11, 15, 19, 23) if day.weekday() >= 5 else (8, 13, 16, 22)
+    return [datetime.combine(day, time(hour), tzinfo=zone) for hour in hours]
 
 
 def due_slot(profile, state, now):
@@ -437,7 +436,7 @@ def controls(owner, text):
     cadence = (
         "daily at 19:30"
         if profile.get("ai_scout_cadence") == "daily"
-        else "weekdays 09:00, 12:30, 16:00, 19:30; weekends 11:00, 14:30, 18:00, 21:30"
+        else "weekdays 08:00, 13:00, 16:00, 22:00; weekends 11:00, 15:00, 19:00, 23:00"
     )
     return f"AI scout: {'enabled' if profile.get('ai_scout_enabled') else 'paused'}\n• Checks: {cadence} ({profile.get('timezone', 'UTC')})\n• Last run: {state.get('status', 'not_run')}\n• X: {state.get('coverage', {}).get('x', 'not_verified')}\n• Letta: {state.get('reviewer', 'not_run')}\n• No paid X API usage"
 
@@ -463,11 +462,19 @@ def recent_diagnostics(snapshot, now):
 
 class AIScoutWorker:
     def __init__(
-        self, send, *, fetcher=None, collector=None, metadata=None, reviewer=None
+        self,
+        send,
+        *,
+        fetcher=None,
+        collector=None,
+        metadata=None,
+        reviewer=None,
+        clock=None,
     ):
         from connectors.x_browser import collect_posts, session_metadata
         from services.ai_scout_reviewer import review
 
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.send, self.fetcher = send, fetcher or fetch_releases
         self.collector, self.metadata = (
             collector or collect_posts,
@@ -481,7 +488,8 @@ class AIScoutWorker:
         from connectors.x_browser import BrowserAccessError
         import time as clock
 
-        now = now or datetime.now(timezone.utc)
+        use_live_clock = now is None
+        now = now or self.clock()
         profile = UserManager.get_user_profile(owner) or {}
         if not profile.get("ai_scout_enabled"):
             return
@@ -619,7 +627,9 @@ class AIScoutWorker:
                 to_deliver = [
                     item for item in latest(owner, now) if item["url"] not in attempted
                 ][:3]
-            await self.deliver(owner, to_deliver, state, key, now)
+            # Research may cross midnight; enforce quiet hours at delivery time.
+            delivery_now = self.clock() if use_live_clock else now
+            await self.deliver(owner, to_deliver, state, key, delivery_now)
         except Exception as exc:
             state.update(status="failed", last_error=type(exc).__name__)
         finally:

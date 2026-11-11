@@ -10,11 +10,11 @@ research packet and reading history rather than duplicate browser sessions.
 ## Research and evidence
 
 Cover models/LLMs, practical tools, agents, agent harnesses and context systems,
-local inference/deployment, and research/evaluation. Check approximately every
-3½ hours: weekdays 09:00, 12:30, 16:00, 19:30; weekends 11:00, 14:30, 18:00,
-21:30 in the owner's timezone, or daily at 19:30 when selected. Stay quiet after
+local inference/deployment, and research/evaluation. Check on the owner's schedule:
+weekdays 08:00, 13:00, 16:00, 22:00; weekends 11:00, 15:00, 19:00, 23:00 in the owner's timezone, or daily at 19:30 when selected. Stay quiet after
 midnight and before 08:00 on weekdays / 11:00 on weekends. X reads retain the approved 2–6/day ceiling. Do not catch up missed
-sessions with a burst or reload a model when no new material exists.
+sessions with a burst or reload a model when no new material exists. Enforce quiet
+hours again when sending; a session that crosses midnight must wait.
 
 Use only the authorized Curie server account through the shared collector. The
 browser authentication gate is separate from API posting credentials. If access

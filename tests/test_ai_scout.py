@@ -8,7 +8,7 @@ import pytest
 from services import ai_scout as scout
 from services.ai_scout_reviewer import parse_selection
 
-NOW = datetime(2026, 11, 12, 1, 10, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 12, 0, 10, tzinfo=timezone.utc)
 PROFILE = {
     "timezone": "Asia/Hong_Kong",
     "ai_scout_enabled": True,
@@ -99,11 +99,15 @@ def worker(items=None, **kw):
 
 def test_cadence_local_clock_quiet_hours_and_no_catchup():
     times = scout.slots(PROFILE, NOW)
-    assert [t.strftime("%H:%M") for t in times] == ["09:00", "12:30", "16:00", "19:30"]
-    assert all((b - a).total_seconds() == 12600 for a, b in zip(times, times[1:]))
+    assert [t.strftime("%H:%M") for t in times] == ["08:00", "13:00", "16:00", "22:00"]
+    assert [(b - a).total_seconds() for a, b in zip(times, times[1:])] == [
+        18000,
+        10800,
+        21600,
+    ]
     assert scout.due_slot(PROFILE, {}, NOW)
     assert not scout.due_slot(PROFILE, {}, NOW + timedelta(hours=1))
-    assert not scout.due_slot(PROFILE, {}, NOW + timedelta(hours=14))
+    assert not scout.due_slot(PROFILE, {}, NOW + timedelta(hours=16))
     assert len(scout.slots({**PROFILE, "ai_scout_cadence": "daily"}, NOW)) == 1
 
 
@@ -223,7 +227,7 @@ async def test_repeated_slot_and_evening_recap_do_not_repeat_deliveries(runtime)
     service = worker()
     await service.run_owner("owner", NOW)
     await service.run_owner("owner", NOW)
-    await service.run_owner("owner", NOW + timedelta(hours=10, minutes=30))
+    await service.run_owner("owner", NOW + timedelta(hours=14))
     assert service.send.await_count == 1
     assert service.reviewer.await_count == 1
 
@@ -239,7 +243,7 @@ async def test_403_pauses_only_browser_reads_until_new_session(runtime):
         metadata=lambda _: {"ready": True, "saved_at": "one"},
     )
     await service.run_owner("owner", NOW)
-    await service.run_owner("owner", NOW + timedelta(minutes=210))
+    await service.run_owner("owner", NOW + timedelta(hours=5))
     assert service.collector.await_count == 1
     assert service.fetcher.await_count == 2
     assert scout.state_for("owner")["coverage"]["x"] == "paused_after_restriction"
@@ -257,7 +261,7 @@ async def test_no_new_items_skips_model_and_message(runtime):
 async def test_ambiguous_delivery_is_not_retried_in_recap(runtime):
     service = worker(send=AsyncMock(return_value=False))
     await service.run_owner("owner", NOW)
-    await service.run_owner("owner", NOW + timedelta(hours=10, minutes=30))
+    await service.run_owner("owner", NOW + timedelta(hours=14))
     assert service.send.await_count == 1
     assert scout.state_for("owner")["delivery"] == "uncertain"
 
@@ -270,7 +274,7 @@ async def test_pause_and_snooze_block_delivery(runtime):
     service.send.assert_not_awaited()
     assert scout.state_for("owner")["delivery"].startswith("suppressed:")
     scout.controls("owner", "/aiscout pause")
-    await service.run_owner("owner", NOW + timedelta(minutes=210))
+    await service.run_owner("owner", NOW + timedelta(hours=5))
     assert service.fetcher.await_count == 1
 
 
@@ -285,7 +289,7 @@ async def test_frequent_updates_do_not_inherit_unrelated_topic_cooldown(runtime)
         )
     )
     await service.run_owner("owner", NOW)
-    await service.run_owner("owner", NOW + timedelta(minutes=210))
+    await service.run_owner("owner", NOW + timedelta(hours=5))
     assert service.send.await_count == 2
     assert runtime["owner"]["proactive_topic_cooldown_hours"] == 72
 
@@ -302,9 +306,9 @@ def test_weekend_schedule_starts_at_eleven_and_daily_stays_at_nineteen_thirty():
     saturday = datetime(2026, 11, 14, 2, 59, tzinfo=timezone.utc)
     assert [t.strftime("%H:%M") for t in scout.slots(PROFILE, saturday)] == [
         "11:00",
-        "14:30",
-        "18:00",
-        "21:30",
+        "15:00",
+        "19:00",
+        "23:00",
     ]
     assert not scout.due_slot(PROFILE, {}, saturday)
     assert scout.due_slot(PROFILE, {}, saturday + timedelta(minutes=1))
@@ -399,3 +403,17 @@ def test_diagnostic_runner_uses_instance_database(tmp_path, monkeypatch):
     monkeypatch.setenv("CURIE_INSTANCE", "../elsewhere")
     with pytest.raises(ValueError):
         load_instance_environment(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_research_crossing_midnight_cannot_send_after_quiet_hours_start(runtime):
+    start = datetime(2026, 11, 14, 15, 59, tzinfo=timezone.utc)
+    completed = start + timedelta(minutes=2)
+    ticks = iter([start, completed])
+    service = worker(
+        items=[release(published_at=start.isoformat())], clock=lambda: next(ticks)
+    )
+    await service.run_owner("owner")
+    service.fetcher.assert_awaited_once()
+    service.send.assert_not_awaited()
+    assert scout.state_for("owner")["delivery"] == "suppressed:quiet_hours"
