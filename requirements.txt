@@ -51,3 +51,6 @@ psutil>=5.9.0
 rich>=13.0.0
 imageio-ffmpeg==0.6.0
 piper-tts==1.7.0
+
+# Bounded public AI-news XML feeds.
+defusedxml==0.7.1
