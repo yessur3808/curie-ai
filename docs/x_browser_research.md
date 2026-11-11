@@ -4,10 +4,12 @@ This is a separate, opt-in research routine, not the API posting service. It has
 **no paid X API fallback**. X warns that scripted website automation may lead to
 account suspension. Enable only after the owner explicitly accepts that risk.
 
-The server uses its **installed Firefox**, through Selenium/geckodriver, with a
-persistent profile dedicated to each owner. Login and scheduled research reuse
-that same profile. Firefox loads ordinary website resources, cookies, local
-storage, IndexedDB and service workers. There is no endpoint allowlist or request
+The server uses **installed Chrome** through Playwright, or **installed Firefox**
+through Selenium/geckodriver, with a persistent profile dedicated to each owner.
+Set `CURIE_X_BROWSER_ENGINE=chrome` to use Chrome; Firefox remains the default for
+existing installations. Login and scheduled research reuse the same profile. Both
+browsers load ordinary website resources, cookies, local storage, IndexedDB and
+service workers. There is no endpoint allowlist or request
 rewriting: X's own internal requests are necessary for its website and do not use
 Curie's paid developer API credentials. The collector reads visible DOM content;
 it never constructs or replays private API calls.
@@ -57,7 +59,9 @@ cookies are never imported. Enrol a fresh browser session for Curie’s account:
 
    ```sh
    .venv/bin/python -m pip install -r requirements-browser.txt
-   # Install Firefox and geckodriver using the server OS package manager.
+   # Install Google Chrome from its official vendor package and set
+   # CURIE_X_BROWSER_ENGINE=chrome in the private server environment.
+   # Alternatively install Firefox and geckodriver using the OS package manager.
    # Ubuntu Firefox Snap already includes /snap/bin/geckodriver.
    ```
 
@@ -71,7 +75,7 @@ cookies are never imported. Enrol a fresh browser session for Curie’s account:
 3. Sign in manually in the new browser and complete any verification yourself.
    Return to the terminal and press Enter only once Curie’s home feed is visible.
    A mismatched account is rejected. No password is read by the script.
-4. Firefox retains its session in its private profile directory. These are normal
+4. The selected browser retains its session in its private profile directory. These are normal
    browser files, **not encrypted by Curie's vault**. The directory and its root
    are restricted to the service user (0700); the adjacent lock is 0600. Keep
    server storage encrypted as appropriate and exclude profiles from backups
@@ -85,13 +89,20 @@ cookies are never imported. Enrol a fresh browser session for Curie’s account:
    startup registers the browser worker with the Rust task engine. If no browser
    session exists, it waits with `server_browser_login_required`, without API calls.
 
-The default profile root is `.curie-browser/x` (gitignored), or
+Chrome uses `~/.local/share/curie/x-chrome`. Firefox uses
+`.curie-browser/x` (gitignored), or
 `~/snap/firefox/common/curie-x-profiles` when Snap geckodriver is installed. The
 latter is accessible inside Firefox's Snap confinement. Set
 `CURIE_X_BROWSER_PROFILE_ROOT` to override it; use the same absolute root and
 service user for login and background research. Optional `CURIE_X_FIREFOX_BINARY`
 and `CURIE_X_GECKODRIVER` select installed binaries. No driver is downloaded at
 runtime. Keep Snap profiles outside `/tmp` and hidden home directories.
+
+If you signed in manually using the same dedicated profile, close that browser
+normally and run `scripts.x_browser_login` with `--verify-existing`. This reopens
+the profile, verifies the actual account on X, and only then records enrollment.
+Chrome and Firefox metadata/profile formats are not interchangeable. Switching
+engines requires separate enrollment; no cookies are imported or exported.
 
 An OS file lock serializes login and research per owner. Curie never deletes
 browser locks or kills another browser to take over a profile. Startup failures
@@ -126,12 +137,13 @@ duplicate stories, source quality/freshness, owner isolation, pause/restart path
 wrong accounts, metadata privacy, digest idempotency and
 the native scheduler lease (when installed). Existing awareness and research tests
 must also pass. `tests/test_x_browser_profile.py` covers profile locking,
-permissions, isolation, cancellation and enrollment. Its optional real-Firefox
-test checks cookie/local-storage/service-worker persistence across restarts,
+permissions, isolation, cancellation and enrollment. Its optional installed-browser
+tests check cookie/local-storage/service-worker persistence across restarts,
 DOM extraction and response-status observation, using only a local fixture:
 
 ```sh
-CURIE_RUN_BROWSER_TESTS=1 .venv/bin/python -m pytest -q -m integration tests/test_x_browser_profile.py
+CURIE_RUN_BROWSER_TESTS=1 .venv/bin/python -m pytest -q -m integration tests/test_x_browser_profile.py -k chrome
+# Use -k firefox for the installed Firefox backend.
 ```
 
 For Snap, pass `--basetemp` pointing to a fresh directory under
