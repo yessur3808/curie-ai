@@ -381,3 +381,21 @@ async def test_current_pressure_keeps_public_coverage_without_browser_or_model(
         scout.state_for("owner")["reviewer"]
         == "deferred_resource_budget_deterministic_ranking"
     )
+
+
+def test_diagnostic_runner_uses_instance_database(tmp_path, monkeypatch):
+    from scripts.ai_scout_run import load_instance_environment
+
+    monkeypatch.setenv("CURIE_INSTANCE", "curie")
+    monkeypatch.setenv("CURIE_LOCAL_MEMORY_DB", "base.sqlite")
+    (tmp_path / "instances").mkdir()
+    (tmp_path / "instances/curie.env").write_text(
+        "CURIE_LOCAL_MEMORY_DB=instance.sqlite\n"
+    )
+    load_instance_environment(tmp_path)
+    import os
+
+    assert os.environ["CURIE_LOCAL_MEMORY_DB"] == "instance.sqlite"
+    monkeypatch.setenv("CURIE_INSTANCE", "../elsewhere")
+    with pytest.raises(ValueError):
+        load_instance_environment(tmp_path)

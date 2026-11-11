@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import json
 import os
+from pathlib import Path
+import re
 
 from dotenv import load_dotenv
 
@@ -48,11 +50,20 @@ async def run(owner):
     )
 
 
+def load_instance_environment(root=None):
+    root = Path(root) if root else Path(__file__).resolve().parent.parent
+    load_dotenv(root / ".env")
+    instance = os.getenv("CURIE_INSTANCE", "curie")
+    if not re.fullmatch(r"[a-z0-9_-]+", instance):
+        raise ValueError("Invalid Curie instance name")
+    load_dotenv(root / "instances" / f"{instance}.env", override=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--owner", required=True)
     args = parser.parse_args()
-    load_dotenv()
+    load_instance_environment()
     asyncio.run(run(args.owner))
 
 

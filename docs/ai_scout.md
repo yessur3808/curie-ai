@@ -61,6 +61,9 @@ profiles, credentials, synthetic evaluation packets or generated model keys.
 
 `scripts.ai_scout_run --owner OWNER` checks an actual due slot using the same durable
 receipts; it is a diagnostic/one-shot entry point, not a second required schedule.
+It loads the installation environment followed by `instances/INSTANCE.env`, just
+like PM2. Profile changes and scheduler checks must use that same live instance
+database, not a leftover installation-wide SQLite file.
 
 ## Validation
 
