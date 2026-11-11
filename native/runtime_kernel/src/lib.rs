@@ -200,7 +200,6 @@ impl PersistenceStore {
             }
             let names: Vec<String> = statement
                 .column_names()
-                .iter()
                 .map(|item| (*item).to_owned())
                 .collect();
             let mut query = statement
@@ -284,7 +283,7 @@ impl PersistenceStore {
                 )
                 .map_err(sqlite_error)?;
             let mapped = statement
-                .query_map(params![stream, after_sequence, limit.clamp(1, 10_000)], |row| {
+                .query_map(params![stream, after_sequence, limit.clamp(1, 10_000) as i64], |row| {
                     Ok(json!({
                         "sequence": row.get::<_, i64>(0)?,
                         "event_type": row.get::<_, String>(1)?,

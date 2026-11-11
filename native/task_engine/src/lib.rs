@@ -1247,7 +1247,7 @@ fn claim_scheduled_work(
     let ids = {
         let mut statement = tx.prepare(&query).map_err(sqlite_error)?;
         let mapped = statement
-            .query_map(params![now_ms, kind, limit.clamp(1, 1_000)], |row| {
+            .query_map(params![now_ms, kind, limit.clamp(1, 1_000) as i64], |row| {
                 row.get::<_, String>(0)
             })
             .map_err(sqlite_error)?;

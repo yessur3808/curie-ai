@@ -7,10 +7,11 @@ model-weight fine-tune. See `skills/ai-twitter-scout/SKILL.md` and its evaluatio
 
 ## Cadence and efficiency
 
-The existing Rust task scheduler checks due work. Frequent mode uses 09:00, 12:30,
-16:00 and 19:30 on weekdays; weekends use 11:00, 14:30, 18:00 and 21:30.
+The existing Rust task scheduler checks due work. Frequent mode uses 08:00, 13:00,
+16:00 and 22:00 on weekdays; weekends use 11:00, 15:00, 19:00 and 23:00.
 All times follow the owner profile timezone. Daily mode uses 19:30 every day.
-Scout updates stay quiet from midnight until 08:00 on weekdays and 11:00 on weekends. Missing a slot
+Scout updates stay quiet from midnight until 08:00 on weekdays and 11:00 on weekends.
+Quiet hours are checked at delivery time, including research that crosses midnight. Missing a slot
 by over an hour skips it instead of producing catch-up messages. The evening slot
 can share saved findings that have not already been reported. The scout has a one-hour topic cooldown; snooze, explicit feedback backoff,
 channel preferences and global proactive budgets still apply. Duplicate or
@@ -75,3 +76,14 @@ or ambiguous delivery. Live source and model checks are separate: passing fixtur
 tests does not establish that X accepts automated access.
 
 The portable skill layout follows [Letta's skill format](https://docs.letta.com/configuration/skills).
+
+## Dependency audit scope
+
+The November 2026 rollout updates PyMongo to 4.18.3, rusqlite to the 0.41
+series (libsqlite3-sys 0.39.1), and rustix to 1.1.6. The SQLite kernels retain
+shared-library linking: Python and both Rust extensions must use the same SQLite
+library in a process for safe WAL locking. Do not enable bundled SQLite on just
+one extension. Cargo's lockfile audit does not certify the operating system's
+SQLite security backports; that shared library must be maintained separately.
+See [RustSec's SQLite advisory](https://github.com/RustSec/advisory-db/blob/main/crates/libsqlite3-sys/RUSTSEC-2026-0459.md)
+and [rustix advisory](https://github.com/RustSec/advisory-db/blob/main/crates/rustix/RUSTSEC-2026-0486.md).
