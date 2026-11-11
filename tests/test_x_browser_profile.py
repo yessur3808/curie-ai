@@ -14,8 +14,91 @@ from connectors import x_browser as xb
 
 @pytest.fixture
 def profiles(monkeypatch, tmp_path):
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "firefox")
     monkeypatch.setenv("CURIE_X_BROWSER_PROFILE_ROOT", str(tmp_path / "profiles"))
     return tmp_path / "profiles"
+
+
+def test_chrome_profile_is_separate_and_requires_matching_enrollment(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("CURIE_X_BROWSER_PROFILE_ROOT", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "firefox")
+    firefox = xb.profile_path("owner")
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "chrome")
+    assert xb.profile_path("owner") != firefox
+    assert xb.profile_path("owner").parent == tmp_path / ".local/share/curie/x-chrome"
+    metadata = {"handle": "CurieTest", "mode": "persistent_firefox"}
+    monkeypatch.setattr(xb, "get_credential", lambda *a: metadata)
+    with xb.profile_lease("owner") as path:
+        (path / "prefs.js").write_text("{}")
+        assert not xb.session_metadata("owner")["ready"]
+        metadata["mode"] = "persistent_chrome"
+        assert not xb.session_metadata("owner")["ready"]
+        (path / "Default").mkdir()
+        (path / "Default/Preferences").write_text("{}")
+    assert xb.session_metadata("owner")["ready"]
+
+
+def test_unknown_browser_engine_fails_closed(monkeypatch):
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "unrecognized")
+    with pytest.raises(xb.BrowserAccessError, match="browser_engine_invalid"):
+        xb.profile_path("owner")
+
+
+@pytest.mark.asyncio
+async def test_chrome_uses_private_profile_and_closes_after_failure(
+    profiles, monkeypatch
+):
+    from connectors import x_browser_runtime as runtime
+
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "chrome")
+    closed = []
+
+    @asynccontextmanager
+    async def chrome(path, headless):
+        assert path == xb.profile_path("owner")
+        assert headless
+        try:
+            yield SimpleNamespace()
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr(runtime, "chrome_context", chrome)
+    with pytest.raises(RuntimeError):
+        async with xb.browser_context("owner"):
+            with pytest.raises(xb.BrowserAccessError, match="browser_profile_busy"):
+                with xb.profile_lease("owner"):
+                    pass
+            raise RuntimeError("fixture failure")
+    assert closed == [True]
+    with xb.profile_lease("owner"):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_existing_chrome_enrollment_verifies_before_saving(profiles, monkeypatch):
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "chrome")
+    page = SimpleNamespace()
+
+    @asynccontextmanager
+    async def context(owner, **kwargs):
+        yield SimpleNamespace(pages=[page])
+
+    monkeypatch.setattr(xb, "browser_context", context)
+    saved = []
+    monkeypatch.setattr(xb, "put_credential", lambda *args: saved.append(args))
+    navigate = AsyncMock(side_effect=xb.BrowserAccessError("wrong_account"))
+    monkeypatch.setattr(xb, "_navigate", navigate)
+    with pytest.raises(xb.BrowserAccessError, match="wrong_account"):
+        await xb.enroll_existing_session("owner", "CurieTest")
+    assert not saved
+    navigate.side_effect = None
+    await xb.enroll_existing_session("owner", "CurieTest")
+    navigate.assert_awaited_with(page, "https://x.com/home", "CurieTest")
+    assert saved[0][2]["mode"] == "persistent_chrome"
+    assert set(saved[0][2]) == {"handle", "mode", "saved_at"}
 
 
 def test_profile_is_owner_scoped_private_and_exclusively_leased(profiles):
@@ -213,10 +296,14 @@ async def test_both_login_flows_are_not_authenticated(path):
 @pytest.mark.integration
 @pytest.mark.skipif(
     os.getenv("CURIE_RUN_BROWSER_TESTS") != "1",
-    reason="requires installed Firefox and geckodriver",
+    reason="requires installed Chrome or Firefox and geckodriver",
 )
-async def test_real_firefox_keeps_cookie_local_storage_and_service_worker(profiles):
+@pytest.mark.parametrize("engine", ["firefox", "chrome"])
+async def test_real_browser_keeps_cookie_local_storage_and_service_worker(
+    profiles, monkeypatch, engine
+):
     """Two real browser lifetimes, local fixture only; no user account or live X."""
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", engine)
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     import threading
 
@@ -248,6 +335,18 @@ async def test_real_firefox_keeps_cookie_local_storage_and_service_worker(profil
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     url = f"http://127.0.0.1:{server.server_port}"
+
+    async def evaluate(context, body):
+        if engine == "chrome":
+            return await context.pages[0].evaluate("async () => {" + body + "}")
+        return await context.run(
+            lambda: context.driver.execute_async_script(
+                "const done = arguments[0]; (async () => {"
+                + body
+                + "})().then(done, e => done(String(e)));"
+            )
+        )
+
     try:
         async with xb.browser_context("fixture") as context:
             page = context.pages[0]
@@ -272,46 +371,39 @@ async def test_real_firefox_keeps_cookie_local_storage_and_service_worker(profil
                 "response",
                 lambda response: limited.set() if response.status == 429 else None,
             )
-            await context.run(
-                lambda: context.driver.execute_script("fetch('/limited')")
-            )
+            await evaluate(context, "await fetch('/limited');")
             await asyncio.wait_for(limited.wait(), timeout=5)
-            await context.run(lambda: context.driver.execute_async_script("""
-                const done = arguments[arguments.length - 1];
-                (async () => {
+            await evaluate(
+                context,
+                """
                 document.cookie = 'curie_fixture=retained; Max-Age=3600; SameSite=Lax';
                 localStorage.setItem('curie_fixture', 'retained');
                 await navigator.serviceWorker.register('/sw.js');
                 await navigator.serviceWorker.ready;
-                })().then(() => done(true), e => done(String(e)));
-            """))
+            """,
+            )
         async with xb.browser_context("fixture") as context:
             page = context.pages[0]
             await page.goto(url)
-            assert "curie_fixture=retained" in await context.run(
-                lambda: context.driver.execute_script("return document.cookie")
+            assert "curie_fixture=retained" in await evaluate(
+                context, "return document.cookie;"
             )
             assert (
-                await context.run(
-                    lambda: context.driver.execute_script(
-                        "return localStorage.getItem('curie_fixture')"
-                    )
-                )
+                await evaluate(context, "return localStorage.getItem('curie_fixture');")
                 == "retained"
             )
             assert (
-                await context.run(
-                    lambda: context.driver.execute_async_script(
-                        "const done = arguments[0]; navigator.serviceWorker.getRegistrations().then(r => done(r.length));"
-                    )
+                await evaluate(
+                    context,
+                    "return (await navigator.serviceWorker.getRegistrations()).length;",
                 )
                 == 1
             )
         async with xb.browser_context("other-fixture") as context:
             page = context.pages[0]
             await page.goto(url)
-            assert "curie_fixture=retained" not in await context.run(
-                lambda: context.driver.execute_script("return document.cookie")
+            assert "curie_fixture=retained" not in await evaluate(
+                context, "return document.cookie;"
             )
     finally:
         await asyncio.to_thread(server.shutdown)

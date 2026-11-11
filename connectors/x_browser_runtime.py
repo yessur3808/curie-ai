@@ -1,6 +1,6 @@
-"""Small async DOM adapter for an installed, sandboxed Firefox browser.
+"""Persistent, sandboxed installed browsers for the bounded X reader.
 
-All WebDriver commands run on one worker thread. Browser requests are observed,
+Firefox WebDriver commands run on one worker thread. Browser requests are observed,
 never intercepted, rewritten or replayed. No authentication values are exported.
 """
 
@@ -11,6 +11,26 @@ import os
 from pathlib import Path
 import shutil
 from types import SimpleNamespace
+
+
+@asynccontextmanager
+async def chrome_context(path, headless=True):
+    """Use official installed Chrome; retain its profile without exporting cookies."""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as playwright:
+        context = await playwright.chromium.launch_persistent_context(
+            user_data_dir=str(path),
+            channel="chrome",
+            headless=headless,
+            chromium_sandbox=True,
+            accept_downloads=False,
+            args=["--ozone-platform=x11"] if not headless else [],
+        )
+        try:
+            yield context
+        finally:
+            await asyncio.shield(context.close())
 
 
 class FirefoxContext:

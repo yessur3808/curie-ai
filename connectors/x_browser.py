@@ -25,6 +25,17 @@ POST_PATH = re.compile(r"^/([A-Za-z0-9_]{1,15})/status/(\d+)$")
 PROFILE_MODE = "persistent_firefox"
 
 
+def browser_engine():
+    engine = os.getenv("CURIE_X_BROWSER_ENGINE", "firefox").strip().lower()
+    if engine not in {"firefox", "chrome"}:
+        raise BrowserAccessError("browser_engine_invalid")
+    return engine
+
+
+def profile_mode():
+    return "persistent_" + browser_engine()
+
+
 class BrowserAccessError(RuntimeError):
     """Only a safe reason code crosses the browser boundary."""
 
@@ -37,11 +48,14 @@ def profile_path(owner):
     """A dedicated server profile, never the owner's personal browser directory."""
     if not isinstance(owner, str) or not owner.strip():
         raise BrowserAccessError("owner_required")
-    default = (
-        Path.home() / "snap/firefox/common/curie-x-profiles"
-        if Path("/snap/bin/geckodriver").exists()
-        else Path(".curie-browser/x")
-    )
+    if browser_engine() == "chrome":
+        default = Path.home() / ".local/share/curie/x-chrome"
+    else:
+        default = (
+            Path.home() / "snap/firefox/common/curie-x-profiles"
+            if Path("/snap/bin/geckodriver").exists()
+            else Path(".curie-browser/x")
+        )
     root = Path(os.getenv("CURIE_X_BROWSER_PROFILE_ROOT", str(default))).expanduser()
     return (
         root.parent.resolve() / root.name / hashlib.sha256(owner.encode()).hexdigest()
@@ -90,12 +104,13 @@ def session_metadata(owner):
     try:
         item = get_credential(owner, PROVIDER) or {}
         path = profile_path(owner)
+        marker = "Default/Preferences" if browser_engine() == "chrome" else "prefs.js"
         ready = bool(
-            item.get("mode") == PROFILE_MODE
+            item.get("mode") == profile_mode()
             and HANDLE.fullmatch(str(item.get("handle", "")))
             and not path.is_symlink()
             and path.is_dir()
-            and (path / "prefs.js").is_file()
+            and (path / marker).is_file()
         )
     except (RuntimeError, PermissionError, OSError):
         return {"ready": False, "reason": "vault_or_profile_unavailable"}
@@ -109,11 +124,12 @@ def session_metadata(owner):
 
 @asynccontextmanager
 async def browser_context(owner, *, headless=True):
-    """Reuse installed Firefox with ordinary networking and persistent storage."""
-    from connectors.x_browser_runtime import firefox_context
+    """Reuse the configured installed browser and its dedicated server profile."""
+    from connectors.x_browser_runtime import chrome_context, firefox_context
 
+    factory = chrome_context if browser_engine() == "chrome" else firefox_context
     with profile_lease(owner) as path:
-        async with firefox_context(path, headless=headless) as context:
+        async with factory(path, headless=headless) as context:
             yield context
 
 
@@ -278,7 +294,7 @@ async def _wait_for_login_confirmation():
 
 
 async def enroll_session(owner, expected):
-    """Sign in using Curie's dedicated, persistent server Firefox profile."""
+    """Sign in using Curie's dedicated, persistent server browser profile."""
     if not HANDLE.fullmatch(expected):
         raise ValueError("Expected a valid X handle without @")
     async with browser_context(owner, headless=False) as context:
@@ -297,13 +313,27 @@ async def enroll_session(owner, expected):
         )
         await _wait_for_login_confirmation()
         await verify_account(page, expected)
-        put_credential(
-            owner,
-            PROVIDER,
-            {
-                "handle": expected,
-                "saved_at": datetime.now(timezone.utc).isoformat(),
-                "mode": PROFILE_MODE,
-            },
-        )
+        _save_enrollment(owner, expected)
         print("Curie's server browser profile is enrolled. Future sessions reuse it.")
+
+
+def _save_enrollment(owner, expected):
+    put_credential(
+        owner,
+        PROVIDER,
+        {
+            "handle": expected,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "mode": profile_mode(),
+        },
+    )
+
+
+async def enroll_existing_session(owner, expected):
+    """Verify a manually signed-in server profile before recording enrollment."""
+    if not HANDLE.fullmatch(expected):
+        raise ValueError("Expected a valid X handle without @")
+    async with browser_context(owner) as context:
+        page = context.pages[0] if context.pages else await context.new_page()
+        await _navigate(page, "https://x.com/home", expected)
+        _save_enrollment(owner, expected)
