@@ -334,11 +334,11 @@ def _save_enrollment(owner, expected):
     )
 
 
-async def enroll_existing_session(owner, expected):
+async def enroll_existing_session(owner, expected, *, headless=True):
     """Verify a manually signed-in server profile before recording enrollment."""
     if not HANDLE.fullmatch(expected):
         raise ValueError("Expected a valid X handle without @")
-    async with browser_context(owner) as context:
+    async with browser_context(owner, headless=headless) as context:
         page = context.pages[0] if context.pages else await context.new_page()
         await _navigate(page, "https://x.com/home", expected)
         _save_enrollment(owner, expected)

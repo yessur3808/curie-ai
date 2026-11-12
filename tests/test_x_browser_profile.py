@@ -82,8 +82,11 @@ async def test_existing_chrome_enrollment_verifies_before_saving(profiles, monke
     monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "chrome")
     page = SimpleNamespace()
 
+    launches = []
+
     @asynccontextmanager
     async def context(owner, **kwargs):
+        launches.append(kwargs)
         yield SimpleNamespace(pages=[page])
 
     monkeypatch.setattr(xb, "browser_context", context)
@@ -95,10 +98,53 @@ async def test_existing_chrome_enrollment_verifies_before_saving(profiles, monke
         await xb.enroll_existing_session("owner", "CurieTest")
     assert not saved
     navigate.side_effect = None
-    await xb.enroll_existing_session("owner", "CurieTest")
+    await xb.enroll_existing_session("owner", "CurieTest", headless=False)
+    assert launches == [{"headless": True}, {"headless": False}]
     navigate.assert_awaited_with(page, "https://x.com/home", "CurieTest")
     assert saved[0][2]["mode"] == "persistent_chrome"
     assert set(saved[0][2]) == {"handle", "mode", "saved_at"}
+
+
+@pytest.mark.parametrize("headed", [False, True])
+def test_login_cli_loads_live_instance_before_enrollment(monkeypatch, tmp_path, headed):
+    from scripts import x_browser_login as login
+    from scripts.ai_scout_run import load_instance_environment
+
+    (tmp_path / ".env").write_text(
+        "CURIE_LOCAL_MEMORY_DB=legacy.sqlite3\nCURIE_X_BROWSER_ENGINE=firefox\n"
+    )
+    (tmp_path / "instances").mkdir()
+    (tmp_path / "instances/curie.env").write_text(
+        "CURIE_LOCAL_MEMORY_DB=live.sqlite3\nCURIE_X_BROWSER_ENGINE=chrome\n"
+    )
+    monkeypatch.delenv("CURIE_INSTANCE", raising=False)
+    monkeypatch.delenv("CURIE_LOCAL_MEMORY_DB", raising=False)
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "firefox")
+    monkeypatch.setattr(
+        login, "load_instance_environment", lambda: load_instance_environment(tmp_path)
+    )
+    calls = []
+
+    async def enroll(owner, handle, **kwargs):
+        assert os.environ["CURIE_LOCAL_MEMORY_DB"] == "live.sqlite3"
+        assert xb.browser_engine() == "chrome"
+        calls.append((owner, handle, kwargs))
+
+    monkeypatch.setattr(xb, "enroll_existing_session", enroll)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "x_browser_login",
+            "--owner-id",
+            "owner",
+            "--handle",
+            "@CurieTest",
+            "--verify-existing",
+        ]
+        + (["--headed"] if headed else []),
+    )
+    login.main()
+    assert calls == [("owner", "CurieTest", {"headless": not headed})]
 
 
 def test_profile_is_owner_scoped_private_and_exclusively_leased(profiles):

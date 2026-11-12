@@ -3,7 +3,7 @@
 import argparse
 import asyncio
 
-from dotenv import load_dotenv
+from scripts.ai_scout_run import load_instance_environment
 
 
 def main():
@@ -15,8 +15,13 @@ def main():
         action="store_true",
         help="Verify and enroll an already signed-in server profile without a login prompt",
     )
+    parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="Verify the existing profile in normal visible Chrome/Firefox on the server desktop",
+    )
     args = parser.parse_args()
-    load_dotenv()
+    load_instance_environment()
     from connectors.x_browser import (
         BrowserAccessError,
         enroll_existing_session,
@@ -24,8 +29,13 @@ def main():
     )
 
     try:
-        enroll = enroll_existing_session if args.verify_existing else enroll_session
-        asyncio.run(enroll(args.owner_id, args.handle.removeprefix("@")))
+        handle = args.handle.removeprefix("@")
+        if args.verify_existing:
+            asyncio.run(
+                enroll_existing_session(args.owner_id, handle, headless=not args.headed)
+            )
+        else:
+            asyncio.run(enroll_session(args.owner_id, handle))
         if args.verify_existing:
             print("Curie's existing server browser session is verified and enrolled.")
     except KeyboardInterrupt:

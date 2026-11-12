@@ -101,6 +101,13 @@ runtime. Keep Snap profiles outside `/tmp` and hidden home directories.
 If you signed in manually using the same dedicated profile, close that browser
 normally and run `scripts.x_browser_login` with `--verify-existing`. This reopens
 the profile, verifies the actual account on X, and only then records enrollment.
+The login command loads `.env` followed by overriding `instances/curie.env`
+(or `instances/$CURIE_INSTANCE.env`) before importing memory or vault modules.
+For a normal visible verification on the authorized server desktop, add
+`--headed` to `--verify-existing`; the default remains headless. This requires
+the desktop's valid `DISPLAY` and X authorization. It does not bypass an X
+restriction, and successful visible enrollment alone does not verify the
+scheduled headless collector: check a bounded real collection separately.
 Chrome and Firefox metadata/profile formats are not interchangeable. Switching
 engines requires separate enrollment; no cookies are imported or exported.
 
