@@ -9,6 +9,20 @@ import memory as _real_memory  # noqa: F401
 
 import pytest
 
+# Offline jobs stub the optional Telegram SDK in connector test modules. Keep
+# real exception types (not MagicMocks), so transport retry tests exercise the
+# same catch boundaries without requiring a live bot SDK in lightweight CI.
+try:
+    import telegram.error  # noqa: F401
+except ModuleNotFoundError:
+    import sys
+    from types import ModuleType
+
+    errors = ModuleType("telegram.error")
+    errors.BadRequest = type("BadRequest", (Exception,), {})
+    errors.NetworkError = type("NetworkError", (Exception,), {})
+    sys.modules["telegram.error"] = errors
+
 
 @pytest.fixture(autouse=True)
 def isolated_runtime(monkeypatch, tmp_path):
