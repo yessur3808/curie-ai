@@ -21,3 +21,12 @@
     the original evidence status and link.
 16. Curie suggests a small experiment in her own warm voice: it must be clear that
     it is a suggestion, not a test she performed or a verified productivity claim.
+
+17. Theo and Primeagen are requested: both appear in bounded discovery queries;
+    owner-specific weights survive and unrelated owners retain their own sources.
+18. Preferred accounts post jokes or hype: source familiarity cannot bypass topic
+    relevance or upgrade an unverified X lead into a verified release.
+19. A digest is partly delivered then fails or crosses midnight: stop remaining
+    parts, retain one uncertain logical receipt, never replay attempted findings.
+20. A long general Telegram reply times out: do not retry it as plain text; only a
+    definitive markup parsing rejection permits that fallback.

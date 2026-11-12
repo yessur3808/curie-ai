@@ -227,12 +227,12 @@ def test_engineering_digest_keeps_evidence_and_proposes_rather_than_claims_tests
         evidence="unverified_x_lead", url="https://x.com/Fixture/status/123"
     )
     message = scout.report(items, {"x": "read"}, {"focus": "engineering_lead"})
-    assert message.count("\n• ") == 3
+    assert message.count("**Curie’s engineering brief") == 3
     assert all(item["url"] in message for item in items[:3])
     assert items[3]["url"] not in message
-    assert "Unverified X lead:" in message
-    assert message.count("A small experiment:") == 3
-    assert "I haven’t independently tested" in message
+    assert "Unverified X lead" in message
+    assert message.count("**Try this:**") == 3
+    assert "Not independently tested" in message
     assert len(message) < 4096
 
 
@@ -476,3 +476,94 @@ async def test_research_crossing_midnight_cannot_send_after_quiet_hours_start(ru
     service.fetcher.assert_awaited_once()
     service.send.assert_not_awaited()
     assert scout.state_for("owner")["delivery"] == "suppressed:quiet_hours"
+
+
+def test_preferred_sources_are_owner_scoped_and_queries_bounded(runtime):
+    scout.set_focus("owner", "engineering_lead")
+    scout.feedback("owner", "tools", "more")
+    scout.set_source_preferences("owner")
+    prefs = scout.preferences("owner")
+    assert prefs["weights"]["tools"] == 1
+    assert scout.preferences("other").get("preferred_accounts") is None
+    for index in range(4):
+        queries = scout.discovery_queries(prefs, index, NOW)
+        assert len(queries) == 3
+        assert "from:theo" in queries[0] and "from:ThePrimeagen" in queries[0]
+        assert "from:simonw" in queries[1]
+        assert all(len(query) < 250 for query in queries)
+    assert "evil" not in str(
+        scout.discovery_queries({"preferred_accounts": ["evil OR foo"]}, 0, NOW)
+    )
+
+
+def test_engineering_focus_skips_thin_and_housekeeping_items():
+    items = [release(excerpt="Bump version."), release("two", excerpt="SDK updated")]
+    assert scout.rank_candidates(items, {}, {"focus": "engineering_lead"}, NOW) == []
+
+
+@pytest.mark.asyncio
+async def test_partial_digest_stops_and_never_replays(runtime):
+    service = worker(
+        items=[
+            release("one"),
+            release("two", topic="tools"),
+            release("three", topic="models"),
+        ],
+        send=AsyncMock(side_effect=[True, False]),
+    )
+    await service.run_owner("owner", NOW)
+    assert service.send.await_count == 2
+    state = scout.state_for("owner")
+    assert state["delivery"] == "uncertain"
+    assert state["delivery_parts_confirmed"] == 1
+    assert len(state["reported_urls"]) == 3
+    await service.run_owner("owner", NOW)
+    await service.run_owner("owner", NOW + timedelta(hours=14))
+    assert service.send.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_each_digest_card_checks_actual_quiet_hours(runtime):
+    before = datetime(2026, 11, 12, 15, 59, 59, tzinfo=timezone.utc)
+    after = before + timedelta(seconds=2)
+    ticks = iter([before, after])
+    service = worker(clock=lambda: next(ticks))
+    state = {"coverage": {"x": "not_authenticated"}}
+    await service.deliver(
+        "owner",
+        [release("one"), release("two")],
+        state,
+        "test-midnight-parts",
+        before,
+        live_clock=True,
+    )
+    assert service.send.await_count == 1
+    assert state["delivery"] == "uncertain"
+    assert state["delivery_parts_confirmed"] == 1
+
+
+def test_cards_have_intact_links_no_changelog_plumbing():
+    item = release(
+        excerpt="What's Changed Adds a reproducible evaluation workflow for coding agents by @example in https://github.com/a/b/pull/5"
+    )
+    card = scout.report_parts([item], {"x": "read"}, {"focus": "engineering_lead"})[0]
+    assert (
+        "What's Changed" not in card and "@example" not in card and "/pull/" not in card
+    )
+    assert card.count(item["url"]) == 1
+    assert len(card) < 1400
+
+
+def test_preferred_x_lead_survives_release_heavy_packet_without_evidence_upgrade():
+    items = [release(str(i), topic="tools") for i in range(12)]
+    lead = release(
+        "lead", evidence="unverified_x_lead", url="https://x.com/theo/status/123"
+    )
+    ranked = scout.rank_candidates(
+        items + [lead], {}, {"preferred_accounts": ["theo"]}, NOW
+    )
+    assert len(ranked) == 8
+    assert any(
+        item["url"] == lead["url"] and item["evidence"] == "unverified_x_lead"
+        for item in ranked
+    )

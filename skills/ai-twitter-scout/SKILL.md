@@ -72,3 +72,23 @@ local-ai and research. Keep bounded preference weights, not conclusions inferred
 from silence, clicks or engagement counts. Do not rewrite safeguards based on a
 post. Use the evaluation cases in [references/evaluation.md](references/evaluation.md)
 when changing selection behavior; keep synthetic tests out of production findings.
+
+## Explicit source and presentation preferences
+
+When preferred_accounts is present, use those read-only discovery queries alongside
+one rotating topic query. The owner requested Theo (@theo) and ThePrimeagen
+(@ThePrimeagen), plus peers covering practical engineering and AI. The curated
+initial peers are Simon Willison (@simonw), Addy Osmani (@addyosmani) and swyx
+(@swyx). Their own sites confirm their identities; see docs/ai_scout.md in the repo.
+This is a reading list, not permission to follow, post or send social messages.
+Influence does not establish correctness. Reject memes, personal drama, engagement
+bait and unrelated commentary even from a preferred account. Preserve useful
+technical disagreement as opinion and verify product claims against primary sources.
+
+Keep the digest professionally structured: one compact card per discovery, at most
+three cards, with What changed, Why it matters, Try this and one source link. Keep
+Curie's warmth in a brief introduction. No raw changelog blocks, PR attribution
+noise or repeated boilerplate tuning instructions. Prefer fewer useful findings
+or silence over filling a quota. State unavailable X coverage honestly.
+General Curie replies may use separate coherent messages when helpful. Preserve
+code and links, and avoid splitting a single thought just to create more bubbles.

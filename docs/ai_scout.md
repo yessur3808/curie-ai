@@ -95,3 +95,31 @@ one extension. Cargo's lockfile audit does not certify the operating system's
 SQLite security backports; that shared library must be maintained separately.
 See [RustSec's SQLite advisory](https://github.com/RustSec/advisory-db/blob/main/crates/libsqlite3-sys/RUSTSEC-2026-0459.md)
 and [rustix advisory](https://github.com/RustSec/advisory-db/blob/main/crates/rustix/RUSTSEC-2026-0486.md).
+
+
+### Engineering reading list and Telegram layout (2026-11-13 HKT)
+
+The owner explicitly requested Theo and ThePrimeagen plus relevant peers. Operator
+setup uses `set_source_preferences(owner)` after loading the live instance environment;
+it preserves focus and topic weights. Queries always include the two anchors, one
+peer group and one rotating topic (three searches total). Preferred X leads remain
+unverified and at most one can enter a three-item digest. Signed-in browser visibility
+does not prove automated collection: preserve the user's open profile and its lease.
+
+Source identity references: [Theo](https://t3.gg/),
+[ThePrimeagen](https://linktr.ee/ThePrimeagen),
+[Simon Willison](https://simonwillison.net/about/) for practical LLM engineering and security,
+[Addy Osmani](https://addyosmani.com/) for developer tools, performance and team leadership,
+and [swyx](https://swyx.io/) for AI engineering and developer workflows.
+
+Engineering focus now drops thin announcements and routine housekeeping without a
+concrete engineering signal. This is a conservative keyword gate, not a guarantee
+that every source claim is useful or correct. Letta ranks the remaining bounded packet.
+Each finding is a separate numbered card with a cleaned source excerpt, relevance,
+a suggested experiment and one labeled link. A logical digest still has one durable
+delivery receipt and one policy count. Every card checks quiet hours at its actual send
+time. Partial/ambiguous delivery is uncertain and cannot be replayed in a recap.
+General Telegram replies prefer paragraph boundaries, preserve Markdown links, and
+hide link previews. Default proactive text is rendered as safe HTML and split too;
+explicit native parse modes remain caller-owned. Network errors never trigger a plain
+text retry in replies. The standalone scout runner uses the same HTML renderer.

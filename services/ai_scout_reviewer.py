@@ -50,6 +50,7 @@ async def review(candidates, prefs):
         + json.dumps(
             {
                 "preferences": prefs.get("weights", {}),
+                "preferred_accounts": prefs.get("preferred_accounts", [])[:8],
                 "reading_focus": (
                     "Practical tools and knowledge for a software engineer and technical lead: "
                     "coding workflows, architecture, debugging, testing/evals, safe agent adoption, "

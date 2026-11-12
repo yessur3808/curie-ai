@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 async def run(owner):
     import httpx
     from services.ai_scout import AIScoutWorker, state_for
+    from utils.formatting import telegram_html
 
     async def send(platform, target, message):
         token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
@@ -24,7 +25,8 @@ async def run(owner):
                     "https://api.telegram.org/bot" + token + "/sendMessage",
                     json={
                         "chat_id": target,
-                        "text": message,
+                        "text": telegram_html(message),
+                        "parse_mode": "HTML",
                         "disable_web_page_preview": True,
                     },
                 )

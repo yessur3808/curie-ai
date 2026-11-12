@@ -41,7 +41,7 @@ def test_split_keeps_urls_and_code_spans_intact():
 def test_reply_in_chunks_uses_safe_telegram_html():
     replies = []
 
-    async def reply_text(text, parse_mode=None):
+    async def reply_text(text, parse_mode=None, **kwargs):
         replies.append((text, parse_mode))
 
     message = SimpleNamespace(reply_text=reply_text)
@@ -53,7 +53,7 @@ def test_reply_in_chunks_uses_safe_telegram_html():
 def test_reply_with_result_sends_deliberate_parts_as_separate_messages():
     replies = []
 
-    async def reply_text(text, parse_mode=None):
+    async def reply_text(text, parse_mode=None, **kwargs):
         replies.append((text, parse_mode))
 
     message = SimpleNamespace(reply_text=reply_text)
@@ -115,7 +115,14 @@ def test_proactive_send_uses_client_owned_by_calling_loop(monkeypatch):
     telegram._runtime.loop = OtherLoop()
     try:
         assert asyncio.run(telegram.send_message("42", "hello")) is True
-        assert observed == [{"chat_id": 42, "text": "hello"}]
+        assert observed == [
+            {
+                "chat_id": 42,
+                "text": "hello",
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+        ]
     finally:
         telegram._runtime.application = previous_app
         telegram._runtime.loop = previous_loop
@@ -259,3 +266,36 @@ def test_text_reply_to_photo_reprocesses_referenced_attachment(monkeypatch):
 
 async def _async_value(value):
     return value
+
+
+def test_split_prefers_paragraph_over_later_space_and_keeps_links_whole():
+    text = "a " * 350 + "\n\n" + "b " * 400
+    chunks = telegram.split_telegram_message(text, preferred_limit=1000)
+    assert chunks[0] == ("a " * 350).strip()
+    link = "[Read the original source](https://example.com/" + "a" * 200 + ")"
+    chunks = telegram.split_telegram_message(
+        "word " * 180 + link + " tail " * 100, preferred_limit=1000
+    )
+    assert any(link in chunk for chunk in chunks)
+
+
+def test_reply_does_not_retry_ambiguous_network_failure():
+    from telegram.error import NetworkError
+    from unittest.mock import AsyncMock
+
+    message = SimpleNamespace(reply_text=AsyncMock(side_effect=NetworkError("timeout")))
+    with pytest.raises(NetworkError):
+        asyncio.run(telegram.reply_in_chunks(message, "**Hello**"))
+    assert message.reply_text.await_count == 1
+
+
+def test_proactive_partial_send_is_not_retried(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    bot = SimpleNamespace(
+        send_message=AsyncMock(side_effect=[None, RuntimeError("timeout")])
+    )
+    monkeypatch.setattr(telegram._runtime, "application", SimpleNamespace(bot=bot))
+    monkeypatch.setattr(telegram._runtime, "loop", None)
+    assert not asyncio.run(telegram.send_message("42", "paragraph " * 400))
+    assert bot.send_message.await_count == 2

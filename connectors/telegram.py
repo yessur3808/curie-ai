@@ -21,6 +21,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from telegram import Bot, BotCommand, Update
+from telegram.error import BadRequest
 from telegram.ext import (
     ApplicationBuilder,
     MessageHandler,
@@ -174,16 +175,15 @@ async def send_message(
         return False
 
     async def deliver(bot) -> None:
-        if parse_mode:
+        # Explicit native markup remains caller-owned. Portable Markdown uses
+        # the same bounded renderer as ordinary replies.
+        chunks = [message] if parse_mode else split_telegram_message(message)
+        for chunk in chunks:
             await bot.send_message(
                 chat_id=int(external_user_id),
-                text=message,
-                parse_mode=parse_mode,
-            )
-        else:
-            await bot.send_message(
-                chat_id=int(external_user_id),
-                text=message,
+                text=chunk if parse_mode else telegram_html(chunk),
+                parse_mode=parse_mode or "HTML",
+                disable_web_page_preview=True,
             )
 
     try:
@@ -435,7 +435,9 @@ async def notify_master_awake(application) -> None:
     logger.info("Sent startup-ready notification to the configured master user")
 
 
-_TELEGRAM_PROTECTED = re.compile(r"```[\s\S]*?```|`[^`\n]+`|https?://[^\s<>]+", re.I)
+_TELEGRAM_PROTECTED = re.compile(
+    r"```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]+\]\([^\s)]+\)|https?://[^\s<>]+", re.I
+)
 
 
 def _protected_split_ranges(text: str, hard_limit: int) -> list[tuple[int, int]]:
@@ -457,7 +459,7 @@ def _safe_telegram_split(text: str, target: int, hard_limit: int) -> int:
         window.rfind("! "),
         window.rfind(" "),
     ]
-    split_at = max(candidates)
+    split_at = next((point for point in candidates if point >= target // 2), -1)
     if split_at < target // 2:
         split_at = min(target, hard_limit)
     elif window[split_at : split_at + 2] in {". ", "? ", "! "}:
@@ -500,9 +502,12 @@ async def reply_in_chunks(
     for raw_chunk in split_telegram_message(text):
         chunk = telegram_html(raw_chunk) if parse_mode == "HTML" else raw_chunk
         try:
-            await message.reply_text(chunk, parse_mode=parse_mode)
-        except Exception:
-            if not parse_mode:
+            await message.reply_text(
+                chunk, parse_mode=parse_mode, disable_web_page_preview=True
+            )
+        except BadRequest as exc:
+            # Retry only a definite markup rejection, never an ambiguous timeout.
+            if not parse_mode or "parse entities" not in str(exc).lower():
                 raise
             logger.debug("Telegram formatting failed; retrying chunk as plain text")
             await message.reply_text(strip_markdown(raw_chunk))

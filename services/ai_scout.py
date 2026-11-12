@@ -65,7 +65,7 @@ def x_candidates(posts, now):
         "local-ai": r"local llm|quantiz|\bgguf\b|\bllama\.cpp\b|\bvllm\b|\bollama\b",
         "agents": r"\bai agents?\b|agent framework|multi.agent",
         "models": r"\bllms?\b|open.weights|\bqwen\b|\bglm\b|reasoning model",
-        "tools": r"\bai tools?\b|\bai coding\b|\bcodex\b|claude code",
+        "tools": r"\bai tools?\b|\bai coding\b|\bcodex\b|claude code|typescript|developer tool|code review|software architecture|web performance",
         "research": r"\bai benchmark|\bllm evaluat|\bai research",
     }
     results = []
@@ -179,6 +179,59 @@ def set_focus(owner, focus):
     return item
 
 
+# Operator-curated discovery sources; familiarity never increases evidence confidence.
+ENGINEERING_ACCOUNTS = ("theo", "ThePrimeagen", "simonw", "addyosmani", "swyx")
+
+
+def set_source_preferences(owner):
+    item = preferences(owner)
+    item.update(
+        preferred_accounts=list(ENGINEERING_ACCOUNTS),
+        source_basis="user_requested_theo_primeagen_and_similar_engineering_accounts",
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    save_personal_item(owner, PREFERENCES, item)
+    return item
+
+
+def discovery_queries(prefs, index, now):
+    since = f" since:{(now - timedelta(days=1)).date()}"
+    accounts = [
+        handle
+        for handle in prefs.get("preferred_accounts", [])[:8]
+        if isinstance(handle, str) and re.fullmatch(r"[A-Za-z0-9_]{1,15}", handle)
+    ]
+    if accounts:
+        # Named anchors always get coverage; peers share a second bounded search.
+        groups = (accounts[:2], accounts[2:])
+        queries = [
+            "(" + " OR ".join("from:" + h for h in group) + ")" + since
+            for group in groups
+            if group
+        ]
+        queries.append(list(TOPICS.values())[index % len(TOPICS)] + since)
+        return queries[:3]
+    return [
+        list(TOPICS.values())[(index * 3 + n) % len(TOPICS)] + since for n in range(3)
+    ]
+
+
+def useful_summary(item):
+    """Keep a concrete source claim, dropping release plumbing and attribution noise."""
+    text = _clean_text(item.get("excerpt", ""), 1500)
+    text = re.sub(r"https?://\S+", "", text)
+    text = re.sub(r"\s+by @?[\w-]+(?:\s+in)?", "", text)
+    text = re.sub(
+        r"What's Changed|Full Changelog[^.!?]*|New Contributors[^.!?]*",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"[#*`<>\[\]]", "", text)
+    text = " ".join(text.split()).strip(" :-")
+    return text[:240].rsplit(" ", 1)[0] + "…" if len(text) > 240 else text
+
+
 def engineering_angle(item):
     """Suggested experiments, not claims about untested product capabilities."""
     text = (item.get("title", "") + " " + item.get("excerpt", "")).casefold()
@@ -223,7 +276,7 @@ def engineering_score(item):
     useful = re.search(
         r"\b(security|sandbox|permissions?|eval\w*|test\w*|regression\w*|"
         r"debug\w*|tracing|observability|inference|latency|memory|quantiz\w*|"
-        r"deploy\w*|api|sdk|mcp|integration\w*|workflow\w*|coding)\b",
+        r"deploy\w*|api|sdk|mcp|integration\w*|workflow\w*|coding|typescript|architecture|performance|developer tools?)\b",
         text,
     )
     housekeeping = re.search(
@@ -390,6 +443,10 @@ def rank_candidates(items, state, prefs, now):
             "unverified_x_lead",
         }:
             continue
+        if prefs.get("focus") == "engineering_lead":
+            # A release existing is not enough to interrupt the reader.
+            if engineering_score(raw) < 3 or len(useful_summary(raw)) < 60:
+                continue
         item = dict(raw)
         item["story_key"] = hashlib.sha256(
             " ".join(re.findall(r"[\w.-]+", item["title"].casefold())).encode()
@@ -434,7 +491,20 @@ def rank_candidates(items, state, prefs, now):
             selected.append(item)
             categories.add(item["topic"])
     selected.extend(item for item in ranked if item not in selected)
-    return selected[:8]
+    preferred = {
+        h.casefold() for h in prefs.get("preferred_accounts", []) if isinstance(h, str)
+    }
+    leads = [
+        item
+        for item in ranked
+        if item["evidence"] == "unverified_x_lead"
+        and urlparse(item["url"]).path.split("/")[1].casefold() in preferred
+    ][:2]
+    # Keep requested voices visible to the reviewer even during release-heavy days.
+    # They remain unverified and the final digest still caps X leads at one.
+    return ([item for item in selected if item not in leads][: 8 - len(leads)] + leads)[
+        :8
+    ]
 
 
 def latest(owner, now=None):
@@ -446,50 +516,38 @@ def latest(owner, now=None):
     ][:12]
 
 
-def report(items, coverage, prefs=None):
-    engineering = (prefs or {}).get("focus") == "engineering_lead"
-    intros = (
-        "Ah, a few discoveries for your engineering toolkit. Here’s what caught my eye:",
-        "I’ve found a few things worth a closer look, monsieur. Shall we put them to work?",
-        "A little inspiration for your next build—these caught my attention:",
-    )
-    seed = int(
-        hashlib.sha256("|".join(i["url"] for i in items[:3]).encode()).hexdigest()[:8],
-        16,
-    )
-    lines = [
-        (
-            intros[seed % len(intros)]
-            if engineering
-            else "A few AI updates worth a look, monsieur:"
+def report_parts(items, coverage, prefs=None):
+    """One self-contained, bounded card per finding; no raw changelog dump."""
+    parts = []
+    for index, item in enumerate(items[:3], 1):
+        title = re.sub(r"[\n*`<>\[\]]", "", item["title"])[:110]
+        why, experiment = engineering_angle(item)
+        summary = useful_summary(item)
+        label = (
+            "Unverified X lead"
+            if item["evidence"] == "unverified_x_lead"
+            else "Source announcement"
         )
-    ]
-    for item in items[:3]:
-        label = "Unverified X lead: " if item["evidence"] == "unverified_x_lead" else ""
-        lines.append(f"\n• {label}{item['title']}")
-        excerpt = _clean_text(item.get("excerpt", ""), 200)
-        excerpt = re.sub(r"^What's Changed\s*", "", excerpt, flags=re.I)
-        if len(excerpt) >= 60 and item["evidence"] != "unverified_x_lead":
-            lines.append(
-                "  Source notes: “"
-                + excerpt.rstrip()
-                + ("…" if len(excerpt) == 200 else "")
-                + "”"
-            )
-        lines.append(item["url"])
-        if engineering:
-            why, experiment = engineering_angle(item)
-            lines.append("  " + why)
-            lines.append("  A small experiment: " + experiment)
-    lines.append(
-        "\nThese are source announcements and leads. I haven’t independently tested their claims."
-    )
-    if coverage.get("x") != "read":
-        lines.append("X browsing is unavailable; these came from public release feeds.")
-    lines.append(
-        "\nTell me /aiscout more agents or /aiscout less local-ai to tune the mix."
-    )
-    return "\n".join(lines)
+        lines = [f"**Curie’s engineering brief · {index}/{min(3, len(items))}**"]
+        if index == 1:
+            lines.append("A little inspiration for your next build, monsieur.")
+        lines.extend(
+            [
+                f"\n**{title}**",
+                f"\n**What changed:** {summary or 'See the source for details.'}",
+                f"\n**Why it matters:** {why}",
+                f"\n**Try this:** {experiment}",
+                f"\n[{label}]({item['url']}) · Not independently tested.",
+            ]
+        )
+        if coverage.get("x") != "read" and index == min(3, len(items)):
+            lines.append("\nX browsing is unavailable; this edition uses public feeds.")
+        parts.append("\n".join(lines))
+    return parts
+
+
+def report(items, coverage, prefs=None):
+    return "\n\n".join(report_parts(items, coverage, prefs))
 
 
 def controls(owner, text):
@@ -624,11 +682,7 @@ class AIScoutWorker:
                 "saved_at"
             ) and bool(state.get("x_blocked_session"))
             if metadata.get("ready") and allowed and not blocked and heavy_allowed:
-                queries = [
-                    list(TOPICS.values())[(index * 3 + n) % len(TOPICS)]
-                    + f" since:{(now - timedelta(days=1)).date()}"
-                    for n in range(3)
-                ]
+                queries = discovery_queries(preferences(owner), index, now)
                 try:
                     posts = await asyncio.wait_for(
                         self.collector(owner, profile["x_research_handle"], queries),
@@ -721,7 +775,9 @@ class AIScoutWorker:
                 ][:3]
             # Research may cross midnight; enforce quiet hours at delivery time.
             delivery_now = self.clock() if use_live_clock else now
-            await self.deliver(owner, to_deliver, state, key, delivery_now)
+            await self.deliver(
+                owner, to_deliver, state, key, delivery_now, live_clock=use_live_clock
+            )
         except Exception as exc:
             state.update(status="failed", last_error=type(exc).__name__)
         finally:
@@ -739,7 +795,7 @@ class AIScoutWorker:
                 outcome=state["status"],
             )
 
-    async def deliver(self, owner, findings, state, slot_key, now):
+    async def deliver(self, owner, findings, state, slot_key, now, live_clock=False):
         from services.proactive_policy import delivery_allowed, delivery_updates
         from memory.repositories import get_repositories
 
@@ -765,7 +821,18 @@ class AIScoutWorker:
         if not target:
             state["delivery"] = "no_telegram_identity"
             return
-        message = report(findings, state["coverage"], preferences(owner))
+        prefs = preferences(owner)
+        if prefs.get("focus") == "engineering_lead":
+            findings = [
+                item
+                for item in findings
+                if engineering_score(item) >= 3 and len(useful_summary(item)) >= 60
+            ]
+        if not findings:
+            state["delivery"] = "no_relevant_items"
+            return
+        parts = report_parts(findings, state["coverage"], prefs)
+        message = "\n\n".join(parts)
         key = slot_key + ":delivery"
         if reserve_mutation_attempt(
             owner,
@@ -782,10 +849,23 @@ class AIScoutWorker:
         )[-1000:]
         save_personal_item(owner, STATE, state)
         try:
-            if not await asyncio.wait_for(
-                self.send("telegram", target, message), timeout=30
-            ):
-                raise RuntimeError("delivery_not_confirmed")
+            state["delivery_parts_confirmed"] = 0
+            for part in parts:
+                # Recheck actual wall time before EVERY bubble, including midnight crossings.
+                part_now = self.clock() if live_clock else now
+                weekend = part_now.astimezone(_timezone(profile)).weekday() >= 5
+                policy["proactive_quiet_hours"] = {
+                    "start": 0,
+                    "end": 11 if weekend else 8,
+                }
+                allowed, reason = delivery_allowed(policy, "ai_updates", part_now)
+                if not allowed:
+                    raise RuntimeError("delivery_suppressed:" + reason)
+                if not await asyncio.wait_for(
+                    self.send("telegram", target, part), timeout=30
+                ):
+                    raise RuntimeError("delivery_not_confirmed")
+                state["delivery_parts_confirmed"] += 1
         except Exception:
             state["delivery"] = "uncertain"
             finish_mutation_attempt(owner, key, "uncertain")
