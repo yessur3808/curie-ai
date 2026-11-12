@@ -147,6 +147,41 @@ def test_login_cli_loads_live_instance_before_enrollment(monkeypatch, tmp_path, 
     assert calls == [("owner", "CurieTest", {"headless": not headed})]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path,landing_heading,reason",
+    [
+        ("/", True, "login_or_verification_required"),
+        ("/", False, "browser_unavailable_or_timeout"),
+        ("/home", False, "browser_unavailable_or_timeout"),
+        ("/i/flow/login", False, "login_or_verification_required"),
+    ],
+)
+async def test_navigation_distinguishes_signed_out_landing_from_timeout(
+    path, landing_heading, reason
+):
+    missing_profile = SimpleNamespace(wait_for=AsyncMock(side_effect=TimeoutError))
+
+    def locator(selector):
+        if selector == 'a[data-testid="AppTabBar_Profile_Link"]':
+            return missing_profile
+        assert selector == "h1, h2"
+
+        def get_by_text(text, exact):
+            assert text == "Happening now." and exact
+            return SimpleNamespace(count=AsyncMock(return_value=int(landing_heading)))
+
+        return SimpleNamespace(get_by_text=get_by_text)
+
+    page = SimpleNamespace(
+        url="https://x.com" + path,
+        goto=AsyncMock(return_value=SimpleNamespace(status=200)),
+        locator=locator,
+    )
+    with pytest.raises(xb.BrowserAccessError, match=reason):
+        await xb._navigate(page, "https://x.com/home", "CurieTest")
+
+
 def test_profile_is_owner_scoped_private_and_exclusively_leased(profiles):
     first = xb.profile_path("owner")
     assert first != xb.profile_path("other")

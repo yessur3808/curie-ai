@@ -175,8 +175,18 @@ async def _navigate(page, url, expected):
     except Exception:
         if hasattr(page, "refresh_url"):
             await page.refresh_url()
-        if urlparse(page.url).path.startswith(
+        path = urlparse(page.url).path
+        if path.startswith(
             ("/i/flow/", "/i/jf/onboarding/", "/login", "/account/access")
+        ):
+            raise BrowserAccessError("login_or_verification_required") from None
+        # X can redirect a signed-out persistent profile to its public landing
+        # page rather than /login. A known auth wall is not a network timeout.
+        if (
+            path in {"", "/"}
+            and await page.locator("h1, h2")
+            .get_by_text("Happening now.", exact=True)
+            .count()
         ):
             raise BrowserAccessError("login_or_verification_required") from None
         raise BrowserAccessError("browser_unavailable_or_timeout") from None
