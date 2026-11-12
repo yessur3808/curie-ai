@@ -46,6 +46,14 @@ items older than 48 hours are filtered. Preference weights are bounded and chang
 only through explicit more/less/reset feedback. Topics are models, tools, agents,
 harnesses, local-ai and research.
 
+An explicit `engineering_lead` reading focus can be saved with
+`services.ai_scout.set_focus(owner, "engineering_lead")`, after loading the live
+instance environment. It preserves topic feedback, boosts practical engineering
+signals, downranks routine housekeeping, and is included in Letta's bounded packet.
+Curie's digest then adds a source-linked change, a practical angle and a suggested
+small experiment in her warm voice. Suggestions are not claims of completed tests.
+Use `general` to return to the general reading focus. No weight fine-tuning is involved.
+
 ## Controls
 
 - `/aiscout status`, `/aiscout latest`

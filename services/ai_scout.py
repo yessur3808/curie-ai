@@ -165,6 +165,73 @@ def preferences(owner):
     return dict(rows[-1]) if rows else {"id": "ai-scout-preferences-v1", "weights": {}}
 
 
+def set_focus(owner, focus):
+    """Persist an explicitly requested reading focus without resetting topic feedback."""
+    if focus not in {"engineering_lead", "general"}:
+        raise ValueError("Unknown AI scout focus")
+    item = preferences(owner)
+    item.update(
+        focus=focus,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        basis="explicit_user_feedback",
+    )
+    save_personal_item(owner, PREFERENCES, item)
+    return item
+
+
+def engineering_angle(item):
+    """Suggested experiments, not claims about untested product capabilities."""
+    text = (item.get("title", "") + " " + item.get("excerpt", "")).casefold()
+    angles = (
+        (
+            r"\b(security|sandbox|permissions?|vulnerabilit\w*|credential\w*)\b",
+            "This catches my eye for safer team adoption.",
+            "Review permissions and data access in a sandbox before connecting a real repository.",
+        ),
+        (
+            r"\b(eval\w*|test\w*|regression\w*|benchmark\w*)\b",
+            "I’d put this on our evaluation shortlist.",
+            "Use a small set of your own engineering tasks; compare failure cases, not just the headline score.",
+        ),
+        (
+            r"\b(debug\w*|tracing|observability|profiling)\b",
+            "The debugging angle looks worth exploring.",
+            "Try one reproducible failure and see whether it becomes easier to diagnose.",
+        ),
+        (
+            r"\b(inference|latency|memory|quantiz\w*|deploy\w*|throughput)\b",
+            "I’m curious about the operational trade-offs here.",
+            "Compare latency, memory and cost on the same small workload before changing your stack.",
+        ),
+        (
+            r"\b(api|sdk|mcp|integration\w*|workflow\w*|coding|code review)\b",
+            "This is a candidate for improving the development workflow.",
+            "Try it on one disposable task; compare time saved, correctness and integration effort.",
+        ),
+    )
+    for pattern, why, experiment in angles:
+        if re.search(pattern, text):
+            return why, experiment
+    return (
+        "Let’s see whether this earns a place in your toolkit.",
+        "Read the linked example and test one relevant use case; check license, pricing and data handling before team adoption.",
+    )
+
+
+def engineering_score(item):
+    text = (item.get("title", "") + " " + item.get("excerpt", "")).casefold()
+    useful = re.search(
+        r"\b(security|sandbox|permissions?|eval\w*|test\w*|regression\w*|"
+        r"debug\w*|tracing|observability|inference|latency|memory|quantiz\w*|"
+        r"deploy\w*|api|sdk|mcp|integration\w*|workflow\w*|coding)\b",
+        text,
+    )
+    housekeeping = re.search(
+        r"\b(bump version|version bump|typos?|chore|formatting)\b", text
+    )
+    return 3 if useful else (-3 if housekeeping else 0)
+
+
 def slots(profile, now):
     zone = _timezone(profile)
     day = now.astimezone(zone).date()
@@ -345,6 +412,11 @@ def rank_candidates(items, state, prefs, now):
             - age / 12
             - (3 if preview else 0)
             - (2 if len(item.get("excerpt", "")) < 60 else 0)
+            + (
+                engineering_score(item)
+                if prefs.get("focus") == "engineering_lead"
+                else 0
+            )
             + max(-2, min(2, prefs.get("weights", {}).get(item["topic"], 0))),
             3,
         )
@@ -374,8 +446,24 @@ def latest(owner, now=None):
     ][:12]
 
 
-def report(items, coverage):
-    lines = ["A few AI updates worth a look, monsieur:"]
+def report(items, coverage, prefs=None):
+    engineering = (prefs or {}).get("focus") == "engineering_lead"
+    intros = (
+        "Ah, a few discoveries for your engineering toolkit. Here’s what caught my eye:",
+        "I’ve found a few things worth a closer look, monsieur. Shall we put them to work?",
+        "A little inspiration for your next build—these caught my attention:",
+    )
+    seed = int(
+        hashlib.sha256("|".join(i["url"] for i in items[:3]).encode()).hexdigest()[:8],
+        16,
+    )
+    lines = [
+        (
+            intros[seed % len(intros)]
+            if engineering
+            else "A few AI updates worth a look, monsieur:"
+        )
+    ]
     for item in items[:3]:
         label = "Unverified X lead: " if item["evidence"] == "unverified_x_lead" else ""
         lines.append(f"\n• {label}{item['title']}")
@@ -389,6 +477,10 @@ def report(items, coverage):
                 + "”"
             )
         lines.append(item["url"])
+        if engineering:
+            why, experiment = engineering_angle(item)
+            lines.append("  " + why)
+            lines.append("  A small experiment: " + experiment)
     lines.append(
         "\nThese are source announcements and leads. I haven’t independently tested their claims."
     )
@@ -428,7 +520,7 @@ def controls(owner, text):
     if action == "latest":
         findings = latest(owner)
         return (
-            report(findings, state.get("coverage", {}))
+            report(findings, state.get("coverage", {}), preferences(owner))
             if findings
             else "No fresh AI findings saved yet."
         )
@@ -673,7 +765,7 @@ class AIScoutWorker:
         if not target:
             state["delivery"] = "no_telegram_identity"
             return
-        message = report(findings, state["coverage"])
+        message = report(findings, state["coverage"], preferences(owner))
         key = slot_key + ":delivery"
         if reserve_mutation_attempt(
             owner,

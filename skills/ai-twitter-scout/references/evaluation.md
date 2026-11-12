@@ -16,3 +16,8 @@
 12. A process dies after delivery: the durable delivery receipt prevents duplicate sends.
 13. No new findings: do not run Letta or send an empty/old digest.
 14. Findings belong to another owner: they must not enter this owner's packet or memory.
+15. An engineering lead asks for useful AI innovations: favor a reproducible developer
+    workflow or evaluation technique over a fresher routine version bump; retain
+    the original evidence status and link.
+16. Curie suggests a small experiment in her own warm voice: it must be clear that
+    it is a suggestion, not a test she performed or a verified productivity claim.

@@ -50,6 +50,13 @@ async def review(candidates, prefs):
         + json.dumps(
             {
                 "preferences": prefs.get("weights", {}),
+                "reading_focus": (
+                    "Practical tools and knowledge for a software engineer and technical lead: "
+                    "coding workflows, architecture, debugging, testing/evals, safe agent adoption, "
+                    "deployment and cost trade-offs. Favor meaningful innovations over version churn."
+                    if prefs.get("focus") == "engineering_lead"
+                    else "General AI technical updates"
+                ),
                 "candidates": [
                     {
                         key: item[key]

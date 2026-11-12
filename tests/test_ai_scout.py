@@ -177,6 +177,65 @@ def test_feedback_is_explicit_bounded_and_owner_scoped(runtime):
     assert scout.preferences("owner")["weights"]["harnesses"] == 0
 
 
+def test_engineering_focus_preserves_feedback_and_owner_isolation(runtime):
+    scout.feedback("owner", "harnesses", "more")
+    scout.set_focus("owner", "engineering_lead")
+    assert scout.preferences("owner")["weights"]["harnesses"] == 1
+    assert scout.preferences("other").get("focus") is None
+    scout.feedback("owner", "tools", "less")
+    assert scout.preferences("owner")["focus"] == "engineering_lead"
+    scout.set_focus("owner", "general")
+    assert scout.preferences("owner")["weights"]["tools"] == -1
+    with pytest.raises(ValueError):
+        scout.set_focus("owner", "invented")
+
+
+def test_engineering_focus_prefers_applicable_change_over_fresher_version_churn():
+    housekeeping = release(
+        "housekeeping",
+        topic="tools",
+        age=0,
+        excerpt="Chore: bump version and update the release metadata and documentation formatting.",
+    )
+    useful = release(
+        "useful",
+        topic="tools",
+        age=8,
+        excerpt="Adds a reproducible evaluation workflow for comparing coding agents on regression tasks.",
+    )
+    assert (
+        scout.rank_candidates([housekeeping, useful], {}, {}, NOW)[0]["id"]
+        == "housekeeping"
+    )
+    selected = scout.rank_candidates(
+        [housekeeping, useful], {}, {"focus": "engineering_lead"}, NOW
+    )
+    assert selected[0]["id"] == "useful"
+    assert selected[0]["evidence"] == useful["evidence"]
+    assert selected[0]["url"] == useful["url"]
+
+
+def test_engineering_digest_keeps_evidence_and_proposes_rather_than_claims_tests():
+    items = [
+        release(
+            str(i),
+            excerpt="A reproducible evaluation workflow for coding agents and regression tasks.",
+        )
+        for i in range(4)
+    ]
+    items[1].update(
+        evidence="unverified_x_lead", url="https://x.com/Fixture/status/123"
+    )
+    message = scout.report(items, {"x": "read"}, {"focus": "engineering_lead"})
+    assert message.count("\n• ") == 3
+    assert all(item["url"] in message for item in items[:3])
+    assert items[3]["url"] not in message
+    assert "Unverified X lead:" in message
+    assert message.count("A small experiment:") == 3
+    assert "I haven’t independently tested" in message
+    assert len(message) < 4096
+
+
 @pytest.mark.parametrize(
     "value",
     [
