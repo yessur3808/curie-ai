@@ -49,7 +49,7 @@ VPN/Meshnet, open X browser and unrelated inference services.
 
 The CLI's blank personality still produced a20KB general-purpose system prompt.
 The dedicated specialist bridge replaces that framework system message with
-`config/letta-curie-specialist.md` before inference, preserving the supplied task
-and curriculum. The installed CLI rejects custom named system presets when
+`config/letta-curie-specialist.md` before inference, extracting one validated task packet and injecting its versioned curriculum.
+Unrelated CLI context is excluded from specialist inference. The installed CLI rejects custom named system presets when
 resuming agents, so no unsupported CLI option is used. The `_skill` capability
 suffix is required by Curie's normal conversation specialist adapter.

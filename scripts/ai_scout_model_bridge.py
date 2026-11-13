@@ -179,8 +179,32 @@ def ask_shared_specialist(messages):
         .split("---", 2)[-1]
         .strip()
     )
-    messages = [{"role": "system", "content": system}] + [
-        item for item in messages if item["role"] != "system"
+    marker = "CURIE_SPECIALIST_PACKET_V1\n"
+    packets = []
+    for item in messages:
+        if item["role"] == "user" and marker in item["content"]:
+            payload, _ = json.JSONDecoder().raw_decode(
+                item["content"].split(marker, 1)[1]
+            )
+            packets.append(payload)
+    if len(packets) != 1 or not isinstance(packets[0], dict):
+        raise ValueError("invalid_specialist_packet")
+    packet = packets[0]
+    specialty = packet.get("specialty")
+    if specialty not in {"workflow", "engineering", "operations"}:
+        raise ValueError("invalid_specialty")
+    evidence = packet.get("request_and_supplied_evidence")
+    if not isinstance(evidence, str) or not 0 < len(evidence) <= 12000:
+        raise ValueError("invalid_specialist_evidence")
+    curriculum = (
+        Path(__file__).resolve().parents[1]
+        / "skills"
+        / f"curie-letta-{specialty}"
+        / "SKILL.md"
+    ).read_text()
+    messages = [
+        {"role": "system", "content": system + "\n" + curriculum},
+        {"role": "user", "content": json.dumps(packet)},
     ]
     prompt = ChatPrompt("\n".join(item["content"] for item in messages), messages)
     return request(

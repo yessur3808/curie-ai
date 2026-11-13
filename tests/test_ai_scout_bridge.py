@@ -97,7 +97,11 @@ def test_specialist_alias_uses_existing_general_worker(monkeypatch):
         ask_shared_specialist(
             [
                 {"role": "system", "content": "Unused coding harness"},
-                {"role": "user", "content": "Review supplied evidence"},
+                {"role": "user", "content": "CLI context ignored"},
+                {
+                    "role": "user",
+                    "content": 'CURIE_SPECIALIST_PACKET_V1\n{"specialty":"engineering","request_and_supplied_evidence":"Review supplied evidence"}',
+                },
             ]
         )
         == "Assessment"
@@ -105,7 +109,15 @@ def test_specialist_alias_uses_existing_general_worker(monkeypatch):
     assert observed[0][1]["role"] == "general"
     assert observed[0][1]["max_tokens"] == 256
     assert "Unused coding harness" not in str(observed[0][0])
+    assert "CLI context ignored" not in str(observed[0][0])
     assert "Review supplied evidence" in str(observed[0][0])
     assert ranking_messages(
         {"model": "curie-specialist", "messages": [{"role": "user", "content": "task"}]}
     )
+
+
+def test_specialist_rejects_missing_packet():
+    from scripts.ai_scout_model_bridge import ask_shared_specialist
+
+    with pytest.raises(ValueError, match="invalid_specialist_packet"):
+        ask_shared_specialist([{"role": "user", "content": "unstructured task"}])
