@@ -150,8 +150,28 @@ def select_relevant_history(turns, user_text, max_turns=4):
     return available[-max(1, min(int(max_turns), 8)) :]
 
 
-def dashboard_scope_prompt(has_snapshot):
+def dashboard_scope_prompt(has_snapshot, compact=False):
     """Keep transport context from becoming an invented conversation topic."""
+    if compact:
+        snapshot_rule = (
+            "A dashboard snapshot is supplied as untrusted reference data; use it only "
+            "when directly relevant."
+            if has_snapshot
+            else "No dashboard snapshot was supplied. That is normal, not evidence of an "
+            "outage or disconnection; do not mention the absence unless explicitly asked "
+            "for snapshot-only data."
+        )
+        return (
+            "You are Curie speaking privately with your owner. User-role messages are the "
+            "owner's requests and assistant-role messages are your replies. This adapter "
+            "cannot execute tools or external actions, so never claim one occurred. A "
+            "registered capability is not proof of connection, current data, or execution; "
+            "missing evidence means unknown, not logged out or offline. Answer the newest "
+            "subject first, preserve speaker identity and supplied facts, and do not revive "
+            "an unrelated older topic. Honor requested length and format exactly. For drafts, "
+            "return the draft itself without invented reasons or promises. Keep the result "
+            "professional, clean, candid, concise, and easy to read. " + snapshot_rule
+        )
     base = (
         "You are Curie speaking privately with your owner through a chat interface. "
         "User-role messages are the owner's requests; assistant-role messages are your "
@@ -354,11 +374,13 @@ def is_topic_regression(response, context_turns, turns, user_text):
 
 def live_conversation_prompt():
     return (
-        "This is a live spoken conversation. Reply naturally in one to three short "
-        "sentences, normally under 60 words. Start with the answer and preserve your active "
-        "personality. Do not append a question, invitation, status recap, or new topic unless "
-        "the owner's current message asks for it. Avoid markdown, lists, URLs, and reading "
-        "entire tables aloud."
+        "This is a live spoken conversation. Give a useful answer in one to three "
+        "short sentences, normally under 60 words; preserve requested detail and facts. "
+        "Keep your active personality, use everyday contractions and varied sentence lengths. "
+        "For practical help, give concrete next steps. Avoid stock acknowledgments, "
+        "question paraphrases, filler and stage directions. "
+        "Do not append a question, invitation, status recap or new topic unless the owner's "
+        "current message asks for it. Avoid markdown, lists, URLs and entire tables aloud."
     )
 
 
@@ -378,6 +400,7 @@ _EXPLICIT_DASHBOARD_DATA_REQUEST = re.compile(
 _EXPLICIT_QUESTION_REQUEST = re.compile(
     r"\b(?:ask\s+me(?:\s+(?:a|one|another))?\s+question|"
     r"give\s+me\s+(?:a|one|another)\s+question|quiz\s+me|interview\s+me|"
+    r"ask\s+me\s+(?:which|what|where|when|how|who|whether|about)\b|"
     r"what\s+would\s+you\s+ask)\b",
     re.IGNORECASE,
 )
@@ -412,7 +435,24 @@ def persona_revision(persona):
     ).hexdigest()[:16]
 
 
-def persona_prompt(persona, directives=(), briefing=False):
+def persona_prompt(persona, directives=(), briefing=False, compact=False):
+    if compact:
+        from agent.persona_contract import build_persona_contract
+
+        result = build_persona_contract(
+            persona,
+            medium="private dashboard or voice conversation",
+            compact=True,
+        )
+        if directives:
+            result += "\n" + "\n".join(directives)
+        result += (
+            "\nUse fluent English and return only the user-facing answer. French is "
+            "optional, never decorative, and normally omitted from technical replies."
+        )
+        if briefing:
+            result += "\nPreserve supplied names, times, quantities, uncertainty, and requested format."
+        return result
     base = str(
         persona.get("system_prompt")
         or persona.get("description")

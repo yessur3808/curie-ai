@@ -13,6 +13,8 @@ Different chat platforms render text differently:
 
 import html
 import re
+from collections.abc import Mapping, Sequence
+from typing import Any
 from urllib.parse import urlparse
 
 # Platforms that natively render Markdown [text](url) links.
@@ -40,11 +42,122 @@ def normalize_markdown_layout(text: str) -> str:
         source,
     )
     return re.sub(
-        r"^\s*\*\s+(?=\*\*[^*\n]+\*\*\s*:)",
+        r"^[ \t]*\*[ \t]+(?=\*\*[^*\n]+\*\*[ \t]*:)",
         "- ",
         source,
         flags=re.M,
     )
+
+
+_PLAIN_LABEL_LINE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<label>[A-Za-z][A-Za-z0-9 /&+()_-]{0,31}):"
+    r"[ \t]+(?P<value>\S.*)$"
+)
+_BULLET_LABEL_LINE = re.compile(
+    r"^(?P<indent>[ \t]*[-*][ \t]+)(?P<label>[A-Za-z][A-Za-z0-9 /&+()_-]{0,31}):"
+    r"[ \t]+(?P<value>\S.*)$"
+)
+_LIST_LINE = re.compile(r"^[ \t]*(?:[-*]|\d{1,2}[.)])[ \t]+\S")
+_FENCED_CODE = re.compile(r"```[\s\S]*?(?:```|$)")
+
+
+def _format_prose_block(block: str) -> str:
+    """Improve structured prose without rewriting its words or values."""
+
+    leading = (
+        "\n\n" if block.startswith("\n\n") else "\n" if block.startswith("\n") else ""
+    )
+    trailing = (
+        "\n\n" if block.endswith("\n\n") else "\n" if block.endswith("\n") else ""
+    )
+    block = normalize_markdown_layout(block)
+    lines = [line.rstrip() for line in block.split("\n")]
+
+    # A sequence of plain label/value rows is data, not a paragraph. Turning
+    # only runs of two or more into bullets avoids changing ordinary prose such
+    # as ``Note: this may take a minute``.
+    index = 0
+    while index < len(lines):
+        end = index
+        while end < len(lines) and _PLAIN_LABEL_LINE.fullmatch(lines[end]):
+            end += 1
+        if end - index >= 2:
+            for row in range(index, end):
+                match = _PLAIN_LABEL_LINE.fullmatch(lines[row])
+                if match:
+                    lines[row] = (
+                        f"{match.group('indent')}- **{match.group('label')}:** "
+                        f"{match.group('value')}"
+                    )
+        index = max(end, index + 1)
+
+    # Existing label bullets get the same restrained hierarchy even when there
+    # is only one. Markdown-aware connectors render it; plain connectors strip
+    # the emphasis while retaining the exact content.
+    for index, line in enumerate(lines):
+        match = _BULLET_LABEL_LINE.fullmatch(line)
+        if match:
+            lines[index] = (
+                f"{match.group('indent')}**{match.group('label')}:** "
+                f"{match.group('value')}"
+            )
+
+    # Separate list blocks from surrounding prose. This is a layout-only
+    # change and makes tool reports readable on narrow chat screens.
+    spaced: list[str] = []
+    for line in lines:
+        current_is_list = bool(_LIST_LINE.match(line))
+        previous = spaced[-1] if spaced else ""
+        previous_is_list = bool(_LIST_LINE.match(previous))
+        if current_is_list and previous and not previous_is_list:
+            spaced.append("")
+        elif line and previous_is_list and not current_is_list:
+            spaced.append("")
+        spaced.append(line)
+
+    body = re.sub(r"\n{3,}", "\n\n", "\n".join(spaced)).strip()
+    return f"{leading}{body}{trailing}" if body else leading or trailing
+
+
+def professional_message_layout(text: str) -> str:
+    """Apply Curie's universal, conservative presentation polish.
+
+    Simple conversational replies stay unchanged. Structured label/value data
+    gains hierarchy and breathing room, while fenced code is copied verbatim.
+    The function never summarizes, paraphrases, or invents a heading.
+    """
+
+    source = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not source:
+        return ""
+
+    parts: list[str] = []
+    cursor = 0
+    for match in _FENCED_CODE.finditer(source):
+        parts.append(_format_prose_block(source[cursor : match.start()]))
+        parts.append(match.group(0))
+        cursor = match.end()
+    parts.append(_format_prose_block(source[cursor:]))
+
+    # Prose blocks are normalized independently so code whitespace and blank
+    # lines remain byte-for-byte intact.
+    return "".join(parts).strip()
+
+
+def format_response_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Polish every connector-facing response and each deliberate part."""
+
+    result = dict(payload)
+    if "text" in result:
+        result["text"] = professional_message_layout(str(result.get("text") or ""))
+    raw_parts = result.get("message_parts")
+    if isinstance(raw_parts, Sequence) and not isinstance(raw_parts, (str, bytes)):
+        result["message_parts"] = [
+            professional_message_layout(str(part))
+            for part in raw_parts
+            if str(part).strip()
+        ]
+    return result
 
 
 def rich_format_preview_request(text: str) -> str | None:
@@ -171,7 +284,7 @@ def telegram_html(text: str) -> str:
     source = re.sub(r"\+\+([^+\n]+)\+\+", r"<u>\1</u>", source)
     source = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", source)
     source = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"<i>\1</i>", source)
-    source = re.sub(r"^\s*[-*]\s+", "• ", source, flags=re.MULTILINE)
+    source = re.sub(r"^[ \t]*[-*][ \t]+", "• ", source, flags=re.MULTILINE)
     source = re.sub(
         r"^&gt;\s?(.+)$", r"<blockquote>\1</blockquote>", source, flags=re.MULTILINE
     )

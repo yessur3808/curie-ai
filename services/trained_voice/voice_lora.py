@@ -79,3 +79,31 @@ def merge(t3, path, strength=1.0):
     with torch.no_grad():
         for module, delta in deltas:
             module.weight.add_(delta.to(module.weight.device, module.weight.dtype))
+
+
+def restore(adapters, path):
+    """Validate all tensors before continuing an existing training run."""
+    from safetensors import safe_open
+
+    with safe_open(str(path), framework="pt") as f:
+        metadata = f.metadata() or {}
+    if metadata.get("format") != "curie-nano-lora-v1":
+        raise ValueError("Unrecognized local adapter format")
+    state = load_file(str(path), device="cpu")
+    expected = {name + suffix for name in adapters for suffix in (".a", ".b")}
+    if set(state) != expected:
+        raise ValueError("Adapter target mismatch")
+    for name, layer in adapters.items():
+        if float(metadata["scale"]) != layer.scale:
+            raise ValueError("Adapter scale mismatch")
+        for suffix in ("a", "b"):
+            tensor = state[name + "." + suffix]
+            if (
+                tensor.shape != getattr(layer, suffix).shape
+                or not torch.isfinite(tensor).all()
+            ):
+                raise ValueError("Invalid adapter weights")
+    with torch.no_grad():
+        for name, layer in adapters.items():
+            for suffix in ("a", "b"):
+                getattr(layer, suffix).copy_(state[name + "." + suffix])

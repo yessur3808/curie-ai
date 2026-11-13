@@ -32,11 +32,12 @@ def _ram_snapshot() -> tuple[str, dict[str, Any]]:
     lines = "\n".join(
         f"- {row['name']} (PID {row['pid']}): {row['rss_mib']:.1f} MiB" for row in top
     )
-    text = f"RAM: {vm.percent:.1f}% used ({vm.used / 1024**3:.1f}/{vm.total / 1024**3:.1f} GiB)\n\nTop processes:\n{lines}"
+    text = f"Host RAM: {vm.percent:.1f}% used ({vm.used / 1024**3:.1f}/{vm.total / 1024**3:.1f} GiB)\nAvailable: {vm.available / 1024**3:.1f} GiB\n\nTop processes:\n{lines}"
     return text, {
         "percent": vm.percent,
         "used": vm.used,
         "total": vm.total,
+        "available": vm.available,
         "processes": top,
     }
 

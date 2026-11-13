@@ -16,6 +16,10 @@ PROMPTS = [
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--prompts",
+        help="JSON list of text/category/language records for a fixed comparison set",
+    )
     parser.add_argument("--root", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--old-profile", required=True)
@@ -23,6 +27,18 @@ def main():
     parser.add_argument("--output-name", default="evaluation")
     parser.add_argument("--checkpoint", default="run/best.safetensors")
     args = parser.parse_args()
+    prompts = (
+        json.loads(pathlib.Path(args.prompts).read_text())
+        if args.prompts
+        else [
+            {"text": text, "language": "en", "category": "legacy"} for text in PROMPTS
+        ]
+    )
+    if not prompts or not all(
+        isinstance(p, dict) and isinstance(p.get("text"), str) and p["text"].strip()
+        for p in prompts
+    ):
+        parser.error("--prompts must contain nonempty text records")
     os.environ.update(
         OMP_NUM_THREADS="6",
         MKL_NUM_THREADS="6",
@@ -63,7 +79,8 @@ def main():
         if strength:
             merge(model.t3, root / args.checkpoint, strength)
         model.conds = Conditionals.load(profile, map_location="cpu").to("cpu")
-        for index, text in enumerate(PROMPTS):
+        for index, item in enumerate(prompts):
+            text = item["text"]
             torch.manual_seed(852)
             start = time.perf_counter()
             with torch.inference_mode():
@@ -76,6 +93,8 @@ def main():
                 "variant": name,
                 "strength": strength,
                 "text": text,
+                "category": item.get("category", "unspecified"),
+                "language": item.get("language", "en"),
                 "audio": path.name,
                 "seconds": len(audio) / model.sr,
                 "generationSeconds": time.perf_counter() - start,

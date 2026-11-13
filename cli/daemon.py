@@ -6,6 +6,8 @@ Uses a PID file in ~/.curie/ to track the running process.
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 import os
 import sys
 import signal
@@ -19,7 +21,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-CURIE_DIR = Path.home() / ".curie"
+CURIE_DIR = assistant_state_dir()
 PID_FILE = CURIE_DIR / "curie.pid"
 LOG_FILE = CURIE_DIR / "curie.log"
 STATE_FILE = CURIE_DIR / "daemon_state.json"
@@ -137,6 +139,10 @@ def start_daemon(extra_args: list[str] | None = None, connector_args: list[str] 
     Returns a dict with {success, pid, message}.
     """
     name = _instance_name(instance)
+    root = Path(__file__).resolve().parents[1]
+    if name not in {"default", root.name.removesuffix("-ai")}:
+        return {"success": False, "pid": None, "message":
+                "Personalities require their own installation. Use curie personality add NAME --persona FILE, then start from that directory."}
     status = get_status(name)
     if status["running"]:
         return {"success": False, "pid": status["pid"], "message": f"Curie is already running (PID {status['pid']})"}

@@ -414,6 +414,7 @@ def test_session_metadata_cannot_expose_cookies_or_cross_owners(monkeypatch, tmp
 
     monkeypatch.setenv("CURIE_CREDENTIAL_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("CURIE_CREDENTIAL_STORE", str(tmp_path / "vault.enc"))
+    monkeypatch.setenv("CURIE_X_BROWSER_ENGINE", "firefox")
     monkeypatch.setenv("CURIE_X_BROWSER_PROFILE_ROOT", str(tmp_path / "browser"))
     with xb.profile_lease("owner") as profile:
         (profile / "prefs.js").write_text("{}")

@@ -84,7 +84,7 @@ def test_corrected_location_runs_a_real_lookup(city):
     ]
     request = classify_request(f"Actually I meant {city}. Check that instead.", history)
     assert request.action == "weather"
-    assert request.params["query"] == "Weather in " + city
+    assert request.params["query"] == f"What's the weather in {city}?"
     assert classify_request(f"Actually I meant {city}. Check that instead.") is None
 
 

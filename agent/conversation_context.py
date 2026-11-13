@@ -35,10 +35,61 @@ _ELLIPSIS = re.compile(
 
 
 def discussion_only(text):
-    """Reporting/asking about a prior result does not authorize its replay."""
+    """Discussion, explanation and prohibitions do not authorize execution."""
     clean = str(text or "").strip()
     if clean.startswith("/"):
         return False
+    if re.match(
+        r"(?:please\s+)?(?:call|name|rename)\s+(?:(?:the|a|an|my|our|this)\s+)?"
+        r"(?:fictional|imaginary|pretend)\b",
+        clean,
+        re.I,
+    ):
+        # Naming an explicitly fictional object is not a device-alias command.
+        return True
+    if re.match(r"(?:back|returning)\s+to\b", clean, re.I) and re.search(
+        r"\bremind me (?:of|about)\b", clean, re.I
+    ):
+        from agent.skills.scheduler import _parse_due_time
+
+        # Conversational recall is not permission to schedule a notification.
+        # Keep explicit due-time requests available to the normal scheduler.
+        if _parse_due_time(clean) is None:
+            return True
+    # A prohibited or hypothetical action is not a request to execute it.
+    # Abstain on mixed directives too: keyword routing cannot safely determine
+    # which clause owns an action. Do not match embedded reminder content.
+    if re.search(
+        r"^\s*(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?"
+        r"(?:please\s+)?(?:don['’]t|do not|not|never|avoid|refrain from)\s+\S",
+        clean,
+        re.I,
+    ):
+        return True
+    if re.search(
+        r"^\s*(?:please\s+)?i(?:\s+(?:don['’]t|do not)\s+want\s+you\s+to|"
+        r"(?:\s+would|['’]d)\s+rather\s+you\s+(?:didn['’]t|did not))\s+\S",
+        clean,
+        re.I,
+    ):
+        return True
+    if re.search(
+        r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        r"(?:how\s+(?:would|could|do|can)\s+you|"
+        r"(?:explain|describe|tell me|show me)\s+how\s+"
+        r"(?:you(?:\s+(?:would|could)|['’]d)?|to))\b",
+        clean,
+        re.I,
+    ):
+        return True
+    if re.search(
+        r"\bwithout\s+(?:(?:actually|really)\s+)?"
+        r"(?:accessing|checking|executing|running|calling|"
+        r"using\s+(?:(?:any|the|your)\s+)?(?:tools?|apis?))\b",
+        clean,
+        re.I,
+    ):
+        return True
     reported_status = re.search(
         r"\b(?:returned|received|gave|got|reported)\s+(?:an?\s+)?(?:http\s+)?[45]\d\d\b",
         clean,

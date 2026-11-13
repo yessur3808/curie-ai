@@ -1,0 +1,10 @@
+[
+ {"category":"agreement","language":"auto","text":"D’accord, we can do that together.","listenFor":"French d’accord followed by fluent English; no dropped words."},
+ {"category":"discovery","language":"auto","text":"Voilà, I found the answer.","listenFor":"French voilà; no English viola substitution."},
+ {"category":"certainty","language":"auto","text":"Bien sûr. Let me check the details first.","listenFor":"French vowel and consonant transitions; natural English restart."},
+ {"category":"understanding","language":"auto","text":"Je comprends. We can take our time.","listenFor":"French nasal vowel; warm but clear delivery."},
+ {"category":"english-control","language":"en","text":"The viola is in the café. We reached an accord yesterday.","listenFor":"Keep English words distinct from French phrase corrections."},
+ {"category":"french-control","language":"fr","text":"D’accord. Voilà. Bien sûr. Je comprends.","listenFor":"Native French pronunciation; listen manually even if ASR is correct."},
+ {"category":"bright","language":"en","text":"That is wonderful news. Congratulations!","listenFor":"Natural enthusiasm; no echo, metallic tone or clipping."},
+ {"category":"gentle","language":"en","text":"I am sorry to hear that. We can take this one step at a time.","listenFor":"Gentle pacing; no robotic echo or muffling."}
+]

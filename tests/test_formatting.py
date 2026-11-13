@@ -9,7 +9,9 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from utils.formatting import (
+    format_response_payload,
     plain_links,
+    professional_message_layout,
     strip_markdown,
     format_for_platform,
     MARKDOWN_SKILL_MODELS,
@@ -17,6 +19,59 @@ from utils.formatting import (
     rich_format_preview_request,
     telegram_html,
 )  # noqa: E402
+
+
+def test_professional_layout_keeps_simple_conversation_plain():
+    assert (
+        professional_message_layout(
+            "I can help with that. What should we tackle first?"
+        )
+        == "I can help with that. What should we tackle first?"
+    )
+
+
+def test_professional_layout_turns_structured_rows_into_readable_labels():
+    source = (
+        "System status\nStatus: Healthy\nOwner: Curie\nUpdated: 30 Oct 2026, 23:45 HKT"
+    )
+
+    polished = professional_message_layout(source)
+
+    assert polished == (
+        "System status\n\n"
+        "- **Status:** Healthy\n"
+        "- **Owner:** Curie\n"
+        "- **Updated:** 30 Oct 2026, 23:45 HKT"
+    )
+    assert telegram_html(polished).count("• <b>") == 3
+
+
+def test_professional_layout_preserves_code_and_links_exactly():
+    source = (
+        "Implementation\nStatus: Ready\nSource: [Docs](https://example.com/a?x=1&y=2)\n\n"
+        "```python\nrecord = {'status': 'ready'}\n\n\nprint(record)\n```"
+    )
+
+    polished = professional_message_layout(source)
+
+    assert "[Docs](https://example.com/a?x=1&y=2)" in polished
+    assert "\n\n```python\n" in polished
+    assert "```python\nrecord = {'status': 'ready'}\n\n\nprint(record)\n```" in polished
+
+
+def test_response_payload_formats_text_and_each_message_part():
+    formatted = format_response_payload(
+        {
+            "text": "Report\nStatus: Ready\nSource: Live",
+            "message_parts": ["First\nStatus: Ready\nSource: Live", "All done."],
+            "model_used": "tool",
+        }
+    )
+
+    assert "- **Status:** Ready" in formatted["text"]
+    assert "- **Source:** Live" in formatted["message_parts"][0]
+    assert formatted["message_parts"][1] == "All done."
+    assert formatted["model_used"] == "tool"
 
 
 def test_inline_bold_label_list_is_restored_without_damaging_italics():
@@ -48,6 +103,12 @@ def test_telegram_html_supports_rich_text_and_safe_links():
     assert "<code>code</code>" in rendered
     assert '<a href="https://example.com?a=1&amp;b=2">Open</a>' in rendered
     assert "• First" in rendered
+
+
+def test_telegram_html_preserves_blank_line_before_a_list():
+    rendered = telegram_html("Status report\n\n- **State:** Ready")
+
+    assert rendered == "Status report\n\n• <b>State:</b> Ready"
 
 
 def test_telegram_html_renders_markdown_table_as_preformatted_text():

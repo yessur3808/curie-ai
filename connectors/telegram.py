@@ -4,6 +4,8 @@ Telegram connector - transport-only concerns.
 Receives Telegram events, normalizes to standard format, calls ChatWorkflow.
 """
 
+from utils.instance_paths import assistant_state_dir
+
 import asyncio
 from contextlib import suppress
 import datetime
@@ -32,7 +34,7 @@ from telegram.ext import (
 from agent.chat_workflow import ChatWorkflow
 
 from utils.session import set_busy_temporarily, clear_user_busy
-from utils.formatting import strip_markdown, telegram_html
+from utils.formatting import professional_message_layout, strip_markdown, telegram_html
 from memory import UserManager
 from memory.session_store import get_session_manager
 from utils.db import is_master_user
@@ -166,18 +168,24 @@ async def send_message(
     Used by ProactiveMessagingService to deliver due reminders and check-ins.
     Returns True if the message was sent successfully, False otherwise.
 
-    The optional `parse_mode` parameter allows callers to enable Markdown or HTML
-    formatting (e.g. "MarkdownV2", "HTML"). Callers are responsible for
-    properly escaping any user-derived content before enabling formatting.
+    With no explicit mode, Curie's portable Markdown is polished and converted
+    to safe Telegram HTML. Explicit modes are passed through unchanged because
+    their callers own escaping and may already provide native markup.
     """
     if _runtime.application is None:
         logger.warning("Telegram app not initialized; cannot send proactive message")
         return False
 
+    outbound_message = (
+        professional_message_layout(message) if parse_mode is None else message
+    )
+
     async def deliver(bot) -> None:
-        # Explicit native markup remains caller-owned. Portable Markdown uses
-        # the same bounded renderer as ordinary replies.
-        chunks = [message] if parse_mode else split_telegram_message(message)
+        chunks = (
+            [outbound_message]
+            if parse_mode
+            else split_telegram_message(outbound_message)
+        )
         for chunk in chunks:
             await bot.send_message(
                 chat_id=int(external_user_id),
@@ -294,7 +302,7 @@ def _startup_notification_path() -> Path:
     return (
         Path(configured)
         if configured
-        else Path.home() / ".curie" / "telegram-startup-notified"
+        else assistant_state_dir() / "telegram-startup-notified"
     )
 
 
@@ -499,7 +507,8 @@ async def reply_in_chunks(
     message, text: str, parse_mode: Optional[str] = "HTML"
 ) -> None:
     """Send readable rich-text chunks and safely fall back to plain text."""
-    for raw_chunk in split_telegram_message(text):
+    polished = professional_message_layout(text)
+    for raw_chunk in split_telegram_message(polished):
         chunk = telegram_html(raw_chunk) if parse_mode == "HTML" else raw_chunk
         try:
             await message.reply_text(
@@ -749,6 +758,9 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
     telegram_username = update.message.from_user.username or f"telegram_{tg_user_id}"
     internal_id = get_internal_id(tg_user_id, telegram_username)
+    from services.navigation_conversation import clear_navigation
+
+    clear_navigation(internal_id, update.message.chat_id)
 
     normalized_input = {
         "platform": "telegram",
@@ -901,10 +913,20 @@ async def _process_and_reply(
         "connector_account_id": os.getenv("TELEGRAM_BOT_USERNAME", "default"),
         "attachments": attachments or [],
     }
+    from memory.adaptation import apply_voice_modality_preference, text_reply_requested
+
+    text_only = text_reply_requested(user_message)
+    if text_only:
+        apply_voice_modality_preference(internal_id, user_message, "telegram")
+    from services.trained_voice.affect import current_cues
+
+    voice_cues = getattr(user_message, "voice_cues", {})
+    cue_token = current_cues.set(voice_cues)
     typing_task = asyncio.create_task(_typing_heartbeat(update.message))
     try:
         result = await _runtime.workflow.process_message(normalized_input)
     finally:
+        current_cues.reset(cue_token)
         typing_task.cancel()
         with suppress(asyncio.CancelledError):
             await typing_task
@@ -914,15 +936,19 @@ async def _process_and_reply(
             synthesize_reply,
             voice_replies_enabled,
             voice_reply_requested,
+            voice_input_reply_allowed,
         )
 
-        if (
-            force_voice
+        if not text_only and (
+            (force_voice and voice_input_reply_allowed(internal_id, "telegram"))
             or voice_reply_requested(user_message)
             or voice_replies_enabled(internal_id, "telegram")
         ):
             voice_path = await synthesize_reply(
-                response_text, _runtime.workflow.persona, internal_id
+                response_text,
+                _runtime.workflow.persona,
+                internal_id,
+                **({"voice_cues": voice_cues} if voice_cues else {}),
             )
             if voice_path:
                 try:
@@ -1003,6 +1029,34 @@ async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text(str(exc))
     finally:
         Path(path).unlink(missing_ok=True)
+
+
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Accept a location pin only in the chat and user that supplied it."""
+    from services.navigation_conversation import handle_navigation
+
+    message = update.effective_message
+    user = update.effective_user
+    if message is None or user is None or message.location is None:
+        return
+    internal_id = get_internal_id(user.id, user.username or f"telegram_{user.id}")
+    point = {
+        "latitude": message.location.latitude,
+        "longitude": message.location.longitude,
+    }
+    try:
+        reply = await handle_navigation(
+            internal_id,
+            message.chat_id,
+            location=point,
+            refresh_only=update.edited_message is not None,
+        )
+    except (ValueError, TypeError):
+        reply = "I couldn’t read that location. Please share a new location pin."
+    if reply is None:
+        return
+    for chunk in split_telegram_message(reply):
+        await message.reply_text(chunk, disable_web_page_preview=True)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1138,6 +1192,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             Path(pending.path).unlink(missing_ok=True)
 
+    from services.navigation_conversation import handle_navigation
+
+    directions_reply = await handle_navigation(
+        internal_id, update.message.chat_id, text=user_message
+    )
+    if directions_reply is not None:
+        # Plain text preserves bullets and avoids interpreting place names as HTML.
+        for chunk in split_telegram_message(directions_reply):
+            await update.message.reply_text(chunk, disable_web_page_preview=True)
+        return
+
     await _process_and_reply(
         update,
         user_message,
@@ -1170,6 +1235,14 @@ async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_with_result(update.message, result, "📅 No reminders found.")
 
 
+async def close_voice_workers(application):
+    from services.trained_voice.warm_speech_worker import close_speech_workers
+    from services.trained_voice.warm_worker import close_recognition_workers
+
+    await close_speech_workers()
+    await close_recognition_workers()
+
+
 def start_telegram_bot(workflow: ChatWorkflow):
     """Start Telegram bot with shared ChatWorkflow."""
     _runtime.workflow = workflow
@@ -1184,6 +1257,7 @@ def start_telegram_bot(workflow: ChatWorkflow):
         ApplicationBuilder()
         .token(telegram_token)
         .post_init(notify_master_awake)
+        .post_shutdown(close_voice_workers)
         .build()
     )
     # Store the application so send_message() can use it for proactive delivery
@@ -1214,6 +1288,7 @@ def start_telegram_bot(workflow: ChatWorkflow):
     app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
     for workflow_command in WORKFLOW_COMMANDS:
         app.add_handler(CommandHandler(workflow_command, handle_workflow_command))
+    app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_message))
     app.add_handler(

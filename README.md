@@ -751,6 +751,7 @@ Copy `.env.example` to `.env` and configure these variables.
 | `LLM_AGENT_MODEL` | reasoning model | Model used to plan approved project/tool changes |
 | `LLM_CRITIC_MODEL` | general model | Independent second-opinion model used by ensembles |
 | `LLM_MAX_LOADED_MODELS` | `2` | LRU limit for resident GGUF models |
+| `LLM_MAX_RESIDENT_BYTES` | `0` | Optional aggregate GGUF byte ceiling; the shared worker evicts LRU models before loading past it |
 | `LLM_PARALLEL_WORKERS` | `2` | Maximum concurrent local specialists |
 | `LLM_ENSEMBLE_ENABLED` | `true` | Enable explicit multi-agent requests |
 | `LLM_PROVIDER_PRIORITY` | `llama.cpp` | Provider order, e.g. `anthropic,openai,llama.cpp` |
@@ -1092,3 +1093,59 @@ This project is licensed under the MIT License — see [LICENSE](LICENSE) for de
 ## Locally trained Curie voice
 
 Curie owns the trained Nano speech worker, live sentence streaming, local transcription, personality delivery and training/evaluation tools in `services/trained_voice/`. The trained voice is the default for Telegram, Discord, Slack, WhatsApp, the main API, and the Observatory dashboard. Private weights and recordings live in `data/trained-voice/` and are excluded from Git. See [setup, provenance and resource limits](docs/TRAINED_VOICE.md).
+
+
+### Hong Kong bus arrivals
+
+Curie can check official Citybus and KMB arrival estimates without API keys:
+
+- “Check my evening bus commute” or “Check my afternoon commute” compares
+  Citybus 18X and 33X from Model Housing Estate to Connaught Garden.
+- “Check my morning commute” checks 18X from Central (Macao Ferry) to
+  Healthy Village, using the confirmed morning boarding stop. An explicit
+  origin, such as “18X from Ka On Street to Healthy Village”, overrides it.
+  Connaught Garden is only served on the return journey.
+- “18X or 33X from K11 Atelier to Connaught Garden” uses Model Housing Estate
+  as the boarding stop, as requested for this commute.
+- “Track KMB 1A from Star Ferry to Sau Mau Ping” checks another route.
+
+The `bus_arrivals` tool also accepts `operator` (`CTB` or `KMB`), `route`,
+`origin` (stop name or ID), `destination`, `direction` (`inbound`/`outbound`),
+and KMB `service_type` (default `1`). Supply a destination or direction when
+stop names match both directions. Stop order is checked before fetching ETAs.
+
+Results show up to three arrivals in Hong Kong time, operator remarks,
+source information, the check time and the oldest provider update time among
+displayed arrivals. Countdown minutes are a snapshot; ask again to refresh. Route metadata is cached for 24 hours; arrivals are fetched
+on each request, and estimates with timestamps older than three minutes are
+excluded. An empty feed means no current estimate, not proof that service has
+ended. This feature provides on-demand stop ETAs, not GPS vehicle positions or
+scheduled push notifications. The commute shortcuts are built-in route examples;
+custom per-user commute persistence is not yet implemented.
+
+Sources: [Citybus open data](https://data.gov.hk/en-data/dataset/ctb-eta-transport-realtime-eta)
+and [KMB open data](https://data.gov.hk/en-data/dataset/hk-td-tis_21-etakmb).
+
+
+### Telegram directions from a shared location
+
+Tell Curie “I want to go to K11 Atelier”, then share a Telegram location pin
+(attachment → Location). You can also share the pin first and then name the
+destination. Public transport is the default; “walk to …” or “drive to …”
+selects that mode. Replies use bullet points, with boarding stops, lines,
+headsigns, alighting stops and walking steps when supplied by the provider.
+
+Set `GOOGLE_ROUTES_API_KEY` in the Curie server environment for detailed routes.
+The key requires Google Routes API enabled in its Google Cloud project with
+billing configured. Restart Curie after changing the environment. Setup:
+https://developers.google.com/maps/documentation/routes/get-api-key
+Without the key, or during provider failures, Curie supplies a Google Maps
+route link in the requested mode and explicitly says detailed directions are
+unavailable. Transit requests never fall back to driving directions.
+
+Location and pending destination are kept only in process memory for 15 minutes,
+scoped to both Telegram user and chat. `/reset`, “forget my location” or
+“cancel directions” clears them. Live-location edits refresh the stored point
+without repeated replies. Locations are sent to Google when requesting a route;
+opening a Maps link also shares its origin and destination with Google.
+The connector does not store these pins in long-term conversation memory.

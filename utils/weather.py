@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+import asyncio
 import aiohttp
 import httpx
 from utils.ttl_cache import TTLCache
+from agent.tooling.errors import ProviderAccessError
 
 _TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
+_REQUEST_DEADLINE = 12.0
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 _WMO = {
@@ -57,12 +60,58 @@ def reset_cache() -> None:
     _GEOCODE_CACHE.clear()
 
 
+async def _get(client, url, *, params):
+    """Retry public read-only requests once, with a total per-stage deadline."""
+    stage = "geocoding" if url == _GEOCODE_URL else "forecast"
+    try:
+        async with asyncio.timeout(_REQUEST_DEADLINE):
+            for attempt in range(2):
+                try:
+                    response = await client.get(url, params=params)
+                    response.raise_for_status()
+                    return response
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    transient = status in {408, 502, 503, 504}
+                    if not transient or attempt:
+                        raise ProviderAccessError(
+                            provider="Open-Meteo",
+                            status=status,
+                            code=f"weather_{stage}_http_{status}",
+                            user_message="The weather provider is currently unavailable. Please try again later.",
+                            retryable=transient or status == 429,
+                        ) from exc
+                except (
+                    httpx.TimeoutException,
+                    httpx.NetworkError,
+                    httpx.RemoteProtocolError,
+                ) as exc:
+                    if attempt:
+                        raise ProviderAccessError(
+                            provider="Open-Meteo",
+                            status=None,
+                            code=f"weather_{stage}_{type(exc).__name__}",
+                            user_message="I couldn't reach the weather provider after two attempts. Please try again later.",
+                            retryable=True,
+                        ) from exc
+                await asyncio.sleep(0.25)
+    except TimeoutError as exc:
+        raise ProviderAccessError(
+            provider="Open-Meteo",
+            status=None,
+            code=f"weather_{stage}_deadline",
+            user_message="The weather provider took too long to respond. The check has stopped; please try again later.",
+            retryable=True,
+        ) from exc
+
+
 async def _geocode(client: httpx.AsyncClient, city: str) -> dict:
     key = city.strip().casefold()
     cached = _GEOCODE_CACHE.get(key)
     if cached is not None:
         return cached
-    geo = await client.get(
+    geo = await _get(
+        client,
         _GEOCODE_URL,
         params={"name": city, "count": 1, "language": "en", "format": "json"},
     )
@@ -87,7 +136,8 @@ async def get_weather(city: str, unit: str = "metric", day_offset: int = 0):
             "timezone": "auto",
         }
         if day_offset:
-            response = await client.get(
+            response = await _get(
+                client,
                 _FORECAST_URL,
                 params={
                     **common,
@@ -115,7 +165,8 @@ async def get_weather(city: str, unit: str = "metric", day_offset: int = 0):
                 ],
             }
         else:
-            response = await client.get(
+            response = await _get(
+                client,
                 _FORECAST_URL,
                 params={
                     **common,
@@ -197,7 +248,8 @@ async def get_weather_range(
             )
         if end_offset > 15:
             raise ValueError("Forecast is not available that far ahead")
-        response = await client.get(
+        response = await _get(
+            client,
             _FORECAST_URL,
             params={
                 "latitude": place["latitude"],

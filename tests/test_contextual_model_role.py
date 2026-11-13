@@ -26,7 +26,7 @@ def test_does_not_inherit_reasoning_for_a_self_contained_unrelated_question():
 
 def test_incidental_code_in_an_activity_choice_is_not_a_programming_task():
     text = "I'm tired after work. Pick one: tea and a book or another hour fixing code. Keep it casual."
-    assert ModelConversationService.model_role(text) == "general"
+    assert ModelConversationService.model_role(text) == "fast"
 
 
 def test_service_error_explanation_is_not_a_coding_request():

@@ -120,6 +120,10 @@ def _compound_home_plan(
 def _compound_operational_plan(
     text: str, owner_id: str, history: Sequence[Any] | None
 ) -> tuple[tuple[RoutingDecision, ...], bool, CompoundRequest | None]:
+    from agent.conversation_context import discussion_only
+
+    if discussion_only(text):
+        return (), True, None
     home = _compound_home_plan(text, owner_id, history)
     if home:
         return home, True, None

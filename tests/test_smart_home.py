@@ -412,6 +412,7 @@ def test_offline_device_reports_the_blocker_without_claiming_success():
             None,
         ),
         ("Is the TV light still on right now?", "home_status", "TV light", None),
+        ("See if the desk lamp is still on.", "home_status", "desk lamp", None),
         ("Turn off the desk plug", "home_control", "desk plug", "off"),
         ("Turn off all lights", "home_control", "all lights", "off"),
         (
@@ -470,6 +471,19 @@ def test_pronoun_control_uses_recent_explicit_home_target():
 
     assert request.action == "home_control"
     assert request.params == {"target": "tv light", "state": "off", "provider": ""}
+
+
+def test_natural_go_ahead_followup_uses_recent_status_target():
+    request = classify_request(
+        "Go ahead and switch it off.",
+        history=[
+            {"role": "user", "content": "See if the desk lamp is still on."},
+            {"role": "assistant", "content": "The desk lamp is on."},
+        ],
+    )
+
+    assert request.action == "home_control"
+    assert request.params == {"target": "desk lamp", "state": "off", "provider": ""}
 
 
 @pytest.mark.parametrize(

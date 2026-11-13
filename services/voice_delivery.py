@@ -47,9 +47,9 @@ _FRENCH_WORDS = frozenset(
     }
 )
 _VOICE_REQUEST = re.compile(
-    r"\b(?:reply|respond|answer|send|say|read)(?:\s+(?:that|this|it|the answer))?\s+"
+    r"\b(?:reply|respond|answer|send|say|read)(?:\s+me)?(?:\s+(?:that|this|it|the answer))?\s+"
     r"(?:as|in|with|using|by)?\s*(?:a\s+)?(?:voice|audio)(?:\s+message|\s+reply|\s+note)?\b|"
-    r"\b(?:voice|audio)\s+(?:message|reply|response)\b",
+    r"\b(?:voice|audio)\s+(?:message|reply|response|note)\b",
     re.I,
 )
 
@@ -149,9 +149,31 @@ def voice_replies_enabled(internal_id: str, channel: str | None = None) -> bool:
     )
 
 
+def voice_input_reply_allowed(internal_id: str, channel: str) -> bool:
+    """Audio input must not override an explicitly saved text-only channel."""
+    from memory.adaptation import get_preferences
+
+    preferences = get_preferences(internal_id)
+    return (
+        channel not in preferences.get("voice_quiet_channels", [])
+        and preferences.get("voice_reply_channels", {}).get(channel) is not False
+    )
+
+
 def voice_reply_requested(text: str) -> bool:
     """Recognize an explicit one-shot request without changing saved preferences."""
-    return bool(_VOICE_REQUEST.search(str(text or "")))
+    from memory.adaptation import text_reply_requested
+
+    text = str(text or "")
+    if text_reply_requested(text):
+        return False
+    if re.search(
+        r"\b(?:do not|don’t|don't|never)\s+(?:send|reply|respond|answer|use|read|say)\b[^.!?]{0,60}\b(?:voice|audio)\b|\b(?:text only|no (?:voice|audio)(?: messages?| notes?| replies)?)\b",
+        text,
+        re.I,
+    ):
+        return False
+    return bool(_VOICE_REQUEST.search(text))
 
 
 def trained_voice_id(persona: dict | None) -> str:
@@ -217,7 +239,7 @@ def voice_health() -> dict:
 
 
 async def synthesize_reply(
-    text: str, persona: dict, internal_id: str | None = None
+    text: str, persona: dict, internal_id: str | None = None, *, voice_cues=None
 ) -> str | None:
     """Generate one local audio file; caller owns and must delete the result."""
     from utils.voice import (
@@ -260,7 +282,11 @@ async def synthesize_reply(
             )
             os.close(trained_fd)
             try:
-                delivery = delivery_settings(persona, _delivery_mode(text))
+                from services.trained_voice.affect import expressive_delivery
+
+                delivery = expressive_delivery(
+                    delivery_settings(persona, _delivery_mode(text)), text, voice_cues
+                )
                 speed = str(config.get("speed") or "normal")
                 delivery["rate"] = round(
                     float(delivery.get("rate") or 1.0)

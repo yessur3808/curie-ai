@@ -27,6 +27,22 @@ class ProviderAccessError(ToolExecutionError):
         self.http_status = status
 
 
+class CapabilityUnavailableError(ToolExecutionError):
+    """Availability changed before execution; do not expose raw probe details."""
+
+    error_code = "capability_unavailable"
+
+    def __init__(self, capability: str):
+        label = capability.replace("_", " ")
+        super().__init__(
+            f"Capability {capability!r} is unavailable",
+            user_message=(
+                f"The {label} tool is currently unavailable, so it did not run. "
+                "Check its connection or configuration before trying again."
+            ),
+        )
+
+
 class SandboxCommandError(ToolExecutionError):
     """A command that failed inside, or while starting, the secure sandbox."""
 

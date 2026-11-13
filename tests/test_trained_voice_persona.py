@@ -57,6 +57,23 @@ class PersonaTests(unittest.TestCase):
         self.assertIn("normally spelled English", prompt)
         self.assertIn("do not compose full French clauses", prompt)
 
+    def test_compact_dashboard_persona_preserves_identity_without_full_profile(self):
+        p = {
+            "name": "Curie",
+            "system_prompt": "A very long personality contract that should not be repeated.",
+            "language_profile": {"primary_language": "english"},
+        }
+        prompt = persona_prompt(
+            p,
+            ["- Keep the response clean."],
+            compact=True,
+        )
+
+        self.assertLess(len(prompt), 500)
+        self.assertIn("Curie:", prompt)
+        self.assertIn("Keep the response clean", prompt)
+        self.assertNotIn("very long personality contract", prompt)
+
     def test_dashboard_scope_does_not_infer_an_outage_without_a_snapshot(self):
         prompt = dashboard_scope_prompt(False)
 
@@ -65,6 +82,14 @@ class PersonaTests(unittest.TestCase):
         self.assertIn("Do not repeat or paraphrase", prompt)
         self.assertIn("mention one specific next action", prompt)
         self.assertIn("Never guess a device", prompt)
+
+    def test_compact_dashboard_scope_retains_execution_and_evidence_boundaries(self):
+        prompt = dashboard_scope_prompt(False, compact=True)
+
+        self.assertLess(len(prompt), 1200)
+        self.assertIn("cannot execute tools", prompt)
+        self.assertIn("missing evidence means unknown", prompt)
+        self.assertIn("professional, clean", prompt)
 
     def test_dashboard_scope_allows_relevant_supplied_snapshot(self):
         prompt = dashboard_scope_prompt(True)

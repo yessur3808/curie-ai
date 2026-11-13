@@ -8,6 +8,8 @@ The CLI reads and renders a live breakdown table.
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 import json
 import os
 import time
@@ -15,7 +17,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-CURIE_DIR = Path.home() / ".curie"
+CURIE_DIR = assistant_state_dir()
 _INSTANCE = os.getenv("CURIE_INSTANCE", "default").strip().casefold()
 TASKS_FILE = CURIE_DIR / (
     "tasks.json" if _INSTANCE == "default" else f"instance-{_INSTANCE}-tasks.json"

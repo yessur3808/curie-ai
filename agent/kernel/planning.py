@@ -475,13 +475,14 @@ class PlanExecutor:
                 attempts=0,
             )
         if not step.available:
+            from agent.tooling.errors import CapabilityUnavailableError
+
             return StepOutcome(
                 step.id,
                 step.capability,
                 "failed",
                 "failed",
-                f"{step.capability.replace('_', ' ').title()} is unavailable: "
-                f"{step.unavailable_reason or 'not configured'}.",
+                CapabilityUnavailableError(step.capability).user_message,
                 "planner:unavailable",
                 error_type="capability_unavailable",
             )

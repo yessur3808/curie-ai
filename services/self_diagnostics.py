@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -63,7 +65,7 @@ class DiagnosticMonitor:
             else f"instance-{instance}-command-diagnostics.json"
         )
         self.path = path or Path(
-            os.getenv("CURIE_DIAGNOSTICS_PATH") or Path.home() / ".curie" / filename
+            os.getenv("CURIE_DIAGNOSTICS_PATH") or assistant_state_dir() / filename
         )
         self._records: deque[dict[str, Any]] = deque(maxlen=max(10, int(max_records)))
         self._lock = threading.Lock()

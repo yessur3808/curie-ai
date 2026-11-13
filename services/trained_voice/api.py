@@ -61,7 +61,21 @@ from utils.voice import (
 )
 import uvicorn
 
-app = FastAPI(title="Curie Dashboard Conversation Bridge")
+
+@asynccontextmanager
+async def lifespan(app):
+    try:
+        yield
+    finally:
+        from .warm_worker import close_recognition_workers
+
+        await close_recognition_workers()
+        from .warm_speech_worker import close_speech_workers
+
+        await close_speech_workers()
+
+
+app = FastAPI(title="Curie Dashboard Conversation Bridge", lifespan=lifespan)
 persona = load_persona()
 model = ModelConversationService(manager)
 social = SocialConversationService()
@@ -118,6 +132,7 @@ class Message(BaseModel):
     )
     ephemeral: bool = False
     live: bool = False
+    previous_reply_interrupted: bool = False
     username: str | None = None
     dashboard: dict | None = None
     question: str | None = Field(default=None, max_length=2000)
@@ -210,9 +225,11 @@ def voice_status():
     }
 
 
-async def make_voice(text, profile, mode="professional"):
+async def make_voice(text, profile, mode="professional", cues=None):
     active = refresh_persona()
-    delivery = delivery_settings(active, mode)
+    from .affect import expressive_delivery
+
+    delivery = expressive_delivery(delivery_settings(active, mode), text, cues)
     for old in audio_dir.glob("*"):
         if time.time() - old.stat().st_mtime > 3600:
             old.unlink(missing_ok=True)
@@ -458,13 +475,19 @@ async def speak_stream(req: Speech):
         raise HTTPException(400, "Live replies must be under 2,000 characters")
 
     async def events():
+        speech_started = time.perf_counter()
+        first_audio_ms = None
         async with _voice_operation(
             req.user_id, "synthesis", session_id=req.session_id
         ) as (session_id, _):
             yield json.dumps({"type": "ready", "session_id": session_id}) + "\n"
             try:
                 active = refresh_persona()
-                delivery = delivery_settings(active, "casual")
+                from .affect import outgoing_delivery, expressive_delivery
+
+                delivery = outgoing_delivery.take(
+                    req.user_id, req.text
+                ) or expressive_delivery(delivery_settings(active, "casual"), req.text)
                 for old in audio_dir.glob("*"):
                     if time.time() - old.stat().st_mtime > 3600:
                         old.unlink(missing_ok=True)
@@ -489,13 +512,33 @@ async def speak_stream(req: Speech):
                         )
                         try:
                             async for event in stream:
+                                if (
+                                    event.get("type") == "audio"
+                                    and first_audio_ms is None
+                                ):
+                                    first_audio_ms = round(
+                                        (time.perf_counter() - speech_started) * 1000
+                                    )
                                 yield json.dumps(event) + "\n"
                         finally:
                             await stream.aclose()
                 else:
                     url = await make_voice(req.text, req.voice_profile, "casual")
+                    first_audio_ms = round(
+                        (time.perf_counter() - speech_started) * 1000
+                    )
                     yield json.dumps({"type": "audio", "url": url}) + "\n"
-                yield json.dumps({"type": "done"}) + "\n"
+                yield json.dumps(
+                    {
+                        "type": "done",
+                        "timings": {
+                            "first_audio_ms": first_audio_ms,
+                            "synthesis_total_ms": round(
+                                (time.perf_counter() - speech_started) * 1000
+                            ),
+                        },
+                    }
+                ) + "\n"
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -547,8 +590,28 @@ async def chat(req: Message, request: Request):
         directives = (
             []
             if req.ephemeral
-            else personality.build_prompt_directives(user, history=context_turns)
+            else (
+                personality.build_live_prompt_directives
+                if req.live
+                and os.getenv("CURIE_COMPACT_LIVE_PROMPT", "true").lower() == "true"
+                else personality.build_compact_prompt_directives
+            )(user, history=context_turns)
         )
+        from .affect import (
+            incoming_cues,
+            cue_guidance,
+            outgoing_delivery,
+            expressive_delivery,
+        )
+
+        voice_cues = (
+            incoming_cues.take(req.user_id, user)
+            if req.live and not req.ephemeral
+            else {}
+        )
+        guidance = cue_guidance(voice_cues)
+        if guidance:
+            directives.append(guidance)
         mode = (
             "professional"
             if req.ephemeral
@@ -560,9 +623,9 @@ async def chat(req: Message, request: Request):
 
         system_prompt = (
             "System: "
-            + persona_prompt(active, directives, briefing=req.ephemeral)
+            + persona_prompt(active, directives, compact=True)
             + "\n"
-            + dashboard_scope_prompt(bool(snapshot.strip()))
+            + dashboard_scope_prompt(bool(snapshot.strip()), compact=True)
             + turn_contract_prompt(user, context_turns)
         )
         from utils.temporal_context import temporal_guidance
@@ -570,6 +633,12 @@ async def chat(req: Message, request: Request):
         system_prompt += "\n" + temporal_guidance()
         if req.live:
             system_prompt += "\n" + live_conversation_prompt()
+            if req.previous_reply_interrupted:
+                system_prompt += (
+                    "\nYour previous reply was interrupted. Its full text in history is "
+                    "not proof the owner heard it. Address their correction or new request "
+                    "first; do not repeat the whole reply or assume they heard its ending."
+                )
         prompt = conversation_prompt(
             system_prompt,
             [
@@ -617,6 +686,12 @@ async def chat(req: Message, request: Request):
                     0.35,
                     owner_id="dashboard:" + req.user_id,
                     request_id=request_id,
+                    capability_scope=(
+                        "conversation_only"
+                        if os.getenv("CURIE_SCOPED_CONVERSATION_PROMPT", "true").lower()
+                        == "true"
+                        else "full"
+                    ),
                 ),
             )
             text = candidate.text or "No response was available."
@@ -672,11 +747,11 @@ async def chat(req: Message, request: Request):
             ):
                 original_similarity = max_recent_response_similarity(text, turns)
                 repair_system = (
-                    persona_prompt(active, directives)
+                    persona_prompt(active, directives, compact=True)
                     + "\n"
                     + temporal_guidance()
                     + "\n"
-                    + dashboard_scope_prompt(bool(snapshot.strip()))
+                    + dashboard_scope_prompt(bool(snapshot.strip()), compact=True)
                     + turn_contract_prompt(user, context_turns)
                     + "\nThe invalid draft below repeats an earlier answer, answers an older "
                     "subject, or reverses who made a request. Attribute user-role instructions "
@@ -748,6 +823,13 @@ async def chat(req: Message, request: Request):
                 history.move_to_end(req.user_id)
                 while len(history) > 20:
                     history.popitem(last=False)
+        if req.live and not req.ephemeral:
+            outgoing_delivery.put(
+                req.user_id,
+                text[:2000],
+                expressive_delivery(delivery_settings(active, mode), text, voice_cues),
+            )
+        reply_ready_ms = round((time.perf_counter() - started) * 1000)
         voice_url = None
         if req.voice_response:
             try:
@@ -756,7 +838,8 @@ async def chat(req: Message, request: Request):
                         session_id, session_token, "synthesizing", now_ms()
                     )
                 voice_url = await until_disconnect(
-                    request, make_voice(text[:24000], req.voice_profile, mode)
+                    request,
+                    make_voice(text[:24000], req.voice_profile, mode, voice_cues),
                 )
             except Exception:
                 pass
@@ -765,6 +848,14 @@ async def chat(req: Message, request: Request):
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "model_used": model_used,
             "processing_time_ms": round((time.perf_counter() - started) * 1000),
+            "timings": {
+                "reply_ready_ms": reply_ready_ms,
+                "speech_ms": (
+                    round((time.perf_counter() - started) * 1000) - reply_ready_ms
+                    if req.voice_response
+                    else 0
+                ),
+            },
             "voice_url": voice_url,
             "session_id": session_id,
             "coordination": coordination,
@@ -801,6 +892,7 @@ async def transcribe(
     language: str = Form("en"),
     session_id: str | None = Form(None),
 ):
+    transcription_started = time.perf_counter()
     if not VOICE_PYTHON.is_file():
         raise HTTPException(503, "Install dashboard voice dependencies first")
     suffix = pathlib.Path(file.filename or "").suffix.lower()
@@ -828,6 +920,7 @@ async def transcribe(
                         language=language,
                         auto_detect=False,
                         root=ROOT,
+                        warm=True,
                     ),
                 )
             except SpeechRecognitionError as error:
@@ -835,7 +928,20 @@ async def transcribe(
                     503,
                     "Speech recognition unavailable; check the local voice model installation",
                 ) from error
-            return {**result, "session_id": active_session}
+            from .affect import incoming_cues
+
+            incoming_cues.put(
+                user_id, result["text"][:2000], result.get("voice_cues", {})
+            )
+            return {
+                **result,
+                "session_id": active_session,
+                "timings": {
+                    "transcription_ms": round(
+                        (time.perf_counter() - transcription_started) * 1000
+                    )
+                },
+            }
 
 
 if __name__ == "__main__":

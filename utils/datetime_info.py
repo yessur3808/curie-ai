@@ -139,6 +139,27 @@ def extract_timezone_from_message(message: str) -> Optional[str]:
     return None
 
 
+def weather_location_match(message: str):
+    """Locate the entire explicit weather place, retaining its original span.
+
+    The city group excludes an optional region; location corrections replace
+    both so a prior country or a city suffix cannot leak into the new place.
+    """
+    if not re.search(
+        r"\b(?:weather|forecast|rain|umbrella|temperature)\b", message, re.I
+    ):
+        return None
+    place = re.search(
+        r"\b(?:in|for)\s+(?!(?:today|tomorrow|tonight|the|my|your|our|a|an|here|there)\b)"
+        r"(?P<city>[\w][\w '\-]{0,70}?)"
+        r"(?:,\s*(?P<region>[\w][\w '\-]{0,70}?))?"
+        r"(?=\s+(?:today|tomorrow|tonight|from|on|this|next|right now|for\s+(?:those dates|the trip|that trip))\b|[?.!,]|$)",
+        message,
+        re.I,
+    )
+    return place
+
+
 def extract_city_from_message(message: str) -> Optional[str]:
     """Extract a city name from a message for weather / time lookups.
 
@@ -214,5 +235,11 @@ def extract_city_from_message(message: str) -> Optional[str]:
     for pattern, city in city_map:
         if re.search(pattern, message_lower):
             return city
+
+    # Weather locations are not limited to the common-city alias table. Pass
+    # explicit place names to the geocoder, which remains the authority.
+    place = weather_location_match(message)
+    if place:
+        return place.group("city").strip().title()
 
     return None

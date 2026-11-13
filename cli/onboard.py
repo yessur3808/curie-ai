@@ -321,8 +321,10 @@ def run_onboard(verbose: bool = False) -> int:
             "  [cyan]PERSONA_FILE[/cyan]",
             default=_existing_persona,
         )
-    if persona_file:
-        updates["PERSONA_FILE"] = persona_file
+    if persona_file and persona_file != _existing_persona:
+        _print("Create a separate assistant with: curie personality add NAME --persona assets/personality/FILE.json")
+        _print("This installation keeps its existing personality and memory.")
+    updates["PERSONA_FILE"] = _existing_persona
 
     assistant_name = _prompt(
         "  [cyan]ASSISTANT_NAME[/cyan]  (display name, e.g. jarvis / friday)",

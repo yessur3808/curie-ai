@@ -6,6 +6,8 @@ Supports systemd (Linux) and launchd (macOS).
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 import os
 import sys
 import subprocess
@@ -100,7 +102,7 @@ def _launchd_plist_path() -> Path:
 
 
 def _log_file() -> str:
-    return str(Path.home() / ".curie" / "curie.log")
+    return str(assistant_state_dir() / "curie.log")
 
 
 # ─── public interface ─────────────────────────────────────────────────────────

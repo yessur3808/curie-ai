@@ -26,9 +26,16 @@ function loadEnvFile(filePath, target) {
 }
 
 loadEnvFile(envPath, envConfig);
-const instanceName = envConfig.CURIE_INSTANCE || "curie";
+const instanceName = process.env.CURIE_INSTANCE || envConfig.CURIE_INSTANCE || "curie";
+if (!/^[a-z0-9_-]+$/.test(instanceName)) throw new Error("Invalid Curie instance name");
+const installationOwner = envConfig.CURIE_INSTANCE || "curie";
+if (instanceName !== installationOwner) throw new Error("Personality requires its own installation; use curie personality add");
+if (instanceName !== "curie" && !fs.existsSync(path.join(__dirname, "instances", `${instanceName}.env`))) {
+    throw new Error("Missing instance environment file");
+}
 loadEnvFile(path.join(__dirname, "instances", `${instanceName}.env`), envConfig);
 envConfig.CURIE_INSTANCE = instanceName;
+if (envConfig.CURIE_RELOCATED_TO) throw new Error(`Instance moved to ${envConfig.CURIE_RELOCATED_TO}`);
 
 // Keep the API opt-in because port 8000 may already be owned by another
 // service. Telegram remains the default connector for this installation.
@@ -38,7 +45,7 @@ const runTelegram = envConfig.RUN_TELEGRAM || "true";
 module.exports = {
     apps: [
         {
-            name: "curie-main",
+            name: `${instanceName}-main`,
             cwd: __dirname,
             script: path.join(__dirname, "main.py"),
             interpreter: path.join(__dirname, ".venv", "bin", "python"),
@@ -53,8 +60,8 @@ module.exports = {
                 RUN_API: runApi,
                 RUN_TELEGRAM: runTelegram,
             },
-            error_file: path.join(logDir, "pm2-error.log"),
-            out_file: path.join(logDir, "pm2-out.log"),
+            error_file: path.join(logDir, `${instanceName}-pm2-error.log`),
+            out_file: path.join(logDir, `${instanceName}-pm2-out.log`),
             log_date_format: "YYYY-MM-DD HH:mm:ss Z",
             kill_timeout: 15000,
             listen_timeout: 10000,

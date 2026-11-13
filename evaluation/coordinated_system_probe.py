@@ -115,7 +115,7 @@ async def run(report):
                     )
                 )
                 checks["separate_verifier_role"] = meta.get("roles") == [
-                    "reasoning",
+                    "general",
                     "critic",
                 ]
             if name == "deep_review":

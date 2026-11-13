@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -54,7 +56,7 @@ class ActionPreviewStore:
         self.root = root or Path(
             os.getenv(
                 "CURIE_ACTION_PREVIEW_DIR",
-                str(Path.home() / ".curie" / "action-previews"),
+                str(assistant_state_dir() / "action-previews"),
             )
         )
 

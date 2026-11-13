@@ -166,8 +166,8 @@ class TestIsNavigationQuery:
 
 
 class TestExtractMode:
-    def test_default_drive(self):
-        assert _extract_mode("route from A to B") == "drive"
+    def test_default_transit(self):
+        assert _extract_mode("route from A to B") == "transit"
 
     def test_walk(self):
         assert _extract_mode("walking directions to the park") == "walk"
@@ -193,7 +193,7 @@ class TestExtractNavigationParams:
         assert params is not None
         assert "new york" in params["origin"].lower()
         assert "boston" in params["destination"].lower()
-        assert params["mode"] == "drive"
+        assert params["mode"] == "transit"
 
     def test_from_to_with_walk_mode(self):
         params = extract_navigation_params(

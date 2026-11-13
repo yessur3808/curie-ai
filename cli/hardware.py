@@ -29,6 +29,8 @@ Results are saved to ~/.curie/peripherals.json between sessions so that
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 import json
 import os
 import platform
@@ -52,7 +54,7 @@ except ImportError:
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
-CURIE_DIR = Path.home() / ".curie"
+CURIE_DIR = assistant_state_dir()
 PERIPHERALS_FILE = CURIE_DIR / "peripherals.json"
 
 _OS = platform.system()  # "Linux", "Darwin", "Windows"

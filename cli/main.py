@@ -625,6 +625,8 @@ Examples:
     )
 
     subs = parser.add_subparsers(dest="command", metavar="<command>")
+    from cli.personalities import register
+    register(subs)
 
     # ── start ──────────────────────────────────────────────────────────────
     p_start = subs.add_parser("start", help="Start Curie daemon in background")

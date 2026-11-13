@@ -65,17 +65,27 @@ def trained_voice_health(
     from services.api_voice_runtime import required_native
 
     native = required_native()
-    if native is not None:
+    config = _config(paths)
+    if native is not None and config.get("engine") != "chatterbox-multilingual":
         result = json.loads(
             native.trained_voice_health(str(paths.home), str(paths.speech_python))
         )
         result["voice_id"] = paths.voice_id
+        result["warm_synthesis"] = warm_speech_enabled()
         return result
     config = _config(paths)
     ready = paths.ready()
     return {
         "ready": ready,
-        "backend": "chatterbox-nano-trained" if ready else None,
+        "backend": (
+            (
+                "chatterbox-multilingual-reference"
+                if config.get("engine") == "chatterbox-multilingual"
+                else "chatterbox-nano-trained"
+            )
+            if ready
+            else None
+        ),
         "engine": config.get("engine"),
         "trained": bool(config.get("adapter")),
         "method": config.get("method"),
@@ -83,6 +93,7 @@ def trained_voice_health(
         "worker_isolated": True,
         "threads": int(config.get("threads") or 0),
         "voice_id": paths.voice_id,
+        "warm_synthesis": warm_speech_enabled(),
     }
 
 
@@ -176,7 +187,7 @@ def _command(
     from services.api_voice_runtime import required_native
 
     native = required_native()
-    if native is not None:
+    if native is not None and _config(paths).get("engine") != "chatterbox-multilingual":
         plan = json.loads(
             native.synthesis_plan(
                 str(paths.root),
@@ -220,6 +231,7 @@ def _safe_metrics(stdout: bytes) -> dict[str, Any]:
         "peakMiB",
         "chunks",
         "retries",
+        "modelReused",
     }
     for line in reversed(stdout.decode(errors="replace").splitlines()):
         if not line.startswith("{"):
@@ -231,6 +243,39 @@ def _safe_metrics(stdout: bytes) -> dict[str, Any]:
         if isinstance(value, Mapping):
             return {key: value[key] for key in allowed if key in value}
     return {}
+
+
+def warm_speech_enabled():
+    return os.getenv("CURIE_WARM_SYNTHESIS", "true").lower() in {
+        "true",
+        "1",
+        "yes",
+        "on",
+    }
+
+
+async def _warm_events(paths, text, output, delivery, *, stream_dir=None):
+    from .warm_speech_worker import speech_worker
+
+    stream = speech_worker(paths, _worker_environment()).events(
+        {
+            "text": text,
+            "args": {
+                "config": str(paths.config),
+                "output": str(output),
+                "delivery": json.dumps(dict(delivery)),
+                "stream_dir": str(stream_dir) if stream_dir is not None else None,
+            },
+        },
+        timeout=_timeout_seconds(),
+    )
+    try:
+        async for event in stream:
+            yield event
+    except RuntimeError as exc:
+        raise TrainedVoiceError("trained_voice_worker_failed") from exc
+    finally:
+        await stream.aclose()
 
 
 async def synthesize_trained_voice(
@@ -258,18 +303,30 @@ async def synthesize_trained_voice(
             from services.media_transport import inspect_attachment, supervise_process
 
             try:
-                result = await supervise_process(
-                    _command(paths, output_path, delivery),
-                    text.encode(),
-                    cwd=str(paths.root),
-                    environment=_worker_environment(),
-                    timeout=_timeout_seconds(),
-                    max_stdout_bytes=1024 * 1024,
-                )
+                if warm_speech_enabled():
+                    metrics = {}
+                    stream = _warm_events(paths, text, output_path, delivery)
+                    try:
+                        async for event in stream:
+                            if "generationSeconds" in event:
+                                metrics = event
+                    finally:
+                        await stream.aclose()
+                    stdout = json.dumps(metrics).encode()
+                else:
+                    result = await supervise_process(
+                        _command(paths, output_path, delivery),
+                        text.encode(),
+                        cwd=str(paths.root),
+                        environment=_worker_environment(),
+                        timeout=_timeout_seconds(),
+                        max_stdout_bytes=1024 * 1024,
+                    )
+                    if result.return_code:
+                        raise TrainedVoiceError("trained_voice_worker_failed")
+                    stdout = result.stdout
             except asyncio.TimeoutError as error:
                 raise TrainedVoiceError("trained_voice_timeout") from error
-            if result.return_code:
-                raise TrainedVoiceError("trained_voice_worker_failed")
             if not output_path.is_file() or output_path.stat().st_size <= 44:
                 raise TrainedVoiceError("trained_voice_empty_output")
             inspection = inspect_attachment(
@@ -283,7 +340,7 @@ async def synthesize_trained_voice(
             )
             if inspection["signature"] != "wav":
                 raise TrainedVoiceError("trained_voice_invalid_output")
-            return _safe_metrics(result.stdout)
+            return _safe_metrics(stdout)
     except BaseException:
         output_path.unlink(missing_ok=True)
         raise
@@ -300,16 +357,21 @@ async def trained_voice_stream_events(
     """Stream trained sentence files while holding the shared worker lease."""
     paths = _paths(voice_id=voice_id)
     async with trained_voice_lease(paths):
-        stream = worker_events(
-            _command(paths, output, delivery, stream_dir=stream_dir),
-            text,
-            env=_worker_environment(),
-            cwd=str(paths.root),
-            timeout=_timeout_seconds(),
+        stream = (
+            _warm_events(paths, text, output, delivery, stream_dir=stream_dir)
+            if warm_speech_enabled()
+            else worker_events(
+                _command(paths, output, delivery, stream_dir=stream_dir),
+                text,
+                env=_worker_environment(),
+                cwd=str(paths.root),
+                timeout=_timeout_seconds(),
+            )
         )
         try:
             async for event in stream:
-                yield event
+                if event.get("type") == "audio":
+                    yield event
         finally:
             await stream.aclose()
 

@@ -102,6 +102,21 @@ async def test_streaming_records_real_first_token_and_throughput():
 
 
 @pytest.mark.asyncio
+async def test_complete_answer_throughput_includes_hidden_generation_time():
+    service = ManagedInferenceService(capacity=2, workers=1)
+
+    async def delayed_complete(_emit, _cancelled):
+        await asyncio.sleep(0.05)
+        return "one two three four five six seven eight nine ten"
+
+    result = await service.submit(delayed_complete, owner_id="a")
+
+    assert result.first_token_ms >= 40
+    assert result.tokens_per_second < 1_000
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_close_inference_singleton_cancels_jobs_and_workers(monkeypatch):
     service = ManagedInferenceService(capacity=2, workers=1)
     monkeypatch.setattr(inference_service, "_service", service)

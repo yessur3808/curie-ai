@@ -146,18 +146,16 @@ Do not include disclaimers or meta-commentary. Just give the plan.
 # Includes a one-shot example so small local models understand the expected output format
 # without needing to infer it from a long instruction list.
 _ITINERARY_PROMPT_COMPACT = """\
-Write a concise day-by-day travel itinerary. Be practical and specific.
+Write a concise, practical day-by-day itinerary in this format:
 
-EXAMPLE (London, 2 days, moderate):
-London is a world city famed for its history and culture.
+EXAMPLE — London, 2 days, moderate
 Day 1: AM: Tower of London → Tower Bridge walk. PM: Thames Southbank. Eve: West End theatre.
 Day 2: AM: British Museum (free). PM: Camden Market. Eve: Traditional pub dinner.
 Food: Fish & chips (~£12), afternoon tea (~£30), pie & mash (~£10).
 Tips: Use Oyster card. Book free museums in advance. Walk between nearby sights.
 Budget: ~£120/day (accommodation £70, food £30, activities £20).
 
-Now write for:
-Destination: {destination} | Duration: {duration} | Budget: {budget_tier}
+TRIP — {destination} | {duration} | {budget_tier}
 """
 
 _PACKING_PROMPT = """\

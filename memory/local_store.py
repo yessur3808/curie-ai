@@ -1042,7 +1042,9 @@ def create_pending_action(internal_id: str, action: dict, ttl_minutes: int = 30)
     return token
 
 
-def consume_pending_action(internal_id: str, token: str, approve: bool) -> dict | None:
+def consume_pending_action(
+    internal_id: str, token: str, approve: bool, *, connector: str | None = None
+) -> dict | None:
     now = datetime.now(timezone.utc)
     with _LOCK, _managed_connection() as conn:
         row = conn.execute(
@@ -1052,11 +1054,17 @@ def consume_pending_action(internal_id: str, token: str, approve: bool) -> dict 
         ).fetchone()
         if not row or datetime.fromisoformat(row["expires_at"]) <= now:
             return None
+        action = json.loads(row["action_json"])
+        if (
+            connector is not None
+            and (action.get("authorization") or {}).get("connector") != connector
+        ):
+            return None
         conn.execute(
             "UPDATE pending_actions SET status=? WHERE token=?",
             ("approved" if approve else "rejected", token.lower()),
         )
-        return json.loads(row["action_json"])
+        return action
 
 
 def append_action_audit(

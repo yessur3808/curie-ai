@@ -4,15 +4,24 @@
 class ChatPrompt(str):
     """A text prompt with explicitly constructed messages, never parsed user labels."""
 
-    def __new__(cls, text, messages, *, evidence=(), json_output=False):
+    def __new__(
+        cls, text, messages, *, evidence=(), json_output=False, json_schema=None
+    ):
         obj = super().__new__(cls, text)
         obj._messages = tuple((m["role"], str(m["content"])) for m in messages)
         # Evidence is attached by the application, never parsed from user text.
         import json
 
         obj._evidence = json.dumps(list(evidence), ensure_ascii=False)
-        obj.json_output = bool(json_output)
+        obj.json_output = bool(json_output or json_schema is not None)
+        obj._json_schema = json.dumps(json_schema) if json_schema is not None else None
         return obj
+
+    @property
+    def json_schema(self):
+        import json
+
+        return json.loads(self._json_schema) if self._json_schema is not None else None
 
     @property
     def messages(self):
@@ -26,13 +35,21 @@ class ChatPrompt(str):
 
     def with_evidence(self, evidence):
         return ChatPrompt(
-            str(self), self.messages, evidence=evidence, json_output=self.json_output
+            str(self),
+            self.messages,
+            evidence=evidence,
+            json_output=self.json_output,
+            json_schema=self.json_schema,
         )
 
     def with_json_output(self):
         """Request constrained machine output, separately from prompt wording."""
         return ChatPrompt(
-            str(self), self.messages, evidence=self.evidence, json_output=True
+            str(self),
+            self.messages,
+            evidence=self.evidence,
+            json_output=True,
+            json_schema=self.json_schema,
         )
 
     def with_system_guidance(self, guidance):
@@ -47,6 +64,7 @@ class ChatPrompt(str):
             messages,
             evidence=self.evidence,
             json_output=self.json_output,
+            json_schema=self.json_schema,
         )
 
     def with_reference(self, reference):
@@ -67,6 +85,7 @@ class ChatPrompt(str):
             messages,
             evidence=self.evidence,
             json_output=self.json_output,
+            json_schema=self.json_schema,
         )
 
 

@@ -27,8 +27,8 @@ def test_normal_turns_use_a_balanced_generation_budget():
 
 def test_lightweight_opinions_use_the_conversational_model_and_small_budget():
     prompt = "Carbonara or arrabbiata? Pick one and tell me why."
-    assert ModelConversationService.model_role(prompt) == "general"
-    assert ModelConversationService.token_budget(prompt) == 224
+    assert ModelConversationService.model_role(prompt) == "fast"
+    assert ModelConversationService.token_budget(prompt) == 192
     assert (
         ModelConversationService.model_role(
             "Pick one database architecture and tell me why"
@@ -54,13 +54,13 @@ def test_task_content_selects_specialized_model_roles():
     assert (
         ModelConversationService.model_role("Recommend the best option") == "reasoning"
     )
-    assert ModelConversationService.model_role("Pick one and tell me why") == "general"
+    assert ModelConversationService.model_role("Pick one and tell me why") == "fast"
     assert (
         ModelConversationService.model_role("Push back if you disagree") == "reasoning"
     )
     assert (
         ModelConversationService.model_role("Give me one opinion you can defend")
-        == "general"
+        == "fast"
     )
 
 
@@ -102,5 +102,6 @@ def test_local_fallback_receives_selected_role(monkeypatch):
         )
     )
 
+    assert calls, (result.model_used, result.metadata)
     assert calls[-1]["role"] == "coding"
     assert result.model_used == "general.gguf:coding"

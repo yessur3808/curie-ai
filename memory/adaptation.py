@@ -79,7 +79,11 @@ _VOICE_COMMAND = re.compile(
 )
 _TEXT_MODE_REQUEST = re.compile(
     r"\b(?:reply|respond|answer|explain|write|send)(?:\s+(?:it|that|this))?(?:\s+to\s+me)?\s+"
-    r"(?:in|as)\s+(?:plain\s+)?text\b|\btext(?:\s+reply|\s+response)?\s+only\b",
+    r"(?:in|as)\s+(?:plain\s+)?text\b|\btext(?:\s+reply|\s+response)?\s+only\b|"
+    r"\b(?:switch|change|go)(?:\s+back)?\s+to\s+(?:plain\s+)?text(?:\s+mode)?\b|"
+    r"\b(?:stop|disable|turn\s+off)\s+(?:sending\s+(?:me\s+)?)?(?:voice|audio)(?:\s+(?:replies|messages|notes))?\b|"
+    r"\bno\s+(?:more\s+)?(?:voice|audio)\s+(?:replies|messages|notes)\b|"
+    r"\b(?:do not|don't|don’t)\s+(?:send|use)\s+(?:me\s+)?(?:any\s+)?(?:voice|audio)\b",
     re.I,
 )
 
@@ -177,11 +181,23 @@ def get_adaptation_state(owner_id: str) -> dict:
     return _load(str(owner_id))
 
 
+def text_reply_requested(text: str) -> bool:
+    """Recognize explicit text delivery instructions, excluding negated switches."""
+    text = str(text or "")
+    for match in _TEXT_MODE_REQUEST.finditer(text):
+        prefix = text[max(0, match.start() - 35) : match.start()]
+        if not re.search(
+            r"\b(?:don't|don’t|do not|never)\s+(?:please\s+)?$", prefix, re.I
+        ):
+            return True
+    return False
+
+
 def apply_voice_modality_preference(
     owner_id: str, text: str, channel: str | None = None
 ) -> bool | None:
     """Persist an explicit embedded text/voice request without consuming its task."""
-    if not channel or not _TEXT_MODE_REQUEST.search(text):
+    if not channel or not text_reply_requested(text):
         return None
     overrides = dict(_load(owner_id)["preferences"].get("voice_reply_channels", {}))
     overrides[channel] = False

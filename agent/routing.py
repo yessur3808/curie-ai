@@ -135,9 +135,9 @@ def _specialist(text: str) -> str | None:
 
 
 def _deterministic_clause(
-    text: str, history: Sequence[Any] | None = None
+    text: str, history: Sequence[Any] | None = None, timezone_name=None
 ) -> RoutingDecision | None:
-    request = classify_request(text, history=history)
+    request = classify_request(text, history=history, timezone_name=timezone_name)
     if request:
         return _from_tool_request(request)
     from agent.skills.system_commands import detect_system_command
@@ -172,16 +172,31 @@ def _deterministic_clause(
     return None
 
 
+def _owner_timezone(owner_id):
+    if not owner_id:
+        return None
+    from memory import UserManager
+
+    return (UserManager.get_user_profile(owner_id) or {}).get("timezone")
+
+
 def route_operational_request(
     text: str, owner_id: str = "", history: Sequence[Any] | None = None
 ) -> RoutingDecision | None:
     """Route only explicit operational requests without invoking a model.
 
-    This is the fast-path used before profile, memory, and prompt construction.  It
+    This is the fast-path used before memory recall and prompt construction. It
+    reads the owner's timezone so calendar parameters are bound before approval.
     intentionally excludes social conversation and specialist inference so an
     ordinary chat message cannot be pulled into a tool path by stale context.
     """
-    request = classify_request(text, history=history)
+    from agent.conversation_context import discussion_only
+
+    if discussion_only(text):
+        return None
+    request = classify_request(
+        text, history=history, timezone_name=_owner_timezone(owner_id)
+    )
     if request:
         decision = _from_tool_request(request)
         _record(owner_id, text, decision)
@@ -227,8 +242,11 @@ async def route_request(
         _record(owner_id, text, decision)
         return decision
     clauses = [part for part in _MULTI_SPLIT.split(text.strip()) if part]
+    timezone_name = _owner_timezone(owner_id)
     if len(clauses) > 1:
-        clause_decisions = [_deterministic_clause(part, history) for part in clauses]
+        clause_decisions = [
+            _deterministic_clause(part, history, timezone_name) for part in clauses
+        ]
         routed = [
             item for item in clause_decisions if item and item.intent != "conversation"
         ]
@@ -249,7 +267,7 @@ async def route_request(
             )
             _record(owner_id, text, decision)
             return decision
-    deterministic = _deterministic_clause(text, history)
+    deterministic = _deterministic_clause(text, history, timezone_name)
     if deterministic:
         _record(owner_id, text, deterministic)
         return deterministic
@@ -262,7 +280,9 @@ async def route_request(
         _record(owner_id, text, decision)
         return decision
     if allow_model_inference:
-        inferred = await resolve_request(text, history=history)
+        inferred = await resolve_request(
+            text, history=history, timezone_name=timezone_name
+        )
         if inferred:
             decision = _from_tool_request(inferred)
             _record(owner_id, text, decision)

@@ -59,6 +59,9 @@ def load_instance_environment(root=None):
     if not re.fullmatch(r"[a-z0-9_-]+", instance):
         raise ValueError("Invalid Curie instance name")
     load_dotenv(root / "instances" / f"{instance}.env", override=True)
+    from services.vault_runtime import load_runtime_secrets
+
+    load_runtime_secrets()
 
 
 def main():

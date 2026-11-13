@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -109,7 +111,7 @@ class OperationalMetrics:
             if instance == "default"
             else f"instance-{instance}-telemetry.json"
         )
-        self.path = path or Path.home() / ".curie" / filename
+        self.path = path or assistant_state_dir() / filename
         self._lock = threading.Lock()
         self._request_times: deque[float] = deque(maxlen=500)
         self._total_requests = 0
@@ -214,7 +216,7 @@ class TurnEventWriter:
         )
         configured = os.getenv("CURIE_TURN_TRACE_PATH", "").strip()
         self.path = path or (
-            Path(configured) if configured else Path.home() / ".curie" / filename
+            Path(configured) if configured else assistant_state_dir() / filename
         )
         try:
             configured_max = int(os.getenv("CURIE_TURN_TRACE_MAX_BYTES", "10000000"))

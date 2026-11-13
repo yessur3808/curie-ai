@@ -150,6 +150,14 @@ TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
         ),
     ),
     "dashboard_snapshot": ParameterSpec(),
+    "observatory_project_analytics": ParameterSpec(
+        defaults=(("query", ""), ("project", ""), ("days", 30)),
+        validators=(
+            ("query", lambda value: isinstance(value, str)),
+            ("project", lambda value: isinstance(value, str)),
+            ("days", lambda value: isinstance(value, int) and value in {7, 30, 90}),
+        ),
+    ),
     "x_search": ParameterSpec(required=("query",), validators=(("query", _NONEMPTY),)),
     "x_read": ParameterSpec(
         required=("post_id",),
@@ -195,6 +203,20 @@ TOOL_PARAMETER_SPECS: dict[str, ParameterSpec] = {
         validators=(("label", _NONEMPTY), ("value", _NONEMPTY)),
     ),
     "browser_close": ParameterSpec(),
+    "bus_arrivals": ParameterSpec(
+        defaults=tuple(
+            (key, "")
+            for key in (
+                "query",
+                "operator",
+                "route",
+                "origin",
+                "destination",
+                "direction",
+            )
+        )
+        + (("service_type", "1"),)
+    ),
     "weather": ParameterSpec(required=("query",), validators=(("query", _NONEMPTY),)),
     "research": ParameterSpec(required=("query",), validators=(("query", _NONEMPTY),)),
     "inspect_project": ParameterSpec(
@@ -333,7 +355,9 @@ _INFERENCE_REQUEST_FRAME = re.compile(
     r"(?:\?$|"
     r"\b(?:can|could|would|will)\s+you\b|"
     r"^\s*(?:please\s+)?(?:check|show|get|tell|find|search|look\s+up|read|list|"
-    r"track|map|recommend|suggest|research|investigate|analy[sz]e|inspect|open)\b|"
+    r"track|map|recommend|suggest|investigate|analy[sz]e|inspect|open)\b|"
+    r"^\s*(?:please\s+)?research\s+"
+    r"(?!(?:is|was|has|had|can|could|will|would|should|must)\b)\S|"
     r"^\s*(?:i\s+)?(?:need|want|would\s+like)\b|"
     r"^\s*give\s+me\b|"
     r"^\s*(?:latest|current|recent|today(?:'s)?)\s+"
@@ -397,13 +421,19 @@ def _project_name(text: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def _calendar_window(label: str) -> tuple[str, str]:
-    """Resolve a small, deterministic set of natural calendar windows."""
-    timezone_name = os.getenv("DEFAULT_TIMEZONE", "UTC")
-    try:
-        tz = ZoneInfo(timezone_name)
-    except Exception:
-        tz, timezone_name = ZoneInfo("UTC"), "UTC"
+def _calendar_timezone(timezone_name=None):
+    for name in (timezone_name, os.getenv("DEFAULT_TIMEZONE"), "UTC"):
+        if not name:
+            continue
+        try:
+            return ZoneInfo(str(name))
+        except (ValueError, KeyError):
+            continue
+
+
+def _calendar_window(label: str, timezone_name=None) -> tuple[str, str]:
+    """Resolve local calendar windows; named weeks use ISO Monday boundaries."""
+    tz = _calendar_timezone(timezone_name)
     now = datetime.now(tz)
     folded = label.casefold()
     if "tomorrow" in folded:
@@ -411,9 +441,20 @@ def _calendar_window(label: str) -> tuple[str, str]:
             hour=0, minute=0, second=0, microsecond=0
         )
         end = start + timedelta(days=1)
+    elif re.search(r"\b(?:this|next)\s+week\b", folded):
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start -= timedelta(days=start.weekday())
+        if re.search(r"\bnext\s+week\b", folded):
+            start += timedelta(days=7)
+        end = start + timedelta(days=7)
     elif re.search(r"\b(?:week|seven days|next 7 days)\b", folded):
         start = now
         end = now + timedelta(days=7)
+    elif re.search(r"\b(?:this|next)\s+month\b", folded):
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if re.search(r"\bnext\s+month\b", folded):
+            start = (start + timedelta(days=32)).replace(day=1)
+        end = (start + timedelta(days=32)).replace(day=1)
     elif re.search(r"\b(?:month|next 30 days)\b", folded):
         start = now
         end = now + timedelta(days=30)
@@ -426,7 +467,17 @@ def _calendar_window(label: str) -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
-def _natural_calendar_create(command: str) -> ToolRequest | None:
+def _analytics_days(label: str) -> int:
+    if re.search(r"\b(?:7\s*days?|one\s+week|past\s+week|last\s+week)\b", label, re.I):
+        return 7
+    if re.search(
+        r"\b(?:90\s*days?|three\s+months?|past\s+quarter|last\s+quarter)\b", label, re.I
+    ):
+        return 90
+    return 30
+
+
+def _natural_calendar_create(command: str, timezone_name=None) -> ToolRequest | None:
     """Parse common one-hour event phrasing; ambiguous writes remain clarifications."""
     match = re.fullmatch(
         r"(?:please\s+)?(?:add|schedule|create|put)\s+(?:an?\s+)?"
@@ -445,11 +496,8 @@ def _natural_calendar_create(command: str) -> ToolRequest | None:
         re.I,
     ):
         return None
-    timezone_name = os.getenv("DEFAULT_TIMEZONE", "UTC")
-    try:
-        tz = ZoneInfo(timezone_name)
-    except Exception:
-        tz, timezone_name = ZoneInfo("UTC"), "UTC"
+    tz = _calendar_timezone(timezone_name)
+    timezone_name = tz.key
     now = datetime.now(tz)
     day = match.group("day").casefold()
     if day == "tomorrow":
@@ -457,7 +505,12 @@ def _natural_calendar_create(command: str) -> ToolRequest | None:
     elif day == "today":
         event_date = now.date()
     else:
-        event_date = datetime.strptime(day.removeprefix("on "), "%Y-%m-%d").date()
+        try:
+            event_date = datetime.strptime(day.removeprefix("on "), "%Y-%m-%d").date()
+        except ValueError:
+            return ToolRequest(
+                "clarify", {"message": "What valid calendar date should I use?"}
+            )
     hour = int(match.group("hour"))
     minute = int(match.group("minute") or 0)
     ampm = (match.group("ampm") or "").casefold()
@@ -472,6 +525,19 @@ def _natural_calendar_create(command: str) -> ToolRequest | None:
     start = datetime.combine(event_date, datetime.min.time(), tzinfo=tz).replace(
         hour=hour, minute=minute
     )
+    # Never silently pick a repeated time or normalize a nonexistent DST time.
+    utc = ZoneInfo("UTC")
+    if (
+        start.astimezone(utc).astimezone(tz).replace(tzinfo=None)
+        != start.replace(tzinfo=None)
+        or start.replace(fold=0).utcoffset() != start.replace(fold=1).utcoffset()
+    ):
+        return ToolRequest(
+            "clarify",
+            {
+                "message": "That local time is skipped or repeated by a daylight-saving change. Which unambiguous time should I use?"
+            },
+        )
     duration = int(match.group("duration") or 1)
     if match.group("unit") and match.group("unit").casefold().startswith("minute"):
         delta = timedelta(minutes=duration)
@@ -492,7 +558,7 @@ def _natural_calendar_create(command: str) -> ToolRequest | None:
         {
             "summary": title,
             "start": start.isoformat(),
-            "end": (start + delta).isoformat(),
+            "end": (start.astimezone(utc) + delta).astimezone(tz).isoformat(),
             "timezone": timezone_name,
             "description": "",
             "location": "",
@@ -569,19 +635,23 @@ def _home_control_params(target: str, state: str) -> dict[str, Any]:
 def _home_alias_request(command: str) -> ToolRequest | None:
     """Recognize explicit owner instructions that teach Curie a device alias."""
     patterns = (
+        r"^(?:please\s+)?call\s+(?P<device>.+?)\s+(?P<quote>[\"'])(?P<alias>(?:(?!(?P=quote)).)+)(?P=quote)[.!?]?$",
         r"^(?P<device>.+?)\s+is\s+(?:the\s+)?(?P<alias>.+?)\s*,?\s*(?:please\s+)?(?:correlate|remember|associate|map)\b.+$",
         r"^(?:please\s+)?(?:remember|correlate|associate|map)\s+(?:that\s+)?(?P<device>.+?)\s+(?:is|means|with|to)\s+(?:the\s+)?(?P<alias>.+?)[.!?]?$",
-        r"^(?:please\s+)?call\s+(?P<device>.+?)\s+(?P<alias>[\w.-]{2,64})[.!?]?$",
     )
     for pattern in patterns:
         match = re.fullmatch(pattern, command.strip(), re.I | re.S)
         if not match:
             continue
         device = _home_target(match.group("device"))
-        alias = _home_target(match.group("alias"))
-        alias = re.sub(
-            r"\s+(?:when|from now on|in the future)\b.*$", "", alias, flags=re.I
-        ).strip(" \t.,!?")
+        if match.groupdict().get("quote"):
+            # Explicit delimiters make the enclosed name literal, not request prose.
+            alias = match.group("alias").strip()
+        else:
+            alias = _home_target(match.group("alias"))
+            alias = re.sub(
+                r"\s+(?:when|from now on|in the future)\b.*$", "", alias, flags=re.I
+            ).strip(" \t.,!?")
         params, error = validate_tool_request(
             "home_alias", {"device": device, "alias": alias}
         )
@@ -594,11 +664,28 @@ def _home_alias_request(command: str) -> ToolRequest | None:
                 explanation=f"remember {alias!r} as an alias for {device!r}",
             )
         )
+    # With no delimiter, neither the final word nor a capitalization heuristic
+    # can establish where an arbitrary device name ends. Never persist a guess.
+    if re.fullmatch(
+        r"(?:please\s+)?call\s+.+\s+[\w.\"'-]{2,64}[.!?]?", command.strip(), re.I
+    ):
+        return ToolRequest(
+            "clarify",
+            {
+                "message": (
+                    "Please put the new alias in matching quotes so I can distinguish it from "
+                    'the device name, for example: Call the desk lamp "Reading Light".'
+                )
+            },
+        )
     return None
 
 
 def _home_control_request(command: str) -> ToolRequest | None:
-    polite = r"(?:(?:please|could you|can(?: you)?|would you)\s+)?"
+    polite = (
+        r"(?:(?:please|could you|can(?: you)?|would you)\s+)?"
+        r"(?:(?:go ahead and|go on and)\s+)?"
+    )
     kill = re.fullmatch(
         rf"^{polite}kill\s+(?:all\s+|the\s+)?(?P<target>.+?)(?:\s+please)?[.!?]?$",
         command.strip(),
@@ -782,7 +869,7 @@ def _corrective_home_request(
 
 
 def classify_request(
-    text: str, history: Iterable[Any] | None = None
+    text: str, history: Iterable[Any] | None = None, *, timezone_name=None
 ) -> Optional[ToolRequest]:
     """Recognize explicit, high-confidence requests without model inference."""
     from agent.conversation_context import discussion_only
@@ -797,7 +884,9 @@ def classify_request(
             re.I,
         )
         if location_correction:
-            for item in reversed(list(history)[-8:]):
+            rows = list(history)[-8:]
+            for index in range(len(rows) - 1, -1, -1):
+                item = rows[index]
                 if isinstance(item, dict):
                     role, content = item.get("role"), item.get("content", "")
                 elif isinstance(item, (tuple, list)) and len(item) >= 2:
@@ -806,17 +895,91 @@ def classify_request(
                     continue
                 if role != "user":
                     continue
-                prior = classify_request(str(content))
+                prior = classify_request(
+                    str(content), history=rows[:index], timezone_name=timezone_name
+                )
                 if prior is not None:
                     if prior.action == "weather":
+                        from utils.datetime_info import (
+                            extract_city_from_message,
+                            weather_location_match,
+                        )
+
+                        prior_query = str(prior.params.get("query") or content)
+                        # A city-only correction must not rebase a historical
+                        # relative year when the conversation crosses New Year.
+                        if isinstance(item, dict) and re.search(
+                            r"\b(?:next year|today|tomorrow)\b", prior_query, re.I
+                        ):
+                            from utils.temporal_context import local_now, parse_time
+
+                            stamp = parse_time(
+                                item.get("created_at") or item.get("timestamp")
+                            )
+                            if stamp is not None:
+                                original_day = local_now(
+                                    {"timezone": timezone_name}, stamp
+                                ).date()
+                                prior_query = re.sub(
+                                    r"\bnext year\b",
+                                    str(original_day.year + 1),
+                                    prior_query,
+                                    flags=re.I,
+                                )
+                                if (
+                                    original_day
+                                    != local_now({"timezone": timezone_name}).date()
+                                ):
+                                    relative = re.search(
+                                        r"\b(today|tomorrow)\b", prior_query, re.I
+                                    )
+                                    if relative:
+                                        target = original_day + timedelta(
+                                            days=int(
+                                                relative.group(1).lower() == "tomorrow"
+                                            )
+                                        )
+                                        fixed_range = f"from {target.strftime('%B')} {target.day} through {target.strftime('%B')} {target.day} {target.year}"
+                                        prior_query = (
+                                            prior_query[: relative.start()]
+                                            + fixed_range
+                                            + prior_query[relative.end() :]
+                                        )
+                        old_city = extract_city_from_message(prior_query)
+                        new_city = location_correction.group(1).strip()
+                        place = weather_location_match(prior_query)
+                        if place:
+                            query = (
+                                prior_query[: place.start("city")]
+                                + new_city
+                                + prior_query[place.end() :]
+                            )
+                        elif old_city and re.search(
+                            re.escape(old_city), prior_query, re.I
+                        ):
+                            query = re.sub(
+                                re.escape(old_city),
+                                lambda _: new_city,
+                                prior_query,
+                                count=1,
+                                flags=re.I,
+                            )
+                        else:
+                            timing = re.search(
+                                r"\b(?:today|tomorrow)\b", prior_query, re.I
+                            )
+                            query = (
+                                "Weather in "
+                                + new_city
+                                + (" " + timing.group() if timing else "")
+                            )
                         return ToolRequest(
                             "weather",
-                            {
-                                "query": "Weather in "
-                                + location_correction.group(1).strip()
-                            },
+                            {"query": query},
                         )
                     break
+                # Do not resurrect an old tool request after a topic change.
+                break
     lowered = text.lower().strip()
     approve = _APPROVE.fullmatch(lowered)
     reject = _REJECT.fullmatch(lowered)
@@ -859,7 +1022,7 @@ def classify_request(
     alias_request = _home_alias_request(command)
     if alias_request:
         return alias_request
-    calendar_create = _natural_calendar_create(command)
+    calendar_create = _natural_calendar_create(command, timezone_name)
     if calendar_create:
         return calendar_create
     try:
@@ -880,8 +1043,9 @@ def classify_request(
     # while leaving explicit slash commands and corrections above it usable.
     if not command.lstrip().startswith("/") and (
         re.search(
-            r"\b(?:phrase|quote|quoted|example|metaphor|hypothetical|"
-            r"discuss(?:ed|ing)?|talk(?:ed|ing)\s+about)\b",
+            r"\b(?:phrase|quote|quoted|metaphor|hypothetical|"
+            r"discuss(?:ed|ing)?|talk(?:ed|ing)\s+about)\b|"
+            r"(?<![\w@.])example(?![\w.])",
             command,
             re.I,
         )
@@ -973,6 +1137,37 @@ def classify_request(
         re.I,
     ):
         return ToolRequest("home_status", {"target": "", "provider": ""})
+    match = re.fullmatch(
+        r"(?:please\s+)?(?:could you\s+|can you\s+|would you\s+)?"
+        r"(?:please\s+)?(?:check|see|find out|tell me)\s+(?:whether\s+|if\s+)?"
+        r"(?:the\s+|my\s+)?(.+?)\s+(?:is|are)(?:n['’]t)?\s+(?:not\s+)?"
+        r"(?:(?:still|currently)\s+)?(?:not\s+)?(?:(?:switched|turned)\s+)?(?:on|off|running|online|offline)"
+        r"(?:\s+(?:now|currently|right now))?[?!.]?"
+        r"(?:,?\s+(?:(?:please\s+)?(?:do\s+not|don't)\s+change|without\s+changing)\s+"
+        r"(?:anything|its\s+state)[.!?]?)?",
+        command,
+        re.I | re.S,
+    )
+    home_status_subject = match.group(1) if match else ""
+    if (
+        match
+        and not re.search(
+            r"\b(?:metaphor|theory|example|documentation|poem|story|novel|"
+            r"movie|show|game)\b",
+            home_status_subject,
+            re.I,
+        )
+        and re.search(
+            r"\b(?:device|light|lamp|plug|switch|fan|air|ac|tapo|nanoleaf|"
+            r"smartthings|petlibro|govee|mi home|xiaomi|thinq)\b",
+            home_status_subject,
+            re.I,
+        )
+    ):
+        return ToolRequest(
+            "home_status",
+            {"target": _home_status_target(home_status_subject), "provider": ""},
+        )
     correlation_match = re.fullmatch(
         r"(?:which|what)\s+(?:smart[- ]?home\s+)?device\s+"
         r"(?:would\s+you\s+)?(?:match|map)\s+(.+?)\s+to\s*[?!.]?"
@@ -1020,8 +1215,8 @@ def classify_request(
             "home_status", {"target": _home_target(match.group(1)), "provider": ""}
         )
     match = re.fullmatch(
-        r"(?:is|are)\s+(?:the\s+|my\s+)?(.+?)\s+"
-        r"(?:(?:still|currently)\s+)?(?:on|off|running|online|offline)"
+        r"(?:is|are)(?:n['’]t)?\s+(?:the\s+|my\s+)?(.+?)\s+(?:not\s+)?"
+        r"(?:(?:still|currently)\s+)?(?:not\s+)?(?:(?:switched|turned)\s+)?(?:on|off|running|online|offline)"
         r"(?:\s+(?:now|currently|right\s+now))?[?!.]?"
         r"(?:\s+(?:please\s+)?(?:do\s+not|don't)\s+"
         r"(?:change|control|switch|turn)\s+anything[.!?]?)?",
@@ -1088,7 +1283,7 @@ def classify_request(
     match = re.fullmatch(r"/calendar\s+list(?:\s+(.+))?", command, re.I | re.S)
     if match:
         label = (match.group(1) or "week").strip()
-        time_min, time_max = _calendar_window(label)
+        time_min, time_max = _calendar_window(label, timezone_name)
         query = (
             ""
             if re.search(r"\b(?:today|tomorrow|week|month)\b", label, re.I)
@@ -1145,6 +1340,19 @@ def classify_request(
         )
     if re.fullmatch(r"/(?:dashboard|telemetry)(?:\s+status)?", command, re.I):
         return ToolRequest("dashboard_snapshot")
+    match = re.fullmatch(
+        r"/(?:analytics|observatory)(?:\s+(.+?))?(?:\s+(7|30|90))?",
+        command,
+        re.I | re.S,
+    )
+    if match:
+        return ToolRequest(
+            "observatory_project_analytics",
+            {
+                "project": (match.group(1) or "").strip(),
+                "days": int(match.group(2) or 30),
+            },
+        )
     match = re.fullmatch(r"/(?:x|twitter)\s+search\s+(.+)", command, re.I | re.S)
     if match:
         return ToolRequest("x_search", {"query": match.group(1).strip()})
@@ -1227,6 +1435,9 @@ def classify_request(
     if re.search(
         r"\b(?:what|show|check|inspect)\b.{0,40}\b(?:using|uses)\b.{0,20}\b(?:ram|memory)\b|"
         r"\b(?:ram|memory) usage\b|"
+        r"\bhow much\s+(?:ram|memory)\s+(?:do you have left|is (?:left|available|free))\b|"
+        r"\bhow much\s+(?:ram|memory)\s+(?:you(?:'re| are)|"
+        r"(?:is|are)\s+(?:you|curie|the system))\s+using\b|"
         r"^\s*(?:please\s+)?(?:show|check|inspect)\s+(?:my\s+)?(?:ram|memory)\s*[.!?]*$",
         lowered,
     ):
@@ -1248,14 +1459,34 @@ def classify_request(
         r"\b(?:search|find|look for)\b.{0,30}\b(?:gmail|emails?|inbox)\b|\b(?:gmail|inbox)\b.{0,30}\b(?:search|find)\b",
         lowered,
     ):
-        candidates.append(ToolRequest("gmail_search", {"query": text}))
+        query = text
+        explicit_search = re.fullmatch(
+            r"(?:please\s+)?search\s+gmail\s+for\s+(.+)", text.strip(), re.I | re.S
+        )
+        if explicit_search:
+            query = explicit_search.group(1).strip()
+            # Remove only this explicit execution constraint, outside a quoted
+            # search phrase. Preserve Gmail operators and literal quoted text.
+            prohibition = re.search(
+                r",\s*but\s+do not send anything\.?\s*$", query, re.I
+            )
+            if (
+                prohibition
+                and len(re.findall(r'(?<!\\)"', query[: prohibition.start()])) % 2 == 0
+            ):
+                query = query[: prohibition.start()].strip() or query
+        candidates.append(ToolRequest("gmail_search", {"query": query}))
     if re.search(
         r"\b(?:what(?:'s| is)|show|check|read|list|look at)\b.{0,50}\b"
         r"(?:my\s+)?(?:google\s+)?calendar\b|"
-        r"\b(?:what|anything)\b.{0,30}\b(?:scheduled|on my agenda)\b",
+        r"\b(?:what|anything)\b.{0,30}\b(?:scheduled|on my agenda)\b|"
+        r"\b(?:check|show|see|tell me)\b.{0,50}\b"
+        r"(?:what\s+i(?:'ve| have)?\s+got|what(?:'s| is)\s+coming up|"
+        r"my\s+(?:plans?|schedule))\b.{0,30}\b"
+        r"(?:today|tomorrow|this week|next week)\b",
         lowered,
     ):
-        time_min, time_max = _calendar_window(lowered)
+        time_min, time_max = _calendar_window(lowered, timezone_name)
         candidates.append(
             ToolRequest(
                 "calendar_list",
@@ -1269,7 +1500,7 @@ def classify_request(
         text,
         re.I,
     )
-    if flight_match:
+    if flight_match and not re.search(r"\b(?:kmb|citybus|bus|buses|busses)\b", lowered):
         candidates.append(
             ToolRequest(
                 "flight_track",
@@ -1296,10 +1527,42 @@ def classify_request(
                 },
             )
         )
-    if re.search(
+    analytics_request = bool(
+        re.search(
+            r"\b(?:ga4|google analytics|web(?:site)? traffic|site traffic|page\s*views?|"
+            r"active users?|analytics)\b|"
+            r"\b(?:website|site|app|project)\b.{0,80}\b(?:traffic|analytics|visitors?|sessions?|page\s*views?)\b|"
+            r"\bviews?\b.{0,80}\b(?:website|site|app)\b|"
+            r"\bdashboard\b.{0,80}\b(?:views?|analytics|traffic|visitors?|sessions?)\b|"
+            r"\b(?:get|got|have|had|any)\b.{0,30}\bviews?\b|"
+            r"\b(?:look at|check|see|tell me)\b.{0,50}\b(?:my\s+)?"
+            r"(?:website|site|app)\b.{0,50}\b(?:doing|performing|going)\b",
+            lowered,
+        )
+    )
+    if analytics_request and re.search(
+        r"\b(?:website|site|app)(?:'s)?\b.{0,60}\b"
+        r"(?:build|tests?|test suite|reliability|benchmark)\b",
+        lowered,
+    ):
+        analytics_request = False
+    if analytics_request:
+        candidates.append(
+            ToolRequest(
+                "observatory_project_analytics",
+                {"query": text, "project": "", "days": _analytics_days(lowered)},
+            )
+        )
+    if not analytics_request and re.search(
+        r"\b(?:check|see|look at)\s+(?:how\s+)?curie\s+is\s+doing\s*[?!.]?$|"
         r"\b(?:show|read|check|summari[sz]e|what(?:'s| is))\b.{0,50}\b"
         r"(?:curie(?:'s)?\s+)?(?:dashboard|telemetry)\b|"
-        r"\b(?:dashboard|telemetry)\b.{0,30}\b(?:status|data|metrics?|summary)\b",
+        r"\b(?:dashboard|telemetry)\b.{0,30}\b(?:status|data|metrics?|summary)\b|"
+        r"\b(?:check|see|tell me)\b.{0,50}\bcurie(?: itself)?\b.{0,30}\b"
+        r"(?:healthy|health|online|working|okay|ok|running properly)"
+        r"(?:\s+(?:right now|currently))?[?!.]?$|"
+        r"\bis curie(?: itself)?\b.{0,20}\b(?:healthy|online|working|okay|ok|running properly)"
+        r"(?:\s+(?:right now|currently))?[?!.]?$",
         lowered,
     ):
         candidates.append(ToolRequest("dashboard_snapshot"))
@@ -1399,12 +1662,22 @@ def classify_request(
         candidates.append(ToolRequest("inspect_project", {"path": "."}))
     elif re.search(r"\b(?:run|execute)\b.*\btests?\b", lowered):
         candidates.append(ToolRequest("run_tests", {"path": "."}))
+    if re.search(
+        r"\b(?:18x|33x)\b|\b(?:bus|buses|busses|kmb|citybus)\b.{0,80}\b(?:arrival|arrive|eta|commute|from|when|track)\b|\b(?:check|when|track|next)\b.{0,80}\b(?:bus|buses|busses|kmb|citybus)\b|\b(?:morning|evening|afternoon) commute\b",
+        lowered,
+    ):
+        candidates.append(ToolRequest("bus_arrivals", {"query": text}))
     if not re.search(
-        r"\b(?:weather|storm|rain)\s+(?:metaphor|symbol|imagery)\b", lowered
+        r"\b(?:weather|storm|rain)\s+(?:metaphor|symbol|imagery)\b|"
+        r"\brain(?:ing)?\b.{0,50}\bin (?:the )?"
+        r"(?:story|book|novel|poem|movie|show|game)\b",
+        lowered,
     ) and re.search(
         r"\b(?:check|show|get|tell me|what(?:'s| is)|how(?:'s| is)|is it|will it|"
         r"do i need|should i|will i need).{0,100}\b(?:weather|forecast|rain(?:s|ing|y)?|humid(?:ity)?|jacket|coat|umbrella)\b|"
-        r"\b(?:weather|forecast).{0,80}\b(?:in|for|at|today|tomorrow|now)\b",
+        r"\b(?:weather|forecast).{0,80}\b(?:in|for|at|today|tomorrow|now)\b|"
+        r"\b(?:will|would|is)\s+(?:it\s+)?(?:going to\s+)?rain(?:ing)?\b"
+        r".{0,80}\b(?:in|at|today|tomorrow|tonight)\b",
         lowered,
     ):
         candidates.append(ToolRequest("weather", {"query": text}))
@@ -1416,8 +1689,12 @@ def classify_request(
     ):
         candidates.append(ToolRequest("research", {"query": text}))
     if re.search(
-        r"\b(?:research|analy[sz]e|plan)\b.*\b(?:market|trends?|trip|travel|itinerary|sources?|topic)\b|"
-        r"\b(?:research|current sources?)\b|"
+        r"\b(?:analy[sz]e|plan)\b.*\b(?:market|trends?|trip|travel|itinerary|sources?|topic)\b|"
+        # Research as a noun ("my research notebook") is not an action request.
+        r"(?:^|[.!?]\s+)(?:please\s+)?research\s+"
+        r"(?!(?:is|was|has|had|can|could|will|would|should|must)\b)\S|"
+        r"\b(?:can|could|would|will)\s+you\s+(?:please\s+)?research\s+\S|"
+        r"\bcurrent sources?\b|"
         r"\b(?:latest|current|recent|today(?:'s)?)\b.{0,80}\b"
         r"(?:news|politics?|election|government|president|prime minister|law|policy|"
         r"social trends?|economy|markets?|technology|science|world events?)\b|"
@@ -1481,14 +1758,14 @@ async def _ask_intent_model(prompt: str) -> str:
 
 
 async def resolve_request(
-    text: str, history: Iterable[Any] | None = None
+    text: str, history: Iterable[Any] | None = None, *, timezone_name=None
 ) -> Optional[ToolRequest]:
     """Use deterministic routing first, then a typed local classifier when warranted."""
     from agent.conversation_context import discussion_only
 
     if discussion_only(text):
         return None
-    deterministic = classify_request(text, history=history)
+    deterministic = classify_request(text, history=history, timezone_name=timezone_name)
     if (
         deterministic is not None
         or _RESPONSE_COMPOSITION.search(text)
@@ -1514,6 +1791,22 @@ async def resolve_request(
         model_call=_ask_intent_model,
         model_name=os.getenv("INTENT_CLASSIFIER_MODEL", "fast"),
         available_capabilities=capability_descriptions,
+        capability_parameters={
+            name: {
+                "properties": dict(
+                    registry.get(name).input_schema.get("properties", {})
+                ),
+                "required": list(TOOL_PARAMETER_SPECS[name].required),
+                "optional": sorted(
+                    (
+                        {key for key, _ in TOOL_PARAMETER_SPECS[name].defaults}
+                        | {key for key, _ in TOOL_PARAMETER_SPECS[name].validators}
+                    )
+                    - set(TOOL_PARAMETER_SPECS[name].required)
+                ),
+            }
+            for name in capability_descriptions
+        },
         threshold=float(os.getenv("INTENT_CLASSIFIER_ABSTAIN_THRESHOLD", "0.78")),
     )
     if classification.abstained:
@@ -1527,6 +1820,15 @@ async def resolve_request(
         ]
         action = candidates[0] if len(candidates) == 1 else None
     if action not in read_only:
+        return None
+    spec = TOOL_PARAMETER_SPECS[action]
+    allowed = (
+        set(spec.required)
+        | {key for key, _ in spec.defaults}
+        | {key for key, _ in spec.validators}
+    )
+    if set(classification.entities) - allowed:
+        # Never silently discard a named target and execute a broader default.
         return None
     confidence = classification.confidence
     normalized, validation_question = validate_tool_request(

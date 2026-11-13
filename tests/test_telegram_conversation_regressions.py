@@ -51,6 +51,7 @@ def _capability_report():
         "What are your current capabilities?",
         "What can you do?",
         "What useful things can you help me with? Give me a short, clean list.",
+        "What can you genuinely help me with from here? Just the useful version.",
         "What can you actually help me with from here? Not the marketing version, just the useful version.",
         "Ha, good. What can you actually help me with from here? Not the marketing version, just what is genuinely useful.",
         "Are all your tools still active?",
@@ -203,7 +204,9 @@ def test_focused_capability_answers_are_truthful_and_direct():
         calendar = handle_capabilities_command("Do you have access to my calendar?")
         voice = handle_capabilities_command("Can you send voice messages?")
     assert dashboard.startswith("Yes.")
-    assert "not connected" in calendar
+    assert calendar.startswith("Not right now.")
+    assert "unavailable" in calendar
+    assert "connection or configuration" in calendar
     assert "trained_voice" in voice
 
 

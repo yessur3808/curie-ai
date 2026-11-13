@@ -45,6 +45,14 @@ def verdict(answer, **extra):
     )
 
 
+def pass_verdict(**extra):
+    return verdict("", **extra)
+
+
+def minimal_pass_verdict(**extra):
+    return json.dumps({"verdict": "pass", **extra})
+
+
 def test_shared_context_is_immutable_and_owner_scoped():
     original = evidence_prompt()
     specialist = original.with_system_guidance("Review carefully")
@@ -64,7 +72,7 @@ def test_solver_and_verifier_receive_same_roles_evidence_and_owner():
     def ask(prompt, **kwargs):
         calls.append((prompt, kwargs))
         if kwargs["role"] == "critic":
-            return verdict("Because you asked me to turn it off.")
+            return pass_verdict()
         return "Because you asked me to turn it off."
 
     result = coordinated_answer(
@@ -75,8 +83,13 @@ def test_solver_and_verifier_receive_same_roles_evidence_and_owner():
     assert [kw["role"] for _, kw in calls] == ["reasoning", "critic"]
     for prompt, kwargs in calls:
         assert kwargs["owner_scope"] == "owner-a"
-        assert prompt.messages[1:4] == base.messages[1:4]
         assert prompt.evidence == base.evidence
+    assert calls[0][0].messages[1:4] == base.messages[1:4]
+    assert calls[1][0].messages[0]["role"] == "system"
+    reviewer_payload = json.loads(calls[1][0].messages[1]["content"])
+    assert reviewer_payload["newest_request"] == "Why did you turn it off?"
+    assert reviewer_payload["application_evidence"] == base.evidence
+    assert reviewer_payload["application_evidence"] == base.evidence
     assert calls[1][0].json_output is True
     assert calls[0][0].json_output is False
 
@@ -131,13 +144,167 @@ def test_verifier_network_failure_never_returns_unverified_draft():
     assert result.answer != "Invented draft"
 
 
+def test_draft_verifier_is_told_to_correct_instead_of_abstaining():
+    observed = []
+
+    def corrected(prompt, **_kwargs):
+        observed.append(prompt)
+        return json.dumps(
+            {
+                "verdict": "corrected",
+                "answer": "Hi Alex, I am late.",
+                "evidence_ids": [],
+                "issues": [],
+            }
+        )
+
+    result = verify_answer(
+        as_chat_prompt("Tell Alex I am late."),
+        "Hi Alex, traffic is terrible and I will arrive in 15 minutes.",
+        "Tell Alex I am late.",
+        ask=corrected,
+        owner_scope="a",
+        force=True,
+    )
+
+    assert result.status == "corrected"
+    assert "use corrected rather than uncertain" in str(observed[0])
+    assert "closings such as 'see you soon'" in str(observed[0])
+
+
+def test_draft_verifier_cannot_pass_an_omitted_named_recipient():
+    result = verify_answer(
+        as_chat_prompt("Draft a short note to Nora thanking her for waiting."),
+        "Thank you for waiting.",
+        "Draft a short note to Nora thanking her for waiting.",
+        ask=lambda *_args, **_kwargs: minimal_pass_verdict(),
+        owner_scope="a",
+        force=True,
+    )
+
+    assert result.status == "unverified"
+    assert result.issues == ("verifier_rejected",)
+
+
+def test_draft_verifier_can_restore_an_omitted_named_recipient():
+    result = verify_answer(
+        as_chat_prompt("Draft a short note to Nora thanking her for waiting."),
+        "Thank you for waiting.",
+        "Draft a short note to Nora thanking her for waiting.",
+        ask=lambda *_args, **_kwargs: json.dumps(
+            {
+                "verdict": "corrected",
+                "answer": "Nora, thank you for waiting.",
+                "evidence_ids": [],
+                "issues": ["restored named recipient"],
+            }
+        ),
+        owner_scope="a",
+        force=True,
+    )
+
+    assert result.status == "corrected"
+    assert result.answer == "Nora, thank you for waiting."
+
+
+def test_general_review_explicitly_does_not_require_application_evidence():
+    observed = []
+
+    result = verify_answer(
+        as_chat_prompt("Recommend a queue policy"),
+        "Reject new work when the queue is full.",
+        "Recommend a queue policy",
+        ask=lambda prompt, **_kwargs: observed.append(prompt) or minimal_pass_verdict(),
+        owner_scope="a",
+        force=True,
+    )
+
+    payload = json.loads(observed[0].messages[1]["content"])
+    assert "application_evidence" not in payload
+    assert "no application evidence is expected" in observed[0].messages[0]["content"]
+    assert result.status == "verified"
+
+
+def test_compact_verifier_marks_drafting_and_calls_out_added_eta():
+    observed = []
+    user_text = "Draft a message to Alex saying I am late."
+
+    result = verify_answer(
+        as_chat_prompt(user_text),
+        "Hi Alex, traffic is terrible and I will arrive in 15 minutes.",
+        user_text,
+        ask=lambda prompt, **_kwargs: observed.append(prompt)
+        or json.dumps(
+            {
+                "verdict": "corrected",
+                "answer": "Hi Alex, I am late.",
+                "issues": ["unsupported_details"],
+            }
+        ),
+        owner_scope="a",
+        force=True,
+    )
+
+    payload = json.loads(observed[0].messages[1]["content"])
+    assert payload["drafting_or_editing"] is True
+    assert payload["required_corrections"] == ["traffic", "arrival estimate"]
+    assert "15-minute ETA MUST be corrected" in observed[0].messages[0]["content"]
+    assert result.status == "corrected"
+
+
+def test_verifier_accepts_safe_corrected_draft_alias():
+    result = verify_answer(
+        as_chat_prompt("What is 2 + 2?"),
+        "2 + 2 is 5.",
+        "What is 2 + 2?",
+        ask=lambda *_args, **_kwargs: json.dumps(
+            {"verdict": "corrected", "corrected_draft": "2 + 2 is 4."}
+        ),
+        owner_scope="a",
+        force=True,
+    )
+
+    assert result.status == "corrected"
+    assert result.answer == "2 + 2 is 4."
+
+
+def test_verifier_normalizes_fail_with_safe_correction():
+    result = verify_answer(
+        as_chat_prompt("What is 2 + 2?"),
+        "2 + 2 is 5.",
+        "What is 2 + 2?",
+        ask=lambda *_args, **_kwargs: json.dumps(
+            {"verdict": "fail", "answer": "2 + 2 is 4."}
+        ),
+        owner_scope="a",
+        force=True,
+    )
+
+    assert result.status == "corrected"
+    assert result.answer == "2 + 2 is 4."
+
+
+def test_verifier_cannot_pass_required_draft_correction():
+    result = verify_answer(
+        as_chat_prompt("Draft a message to Alex saying I am late."),
+        "Hi Alex, traffic is terrible and I will arrive in 15 minutes.",
+        "Draft a message to Alex saying I am late.",
+        ask=lambda *_args, **_kwargs: minimal_pass_verdict(),
+        owner_scope="a",
+        force=True,
+    )
+
+    assert result.status == "unverified"
+    assert "traffic" not in result.answer
+
+
 @pytest.mark.parametrize(
     "raw",
     [
         "looks fine",
         "[]",
-        verdict("Done", evidence_ids=["invented"]),
-        verdict("Done", evidence_ids=[]),
+        pass_verdict(evidence_ids=["invented"]),
+        pass_verdict(evidence_ids=[]),
         verdict("I didn't turn it off."),
     ],
 )
@@ -190,6 +357,16 @@ def test_explicit_review_is_delegated(monkeypatch):
     assert should_use_ensemble("Independently verify this design")
 
 
+def test_review_solver_preserves_selected_model_tier():
+    from agent.orchestration.model_service import ModelConversationService
+
+    assert ModelConversationService.review_solver_role("general") == "general"
+    assert ModelConversationService.review_solver_role("fast") == "fast"
+    assert ModelConversationService.review_solver_role("reasoning") == "reasoning"
+    assert ModelConversationService.review_solver_role("coding") == "coding"
+    assert ModelConversationService.review_solver_role("unknown") == "general"
+
+
 def test_dense_deep_reasoner_is_not_used_for_ordinary_analysis():
     from agent.orchestration.model_service import ModelConversationService
 
@@ -210,6 +387,7 @@ def test_dense_deep_reasoner_is_not_used_for_ordinary_analysis():
         ("A thorough comparison, in two sentences", 256),
         ("Explain API latency in one sentence", 160),
         ("Give a candid short answer about database latency", 256),
+        ("Give a concise recommendation about database latency", 192),
         ("Give a comprehensive architecture review", 1024),
     ],
 )
@@ -431,6 +609,62 @@ def test_shared_worker_never_loads_two_gpu_models(monkeypatch):
     manager._evict_for_shared_worker("new-gpu.gguf")
     assert list(cache) == ["critic.gguf"]
     assert closed == ["gpu"]
+
+
+def test_shared_worker_evicts_by_checkpoint_bytes_before_model_count(monkeypatch):
+    from collections import OrderedDict
+    from llm import manager
+
+    closed = []
+    cache = OrderedDict(
+        (
+            (
+                name,
+                SimpleNamespace(
+                    _curie_gpu_layers=0, close=lambda n=name: closed.append(n)
+                ),
+            )
+            for name in ("old-large.gguf", "critic.gguf", "fast.gguf")
+        )
+    )
+    sizes = {
+        "old-large.gguf": 40,
+        "critic.gguf": 35,
+        "fast.gguf": 20,
+        "deep.gguf": 40,
+    }
+    monkeypatch.setattr(manager, "llama_models_cache", cache)
+    monkeypatch.setattr(manager, "MAX_MODELS_IN_CACHE", 4)
+    monkeypatch.setattr(manager, "MAX_RESIDENT_MODEL_BYTES", 100)
+    monkeypatch.setattr(manager, "_model_file_bytes", lambda name: sizes[name])
+    monkeypatch.setenv("LLM_GPU_LAYERS", "0")
+    monkeypatch.setenv("CURIE_MODEL_SUPERVISOR", "off")
+
+    manager._evict_for_shared_worker("deep.gguf")
+
+    assert list(cache) == ["critic.gguf", "fast.gguf"]
+    assert closed == ["old-large.gguf"]
+
+
+def test_cache_cleanup_explicitly_closes_evicted_model(monkeypatch):
+    from collections import OrderedDict
+    from llm import manager
+
+    closed = []
+    cache = OrderedDict(
+        (
+            (name, SimpleNamespace(close=lambda n=name: closed.append(n)))
+            for name in ("old.gguf", "current.gguf")
+        )
+    )
+    monkeypatch.setattr(manager, "llama_models_cache", cache)
+    monkeypatch.setattr(manager, "MAX_MODELS_IN_CACHE", 1)
+    monkeypatch.setenv("CURIE_MODEL_SUPERVISOR", "off")
+
+    manager._cleanup_excess_models()
+
+    assert list(cache) == ["current.gguf"]
+    assert closed == ["old.gguf"]
 
 
 def test_gateway_rejects_public_socket(monkeypatch):

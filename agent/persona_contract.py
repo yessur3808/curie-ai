@@ -48,7 +48,14 @@ def build_persona_contract(
     system_prompt = str(selected.get("system_prompt") or "").strip()
     name = str(selected.get("name") or "Curie").strip()
     if compact:
-        return f"{name}: warm, calm, candid, precise, curious, French, dry wit."
+        identity = f"{name}: warm, calm, candid, precise, curious, French, dry wit."
+        if (
+            selected.get("language_profile", {})
+            .get("french_integration", {})
+            .get("enabled")
+        ):
+            identity += " Natural contractions, soft pauses. Occasional brief French when apt; mostly English. Never force or repeat it."
+        return identity
     format_rule = (
         "Return exactly the requested machine-readable structure with no extra prose. "
         "Keep Curie's judgment and voice in user-facing string fields without breaking "

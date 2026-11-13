@@ -1,9 +1,34 @@
 import json
 import time
+import pytest
 from datetime import datetime
 from types import SimpleNamespace
 
 from cli import dashboard
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("INFO: error counter reset to zero", 0),
+        ("DEBUG: exception handler installed", 0),
+        ("ERROR: connection lost", 1),
+        ("CRITICAL: service unavailable", 1),
+        ("RuntimeError: synthetic failure", 1),
+    ],
+)
+@pytest.mark.parametrize("standard_format", [False, True])
+def test_recent_log_respects_explicit_severity(
+    tmp_path, line, expected, standard_format
+):
+    log = tmp_path / "severity.log"
+    if standard_format and not line.startswith("RuntimeError"):
+        level, message = line.split(": ", 1)
+        line = f"2026-11-01 08:46:00,000 - curie.synthetic - {level} - {message}"
+    log.write_text("2026-11-01 08:46:00 +00:00: " + line + "\n")
+    count, details = dashboard._recent_log("curie", log_path=str(log))
+    assert count == expected
+    assert len(details) == expected
 
 
 def test_pm2_status_reports_named_managed_instance(monkeypatch, tmp_path):

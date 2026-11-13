@@ -15,6 +15,20 @@ from cryptography.fernet import Fernet, InvalidToken
 _LOCK = threading.RLock()
 
 
+def _remote_store():
+    backend = os.getenv("CURIE_CREDENTIAL_BACKEND", "file")
+    if backend == "file":
+        return None
+    if backend != "infisical":
+        raise RuntimeError("Unknown credential backend")
+    from services.infisical_store import InfisicalStore
+
+    path = os.getenv("CURIE_VAULT_CREDENTIAL_CONFIG")
+    if not path:
+        raise RuntimeError("Vault credential configuration is required")
+    return InfisicalStore.from_file(path)
+
+
 def _path() -> Path:
     return Path(os.getenv("CURIE_CREDENTIAL_STORE", ".curie_credentials.enc")).resolve()
 
@@ -74,6 +88,13 @@ def _write(documents: dict[str, Any]) -> None:
 
 def put_credential(owner_id: str, provider: str, value: dict[str, Any]) -> None:
     with _LOCK:
+        store = _remote_store()
+        if store is not None:
+            store.set(
+                "CURIE_" + _record_key(owner_id, provider).upper(),
+                json.dumps(value, separators=(",", ":")),
+            )
+            return
         documents = _load()
         documents[_record_key(owner_id, provider)] = dict(value)
         _write(documents)
@@ -81,12 +102,27 @@ def put_credential(owner_id: str, provider: str, value: dict[str, Any]) -> None:
 
 def get_credential(owner_id: str, provider: str) -> dict[str, Any] | None:
     with _LOCK:
+        store = _remote_store()
+        if store is not None:
+            raw = store.get("CURIE_" + _record_key(owner_id, provider).upper())
+            if raw is None:
+                return None
+            try:
+                value = json.loads(raw)
+            except ValueError:
+                raise RuntimeError("Vault credential record is invalid") from None
+            if not isinstance(value, dict):
+                raise RuntimeError("Vault credential record is invalid")
+            return value
         value = _load().get(_record_key(owner_id, provider))
     return dict(value) if isinstance(value, dict) else None
 
 
 def delete_credential(owner_id: str, provider: str) -> bool:
     with _LOCK:
+        store = _remote_store()
+        if store is not None:
+            return store.delete("CURIE_" + _record_key(owner_id, provider).upper())
         documents = _load()
         removed = documents.pop(_record_key(owner_id, provider), None) is not None
         if removed:

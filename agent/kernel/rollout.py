@@ -7,6 +7,8 @@ Invalid state fails closed to the legacy path while that rollback path exists.
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -70,7 +72,7 @@ def rollout_state_path() -> Path:
     return (
         Path(configured).expanduser()
         if configured
-        else Path.home() / ".curie" / "pipeline-rollout.json"
+        else assistant_state_dir() / "pipeline-rollout.json"
     )
 
 

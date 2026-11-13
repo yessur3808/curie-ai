@@ -76,6 +76,7 @@ from agent.orchestration.social_service import SocialConversationService
 from agent.orchestration.routing_service import UnifiedRoutingService
 from agent.orchestration.turn_pipeline import LegacyTurnPipelineAdapter
 from utils.persona import normalize_persona
+from utils.formatting import format_response_payload
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
 # Task tracking (optional – import silently ignored if cli package unavailable)
@@ -611,6 +612,9 @@ class ChatWorkflow:
         except BaseException as exc:
             diagnostic_monitor.finish(ticket, None, error=exc)
             raise
+        # One channel-safe presentation boundary covers model replies, tools,
+        # commands, errors, cached results, and active-pipeline responses.
+        result = format_response_payload(result)
         record = diagnostic_monitor.finish(ticket, result)
         result["diagnostics"] = record
         return result
@@ -1271,6 +1275,27 @@ class ChatWorkflow:
             logger.debug("Could not process open-source controls: %s", exc)
 
         try:
+            from services.bounded_autonomy import handle_bounded_autonomy_command
+
+            autonomy_response = await handle_bounded_autonomy_command(
+                str(internal_id),
+                user_text,
+                {
+                    **(UserManager.get_user_profile(internal_id) or {}),
+                    "_connector": str(platform or "unknown"),
+                },
+            )
+            if autonomy_response is not None:
+                return {
+                    "text": autonomy_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "bounded_autonomy_controls",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                }
+        except Exception as exc:
+            logger.debug("Could not process bounded-autonomy controls: %s", exc)
+
+        try:
             from services.self_diagnostics import handle_diagnostics_command
 
             diagnostic_response = handle_diagnostics_command(
@@ -1686,7 +1711,7 @@ class ChatWorkflow:
             # Load user profile and conversation history in parallel
             with trace.stage("context"):
                 user_profile, history = await self._batch_load_context(
-                    internal_id, platform
+                    internal_id, platform, user_text=user_text
                 )
 
             # Summarise very long histories to stay within the context window
@@ -1976,7 +2001,7 @@ class ChatWorkflow:
             }
 
     async def _batch_load_context(
-        self, internal_id: str, platform: str = "unknown"
+        self, internal_id: str, platform: str = "unknown", *, user_text: str = ""
     ) -> Tuple[Dict, list]:
         """
         Batch-load user profile and conversation history in parallel.
@@ -2003,6 +2028,11 @@ class ChatWorkflow:
             if hasattr(self, "max_history") and self.max_history:
                 try:
                     limit = int(self.max_history) * 2
+                    if re.match(r"\s*(?:back|returning)\s+to\b", user_text, re.I):
+                        # Revisit a bounded owner/session-local window on an
+                        # explicit topic return. Existing summary and token
+                        # budgets still apply; ordinary turns stay lightweight.
+                        limit = max(limit, 40)
                     if limit > 0:
                         messages_to_use = messages[-limit:]
                     else:
@@ -2040,6 +2070,11 @@ class ChatWorkflow:
             re.I,
         ):
             return []
+        if re.match(r"\s*(?:back|returning)\s+to\b", user_text, re.I):
+            # Explicitly revisiting a topic needs the available transcript,
+            # not just the two intervening exchanges. This does not restore
+            # old executable goals or bypass the normal history/token caps.
+            return history
         if transition and transition.kind in {
             TransitionClass.NEW_GOAL,
             TransitionClass.INTERRUPTION,
@@ -2088,6 +2123,7 @@ class ChatWorkflow:
                 build_persona_contract(
                     self.persona,
                     medium="direct conversation and task response",
+                    compact=True,
                 ),
                 "active persona contract",
                 allow_truncate=False,
@@ -2636,10 +2672,12 @@ class ChatWorkflow:
                 )
         except Exception as exc:
             logger.debug("Adaptive context cache key unavailable: %s", exc)
-        personality_directives = self.personality_context.build_prompt_directives(
-            user_text,
-            user_profile=user_profile,
-            history=history,
+        personality_directives = (
+            self.personality_context.build_compact_prompt_directives(
+                user_text,
+                user_profile=user_profile,
+                history=history,
+            )
         )
 
         # Resolve timezone: prefer learned profile → operator default → UTC
@@ -2696,6 +2734,7 @@ class ChatWorkflow:
                 or build_persona_contract(
                     self.persona,
                     medium="direct conversation and task response",
+                    compact=True,
                 )
             )
 
@@ -2819,14 +2858,22 @@ class ChatWorkflow:
                 "Do not address them by name in routine replies."
             )
             lines.append(
-                "- Use short paragraphs. Add a heading or bullets only when they make a longer "
-                "or multi-part answer easier to scan. Do not over-format casual chat."
+                "- Presentation policy: lead with the answer or outcome. Keep a simple casual "
+                "reply as plain prose. For reports, comparisons, instructions, status updates, "
+                "or multiple results, use short paragraphs, one descriptive heading when useful, "
+                "clear section labels, and compact bullets. Do not over-format casual chat."
             )
             lines.append(
                 "- When formatting improves clarity, use portable Markdown: **bold**, *italic*, "
                 "~~strikethrough~~, ++underline++, `inline code`, [label](https://example.com), "
                 "bullets, numbered lists, and compact Markdown tables. Split distinct sections "
                 "with a blank line so chat connectors can deliver them as readable messages."
+            )
+            lines.append(
+                "- Keep formatting clean and professional: use bold sparingly for titles, section "
+                "names, and important labels. Avoid decorative clutter, repeated headings, walls "
+                "of text, and raw JSON or tuples unless requested. Prefer human-readable dates and "
+                "times with a timezone. Put source, status, or freshness details after the main result."
             )
             if str(self.persona.get("name", "")).casefold() == "curie":
                 lines.append(
@@ -3028,7 +3075,22 @@ class ChatWorkflow:
             "not verified article details. Use live tools for newer or missing facts. "
             "Never promise to research later unless the application has saved a follow-up job."
         )
-        prompt = conversation_prompt(system, history, user_text)
+        # Working summaries are inferred background, not system instructions.
+        # conversation_prompt intentionally rejects system-role history; retain
+        # only our labelled summary entries as assistant context instead.
+        role_history = [
+            (
+                (
+                    "assistant"
+                    if role == "system"
+                    and str(content).startswith("[Working-context summary")
+                    else role
+                ),
+                content,
+            )
+            for role, content in history
+        ]
+        prompt = conversation_prompt(system, role_history, user_text)
         try:
             awareness = awareness_context(str(internal_id), user_profile, now=now)
             if awareness:

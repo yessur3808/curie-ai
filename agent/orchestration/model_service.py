@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import time
 
 from agent.orchestration.contracts import ResponseCandidate
 
@@ -11,6 +13,19 @@ from agent.orchestration.contracts import ResponseCandidate
 class ModelConversationService:
     def __init__(self, local_manager):
         self.local_manager = local_manager
+
+    @staticmethod
+    def local_draft_stream_enabled(scope, role):
+        # Preserve cloud/provider routing and specialist response contracts.
+        return (
+            scope == "conversation_only"
+            and role in {"general", "fast"}
+            and os.getenv("CURIE_LOCAL_DRAFT_STREAM", "true").lower()
+            in {"1", "true", "yes"}
+            and os.getenv("LLM_PROVIDER_PRIORITY", "llama.cpp").strip().lower()
+            == "llama.cpp"
+            and os.getenv(f"LLM_{role.upper()}_PROVIDER", "local").lower() == "local"
+        )
 
     @staticmethod
     def needs_draft_review(user_text, prompt):
@@ -75,6 +90,8 @@ class ModelConversationService:
             return 160
         if re.search(r"\b(?:two|2) sentences\b", text):
             return 256
+        if re.search(r"\bconcise\b", text):
+            return 192
         if re.search(r"\b(?:brief|short (?:answer|reply|note)|keep it short)\b", text):
             return 256
         if re.search(
@@ -96,7 +113,7 @@ class ModelConversationService:
         """Select a model specialty from the user's actual task."""
         text = user_text.strip().casefold()
         if ModelConversationService.is_lightweight_opinion(user_text):
-            return "general"
+            return "fast"
         if re.search(
             r"\b(?:deep dive|in depth|thorough|comprehensive)\b", text
         ) and re.search(
@@ -121,11 +138,12 @@ class ModelConversationService:
             return "reasoning"
         if (
             re.search(
-                r"\b(?:code|coding|program|function|class|api|endpoint|debug|bug|"
+                r"\b(?:code|coding|program|function|api|endpoint|debug|bug|"
                 r"refactor|repository|repo|pull request|unit tests?|pytest|javascript|"
                 r"typescript|python|rust|sql|html|css|docker|authentication)\b",
                 text,
             )
+            or re.search(r"\b(?:write|implement|define)\s+(?:a\s+)?class\b", text)
             or len(re.findall(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", text)) >= 2
         ):
             return "coding"
@@ -181,6 +199,50 @@ class ModelConversationService:
         return requested
 
     @staticmethod
+    def review_solver_role(role: str) -> str:
+        """Keep review on the selected tier; the critic supplies independent depth."""
+        if role in {"general", "fast", "reasoning", "deep_reasoning", "coding"}:
+            return role
+        return "general"
+
+    @staticmethod
+    def capability_aware_prompt(prompt, user_text: str = "", *, scope: str = "full"):
+        """Attach the complete compact capability index and relevant details."""
+
+        from contracts import model_capability_prompt
+        from llm.chat_prompt import ChatPrompt
+
+        if scope == "conversation_only":
+            guidance = (
+                "This conversation interface can answer and speak replies but cannot execute "
+                "tools, browse, send messages, or change devices. Use supplied evidence only; "
+                "never claim an action or live lookup occurred. Missing evidence means unknown."
+            )
+            if isinstance(prompt, ChatPrompt):
+                return prompt.with_system_guidance(guidance)
+            return f"{str(prompt).rstrip()}\n\n{guidance}"
+        if scope != "full":
+            raise ValueError("Unknown capability scope")
+        guidance = model_capability_prompt(query=user_text)
+        from services.voice_delivery import voice_health, voice_reply_requested
+
+        if voice_reply_requested(user_text):
+            health = voice_health()
+            if health.get("ready"):
+                guidance += (
+                    "\nVoice delivery for this request: local speech synthesis is ready. "
+                    "The Telegram connector synthesizes your answer and sends the audio; "
+                    "you provide the words to speak. Fulfil the requested spoken content "
+                    "directly (for example, a request to ask how the user is doing should "
+                    "ask that question). Do not claim you cannot send voice messages, "
+                    "do not offer a text draft instead, and do not claim audio has already "
+                    "been delivered; the connector handles delivery after generation."
+                )
+        if isinstance(prompt, ChatPrompt):
+            return prompt.with_system_guidance(guidance)
+        return f"{str(prompt).rstrip()}\n\n{guidance}"
+
+    @staticmethod
     def quality_prompt(prompt: str, role: str) -> str:
         """Add one-pass internal verification for complex work, without extra calls."""
         if role in {"reasoning", "deep_reasoning", "coding"}:
@@ -231,6 +293,7 @@ class ModelConversationService:
         owner_id: str = "anonymous",
         request_id: str | None = None,
         priority: str = "active",
+        capability_scope: str = "full",
     ) -> ResponseCandidate:
         role = self.contextual_role(user_text, prompt)
         max_tokens = self.token_budget(user_text, role)
@@ -264,7 +327,18 @@ class ModelConversationService:
         role = decision.model or role
         max_tokens = decision.max_tokens
         effective_temperature = self.reasoning_temperature(role, temperature)
-        effective_prompt = self.quality_prompt(prompt, role)
+        effective_prompt = self.capability_aware_prompt(
+            prompt, user_text, scope=capability_scope
+        )
+        # The conversation adapter already supplies answer, truth and turn rules.
+        # Keep extra complex-work guidance, without duplicating the ordinary-chat
+        # checklist on every live turn. Review selection below is unchanged.
+        if capability_scope != "conversation_only" or role in {
+            "reasoning",
+            "deep_reasoning",
+            "coding",
+        }:
+            effective_prompt = self.quality_prompt(effective_prompt, role)
         outcome = {
             "provider": self.local_manager.DEFAULT_LLAMA_MODEL,
             "fallback": False,
@@ -277,9 +351,12 @@ class ModelConversationService:
             "model_calls": 0,
             "usage_estimate": 0,
             "roles": [],
+            "stage_metrics": [],
         }
 
         def measured_ask(model_prompt, **kwargs):
+            import time
+
             if cancel_signal is not None and cancel_signal.is_set():
                 raise RuntimeError("coordination_cancelled")
             coordination["model_calls"] += 1
@@ -291,19 +368,41 @@ class ModelConversationService:
             provider = os.getenv(
                 f"LLM_{str(kwargs.get('role', '')).upper()}_PROVIDER", "local"
             )
-            result = None
-            if provider in {"qwen", "zai"}:
-                from llm.providers import _call_compatible
+            started = time.perf_counter()
+            try:
+                result = None
+                if provider in {"qwen", "zai"} and kwargs.get("role") != "alternate":
+                    from llm.providers import _call_compatible
 
-                result = _call_compatible(
-                    provider,
-                    model_prompt,
-                    kwargs.get("temperature", 0.2),
-                    kwargs.get("max_tokens"),
-                    kwargs.get("role"),
-                )
-            if result is None:
-                result = self.local_manager.ask_llm(model_prompt, **kwargs)
+                    result = _call_compatible(
+                        provider,
+                        model_prompt,
+                        kwargs.get("temperature", 0.2),
+                        kwargs.get("max_tokens"),
+                        kwargs.get("role"),
+                    )
+                if result is None:
+                    result = self.local_manager.ask_llm(model_prompt, **kwargs)
+            finally:
+                elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+            approximate_output_tokens = max(0, len(str(result or "").split()) * 4 // 3)
+            prompt_messages = getattr(model_prompt, "messages", None)
+            prompt_chars = (
+                sum(len(str(message.get("content", ""))) for message in prompt_messages)
+                if prompt_messages
+                else len(str(model_prompt))
+            )
+            coordination["stage_metrics"].append(
+                {
+                    "role": str(kwargs.get("role", "general")),
+                    "latency_ms": elapsed_ms,
+                    "prompt_chars": prompt_chars,
+                    "output_tokens": approximate_output_tokens,
+                    "output_tokens_per_second": round(
+                        approximate_output_tokens / max(0.001, elapsed_ms / 1000), 2
+                    ),
+                }
+            )
             coordination["usage_estimate"] += max(0, len(str(result or "")) // 4)
             return result
 
@@ -325,11 +424,7 @@ class ModelConversationService:
                         ask=measured_ask,
                         owner_scope=owner_id,
                         max_tokens=max_tokens,
-                        solver_role=(
-                            role
-                            if role in {"reasoning", "deep_reasoning", "coding"}
-                            else "reasoning"
-                        ),
+                        solver_role=self.review_solver_role(role),
                         cancelled=cancelled,
                     )
                     response = verified.answer
@@ -347,18 +442,60 @@ class ModelConversationService:
                     coordination["usage_estimate"] += max(
                         1, len(str(effective_prompt)) // 4
                     )
+                    provider_started = time.perf_counter()
+                    draft_metrics = {}
+                    provider_call = ask_best_provider
+                    provider_options = {}
+                    if self.local_draft_stream_enabled(capability_scope, role):
+
+                        def observe_draft(delta):
+                            if cancelled.is_set():
+                                raise RuntimeError("coordination_cancelled")
+                            if "first_draft_ms" not in draft_metrics:
+                                draft_metrics["first_draft_ms"] = round(
+                                    (time.perf_counter() - provider_started) * 1000, 3
+                                )
+                            draft_metrics["draft_characters"] = draft_metrics.get(
+                                "draft_characters", 0
+                            ) + len(delta)
+                            # Never emit raw model drafts to users or speech.
+                            # Verification and live finalization still run below.
+
+                        provider_call = self.local_manager.ask_llm
+                        provider_options["on_delta"] = observe_draft
                     response = await asyncio.to_thread(
-                        ask_best_provider,
+                        provider_call,
                         effective_prompt,
                         temperature=effective_temperature,
                         max_tokens=max_tokens,
                         role=role,
                         owner_scope=owner_id,
+                        **provider_options,
                     )
                     coordination["usage_estimate"] += max(
                         0, len(str(response or "")) // 4
                     )
-                    outcome["provider"] = f"best_provider:{role}"
+                    coordination["stage_metrics"].append(
+                        {
+                            "role": role,
+                            "latency_ms": round(
+                                (time.perf_counter() - provider_started) * 1000, 3
+                            ),
+                            "prompt_chars": sum(
+                                len(m["content"])
+                                for m in getattr(effective_prompt, "messages", [])
+                            )
+                            or len(str(effective_prompt)),
+                            "output_characters": len(response or ""),
+                            "delivery": "complete_answer",
+                            **draft_metrics,
+                        }
+                    )
+                    outcome["provider"] = (
+                        f"local_draft:{role}"
+                        if provider_options
+                        else f"best_provider:{role}"
+                    )
             except Exception:
                 response = None
             if cancelled.is_set():
@@ -377,6 +514,35 @@ class ModelConversationService:
             if cancelled.is_set():
                 raise asyncio.CancelledError
             if "verification" not in coordination:
+                from llm.alternate import enabled, fallback_reason
+
+                reason = fallback_reason(response) if enabled() else None
+                if reason:
+                    coordination["alternate_reason"] = reason
+                    try:
+                        alternate = await asyncio.to_thread(
+                            measured_ask,
+                            effective_prompt,
+                            max_tokens=max_tokens,
+                            temperature=effective_temperature,
+                            role="alternate",
+                            owner_scope=owner_id,
+                        )
+                    except Exception:
+                        alternate = None
+                    if cancelled.is_set():
+                        raise asyncio.CancelledError
+                    if (
+                        isinstance(alternate, str)
+                        and alternate.strip()
+                        and not alternate.startswith("[Error")
+                    ):
+                        response = alternate
+                        outcome["fallback"] = True
+                        outcome["provider"] = "ollama:alternate"
+                        coordination["alternate_status"] = "answered"
+                    else:
+                        coordination["alternate_status"] = "unavailable"
                 draft_review = self.needs_draft_review(user_text, effective_prompt)
                 if draft_review:
                     coordination["mode"] = "draft_review"

@@ -6,6 +6,16 @@ import re
 def speech_chunks(
     text: str, limit: int = 240, sentence_only: bool = False
 ) -> list[str]:
+    text = text.replace("’", "'").replace("‘", "'")
+    # A tiny standalone French acknowledgment plus an English sentence can
+    # trigger long, poorly intelligible output in Nano. Join the aside into
+    # its English clause; preserve every word and keep French-only text intact.
+    text = re.sub(
+        r"^(D['’]accord|Voilà|Bien sûr|Je comprends)\.\s+(Let['’]s|We|You|It|That|This|I)\b",
+        lambda m: m[1] + ", " + ("I" if m[2].casefold() == "i" else m[2].lower()),
+        text.strip(),
+        flags=re.I,
+    )
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"[*#`•]", "", text)
     if sentence_only:
@@ -35,8 +45,22 @@ def speech_chunks(
             if len(word) > limit:
                 raise ValueError("Speech contains an overlong word")
             if current and len(current) + len(word) + 1 > limit:
-                chunks.append(current)
-                current = ""
+                # Prefer a clause ending to a hard word-count cut. Keep a
+                # meaningful lead-in so a short French aside is not isolated.
+                boundaries = list(re.finditer(r"[,;:]\s+", current))
+                boundary = next(
+                    (m for m in reversed(boundaries) if m.end() >= limit // 3), None
+                )
+                if boundary is not None:
+                    chunks.append(current[: boundary.start() + 1])
+                    current = current[boundary.end() :]
+                else:
+                    chunks.append(current)
+                    current = ""
+                # A single large word can still exceed the remaining capacity.
+                if current and len(current) + len(word) + 1 > limit:
+                    chunks.append(current)
+                    current = ""
             current = (current + " " + word).strip()
         if current and (
             (sentence_only and len(current.split()) >= 3) or len(current) >= limit // 2

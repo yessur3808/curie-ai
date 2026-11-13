@@ -17,7 +17,15 @@ from services.voice_delivery import trained_voice_id, voice_reply_requested
         ("Find a coffee shop near Central", "places_search"),
         ("Show me the Curie dashboard status", "dashboard_snapshot"),
         ("What's on my calendar tomorrow?", "calendar_list"),
+        ("Could you check what I've got on tomorrow?", "calendar_list"),
         ("What's the latest political news?", "research"),
+        ("Could you see whether it will rain in Osaka tomorrow?", "weather"),
+        (
+            "Take a quick look at how my Atmosphere website has been doing lately.",
+            "observatory_project_analytics",
+        ),
+        ("Now check whether Curie itself is healthy.", "dashboard_snapshot"),
+        ("See if the desk lamp is still on.", "home_status"),
     ],
 )
 def test_natural_situational_requests_route_to_live_capabilities(text, action):

@@ -286,7 +286,17 @@ def _recent_log(
         return 0, []
     errors = []
     for line in lines:
-        if "error" not in line.casefold() and "exception" not in line.casefold():
+        # Prefer explicit Python/uvicorn severity over words in the message.
+        # Retain the legacy fallback for unstructured traceback lines.
+        severity = re.search(
+            r"(?:^|:\s+| - )(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|FATAL)(?::| - )",
+            line,
+        )
+        if severity:
+            is_error = severity.group(1) in {"ERROR", "CRITICAL", "FATAL"}
+        else:
+            is_error = "error" in line.casefold() or "exception" in line.casefold()
+        if not is_error:
             continue
         if since_epoch:
             match = re.match(

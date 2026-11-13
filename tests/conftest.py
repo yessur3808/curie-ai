@@ -35,6 +35,19 @@ def isolated_runtime(monkeypatch, tmp_path):
     from agent.observability import reset_telemetry
     from services.action_previews import preview_store
     from services.contribution_learning import contribution_learning
+    from services.resource_governor import resource_governor
+    from services.self_diagnostics import diagnostic_monitor
+    from collections import deque
+
+    # These singleton services can be imported before the fixture runs.
+    # Isolate their objects as well as environment defaults so repeated offline
+    # suites neither consume live budgets nor inherit persisted test usage.
+    monkeypatch.setenv("CURIE_RESOURCE_BUDGET_PATH", str(tmp_path / "budgets.json"))
+    monkeypatch.setenv("CURIE_DIAGNOSTICS_PATH", str(tmp_path / "diagnostics.json"))
+    monkeypatch.setattr(resource_governor, "path", tmp_path / "budgets.json")
+    monkeypatch.setattr(resource_governor, "_events", [])
+    monkeypatch.setattr(diagnostic_monitor, "path", tmp_path / "diagnostics.json")
+    monkeypatch.setattr(diagnostic_monitor, "_records", deque(maxlen=250))
 
     # Preview and contribution tests must never touch the operator's live state.
     monkeypatch.setattr(preview_store, "root", tmp_path / "action-previews")

@@ -20,8 +20,27 @@ _KIND_WEIGHT = {
     "commitment": 0.82,
     "device_health": 0.75,
     "tracked_goal": 0.7,
+    "practical_help": 0.78,
+    "assistance": 0.72,
+    "life_easier": 0.65,
+    "entertainment": 0.3,
     "routine": 0.55,
     "check_in": 0.2,
+}
+_PROACTIVE_CATEGORIES = ("help", "assist", "ease", "fun", "companion")
+_DEFAULT_CATEGORY_BY_KIND = {
+    "deadline": "help",
+    "reminder": "help",
+    "travel_disruption": "help",
+    "commitment": "help",
+    "device_health": "help",
+    "tracked_goal": "help",
+    "practical_help": "help",
+    "assistance": "assist",
+    "life_easier": "ease",
+    "entertainment": "fun",
+    "routine": "assist",
+    "check_in": "companion",
 }
 _DEVICE_COMMAND_THEME = re.compile(
     r"\b(?:turn|switch|power)\s+(?:on|off)\b|\b(?:all|both)\s+(?:lights?|devices?)\b",
@@ -62,6 +81,7 @@ class ProactiveEvidence:
 @dataclass(frozen=True, slots=True)
 class ProactiveCandidate:
     kind: str
+    category: str
     topic: str
     reason: str
     confidence: float
@@ -78,8 +98,12 @@ class ProactiveCandidate:
             for item in value.get("evidence", ())
             if isinstance(item, Mapping)
         )
+        kind = str(value.get("kind") or "routine")[:40]
         return cls(
-            kind=str(value.get("kind") or "routine")[:40],
+            kind=kind,
+            category=str(
+                value.get("category") or _DEFAULT_CATEGORY_BY_KIND.get(kind, "assist")
+            )[:20],
             topic=str(value.get("topic") or "general")[:80],
             reason=str(value.get("reason") or "")[:180],
             confidence=max(0.0, min(float(value.get("confidence", 0)), 1.0)),
@@ -104,6 +128,7 @@ class ProactiveCandidate:
     def as_dict(self) -> dict[str, Any]:
         return {
             "kind": self.kind,
+            "category": self.category,
             "topic": self.topic,
             "reason": self.reason,
             "confidence": self.confidence,
@@ -120,9 +145,12 @@ def rank_candidates(candidates: list[dict], profile: dict) -> list[dict]:
     excluded = {
         str(value).casefold() for value in profile.get("proactive_avoid_topics", [])
     }
+    categories = set(settings(profile)["categories"])
     ranked = []
     for raw_candidate in candidates:
         candidate = ProactiveCandidate.from_mapping(raw_candidate)
+        if candidate.category not in categories:
+            continue
         topic = candidate.topic.casefold()
         if any(item and item in topic for item in excluded):
             continue
@@ -166,6 +194,16 @@ def _parse_time(value):
 def settings(profile: dict) -> dict:
     """Return the bounded, user-visible proactive settings."""
     quiet = profile.get("proactive_quiet_hours") or {"start": 22, "end": 8}
+    raw_categories = profile.get("proactive_categories")
+    categories = [
+        str(value).casefold()
+        for value in (
+            raw_categories
+            if isinstance(raw_categories, (list, tuple, set))
+            else _PROACTIVE_CATEGORIES
+        )
+        if str(value).casefold() in _PROACTIVE_CATEGORIES
+    ]
     return {
         "enabled": profile.get("proactive_messaging_enabled") is True,
         "timezone": profile.get("timezone") or "UTC",
@@ -182,6 +220,8 @@ def settings(profile: dict) -> dict:
             1.0, min(float(profile.get("proactive_interval_hours", 24)), 168.0)
         ),
         "style": str(profile.get("proactive_style", "balanced")),
+        "concierge_enabled": profile.get("proactive_concierge_enabled") is True,
+        "categories": list(dict.fromkeys(categories)),
         "snoozed_until": profile.get("proactive_snoozed_until"),
         "excluded_topics": list(profile.get("proactive_avoid_topics", []))[:20],
         "delivery_channels": list(profile.get("proactive_delivery_channels", []))[:10],
@@ -326,6 +366,40 @@ def handle_proactive_command(internal_id: str, text: str) -> str | None:
             internal_id, {"proactive_delivery_channels": [channel]}
         )
         return f"Proactive messages will prefer {channel}."
+    if action.startswith("categories"):
+        raw = action.removeprefix("categories").strip()
+        if not raw:
+            configured = settings(profile)["categories"]
+            return "Proactive categories: " + ", ".join(configured or ["none"])
+        requested = list(
+            dict.fromkeys(part for part in re.split(r"[\s,]+", raw) if part)
+        )
+        invalid = [item for item in requested if item not in _PROACTIVE_CATEGORIES]
+        if invalid or not requested:
+            return "Choose one or more: help, assist, ease, fun, companion."
+        UserManager.update_user_profile(
+            internal_id,
+            {
+                "proactive_categories": requested,
+                "proactive_concierge_enabled": True,
+                "proactive_messaging_enabled": True,
+            },
+        )
+        return "Proactive categories are now: " + ", ".join(requested) + "."
+    if action in {"concierge on", "concierge enable"}:
+        UserManager.update_user_profile(
+            internal_id,
+            {
+                "proactive_concierge_enabled": True,
+                "proactive_messaging_enabled": True,
+            },
+        )
+        return "Proactive concierge is enabled."
+    if action in {"concierge off", "concierge disable"}:
+        UserManager.update_user_profile(
+            internal_id, {"proactive_concierge_enabled": False}
+        )
+        return "Proactive concierge is disabled."
     if action.startswith("mode "):
         mode = action.split(maxsplit=1)[1].strip().casefold()
         presets = {
@@ -384,8 +458,10 @@ def handle_proactive_command(internal_id: str, text: str) -> str | None:
             f"mode {cfg['style']}; quiet hours {quiet['start']:02d}:00–{quiet['end']:02d}:00; "
             f"cadence {cfg['interval_hours']:g}h; limits {cfg['daily_max']}/day, "
             f"{cfg['weekly_max']}/week; topic cooldown {cfg['topic_cooldown_hours']}h; "
+            f"concierge {'enabled' if cfg['concierge_enabled'] else 'disabled'}; categories "
+            f"{', '.join(cfg['categories']) or 'none'}; "
             f"snoozed until {cfg['snoozed_until'] or 'not snoozed'}. Excluded topics: "
             f"{', '.join(cfg['excluded_topics']) or 'none'}; channels: "
             f"{', '.join(cfg['delivery_channels']) or 'identity-linked default'}."
         )
-    return "Use /proactive, enable, disable, mode quiet|balanced|companion, snooze 1d, exclude <topic>, channel <name>, or why."
+    return "Use /proactive, enable, disable, mode quiet|balanced|companion, concierge on|off, categories help assist ease fun companion, snooze 1d, exclude <topic>, channel <name>, or why."

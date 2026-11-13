@@ -11,7 +11,9 @@ class ActionConversationService:
     ) -> ResponseCandidate | None:
         from agent.action_router import execute_request, resolve_request
 
-        request = await resolve_request(text)
+        request = await resolve_request(
+            text, timezone_name=(profile or {}).get("timezone")
+        )
         if request is None:
             return None
         response = await execute_request(request, str(internal_id), profile or {})

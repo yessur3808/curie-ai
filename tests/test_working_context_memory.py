@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import pytest
+
 from agent.chat_workflow import ChatWorkflow
 from memory import local_store
 
@@ -29,6 +31,72 @@ def _workflow():
     workflow._HISTORY_SUMMARISE_THRESHOLD = 20
     workflow._HISTORY_KEEP_RECENT = 6
     return workflow
+
+
+def test_named_fact_correction_uses_latest_user_value_only():
+    from agent.kernel.summary import (
+        extract_explicit_corrections,
+        rewrite_summary_conflicts,
+    )
+
+    corrections = extract_explicit_corrections(
+        [
+            ("user", "Correction: the picnic budget is 96 dollars, not 80."),
+            ("assistant", "Correction: the picnic budget is 200 dollars."),
+            ("user", "Correction: our picnic budget is 108 dollars, not 96."),
+        ],
+        str,
+    )
+    assert len(corrections) == 1
+    assert corrections[0].target == "picnic budget"
+    rewritten = rewrite_summary_conflicts(
+        "The picnic budget is 80 dollars. The location is riverside.", corrections
+    )
+    assert "108 dollars" in rewritten
+    assert "200 dollars" not in rewritten
+    assert "is 80 dollars" not in rewritten
+    assert "The location is riverside." in rewritten
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "The location is riverside and the picnic budget is 80 dollars.",
+        "The picnic budget is 80 dollars and the location is riverside.",
+        "The picnic budget is 80 dollars; the location is riverside.",
+    ],
+)
+def test_correction_preserves_independent_clause(summary):
+    from agent.kernel.summary import (
+        extract_explicit_corrections,
+        rewrite_summary_conflicts,
+    )
+
+    corrections = extract_explicit_corrections(
+        [("user", "Correction: the picnic budget is 96 dollars, not 80.")], str
+    )
+    result = rewrite_summary_conflicts(summary, corrections)
+    assert "location is riverside" in result
+    assert "is 80 dollars" not in result
+    assert "is 96 dollars" in result
+    assert rewrite_summary_conflicts(result, corrections) == result
+
+
+@pytest.mark.parametrize(
+    "fragment", ["and is final", "and it is final", "and the picnic budget is fixed"]
+)
+def test_correction_does_not_keep_dependent_or_same_target_clause(fragment):
+    from agent.kernel.summary import (
+        extract_explicit_corrections,
+        rewrite_summary_conflicts,
+    )
+
+    correction = "Correction: the picnic budget is 96 dollars, not 80."
+    result = rewrite_summary_conflicts(
+        "The picnic budget is 80 dollars " + fragment + ".",
+        extract_explicit_corrections([("user", correction)], str),
+    )
+    assert result == "Explicit correction: " + correction
 
 
 def test_rolling_summary_is_persisted_and_reused_without_reinference():

@@ -16,11 +16,16 @@ if (fs.existsSync(file)) {
 }
 // Deliberately do not copy connector credentials or remote-provider API keys.
 const modelKeys = [
+  'LLM_ALTERNATE_ENABLED', 'LLM_ALTERNATE_MODEL',
   'LLM_MODELS', 'LLM_GENERAL_MODEL', 'LLM_FAST_MODEL', 'LLM_REASONING_MODEL',
   'LLM_DEEP_REASONING_MODEL',
   'LLM_CODING_MODEL', 'LLM_CRITIC_MODEL', 'LLM_CONTEXT_SIZE', 'LLM_CONTEXT_BUFFER',
-  'LLM_MAX_LOADED_MODELS', 'LLM_THREADS', 'LLM_GPU_LAYERS', 'LLM_ACCELERATOR_MODE',
+  'LLM_MAX_LOADED_MODELS', 'LLM_MAX_RESIDENT_BYTES', 'LLM_THREADS', 'LLM_THREADS_BY_MODEL',
+  'LLM_GPU_LAYERS', 'LLM_FLASH_ATTENTION', 'LLM_ACCELERATOR_MODE',
   'LLM_GPU_LAYERS_BY_MODEL',
+  'LLM_NPU_BINARY', 'LLM_NPU_MODEL', 'LLM_NPU_PORT', 'LLM_NPU_POWER_MODE',
+  'LLM_NPU_CONTEXT_SIZE', 'LLM_NPU_MAX_TOKENS', 'LLM_NPU_REQUEST_TIMEOUT',
+  'LLM_NPU_START_TIMEOUT', 'LLM_NPU_ROUTING',
   'LLM_DISABLE_THINKING', 'LLM_USE_CHAT_TEMPLATE', 'CURIE_RUNTIME_KERNEL',
 ];
 const env = Object.fromEntries(modelKeys.filter(k => values[k]).map(k => [k, values[k]]));
@@ -36,7 +41,7 @@ module.exports = { apps: [{
   max_memory_restart: '46G', kill_timeout: 15000,
   env: {
     ...env, PYTHON_DOTENV_DISABLED: '1', LLM_PROVIDER_PRIORITY: 'llama.cpp',
-    LLM_NPU_ROUTING: 'off', CURIE_INFERENCE_WORKER: '1',
+    LLM_NPU_ROUTING: env.LLM_NPU_ROUTING || 'off', CURIE_INFERENCE_WORKER: '1',
     CURIE_INFERENCE_SOCKET: socketPath, CURIE_MODEL_SUPERVISOR: 'off',
   },
   out_file: path.join(logDir, 'inference-out.log'),

@@ -12,6 +12,21 @@ import signal
 import time
 import re
 
+if __name__ == "__main__":
+    from utils.installation import bootstrap
+
+    bootstrap(os.path.dirname(__file__))
+
+    if os.environ.get("CURIE_RELOCATED_TO"):
+        raise SystemExit(
+            "This instance has moved to " + os.environ["CURIE_RELOCATED_TO"]
+        )
+    from utils.lifecycle_log import install_lifecycle_log
+
+    install_lifecycle_log(
+        os.path.join(os.path.dirname(__file__), "log", "lifecycle.jsonl")
+    )
+
 
 class _SecretRedactionFilter(logging.Filter):
     _pattern = re.compile(

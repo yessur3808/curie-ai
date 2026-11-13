@@ -20,7 +20,6 @@ from utils.navigation import (
     format_duration,
     format_distance,
     TOMTOM_API_KEY,
-    ORS_API_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -198,12 +197,12 @@ def _clean_location(text: str) -> str:
 
 
 def _extract_mode(message: str) -> str:
-    """Detect transport mode from the message, defaulting to 'drive'."""
+    """Detect transport mode from the message, defaulting to 'transit'."""
     msg = message.lower()
     for kw, mode in _MODE_KEYWORDS.items():
         if re.search(r"\b" + re.escape(kw) + r"\b", msg):
             return mode
-    return "drive"
+    return "transit"
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +212,10 @@ def _extract_mode(message: str) -> str:
 
 def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
     """Format a routing result into a user-friendly message."""
+    if result.get("unavailable"):
+        from utils.transit_directions import format_directions
+
+        return format_directions(result)
     if "error" in result:
         return f"❌ Navigation Error: {result['error']}"
 
@@ -276,7 +279,7 @@ def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
             else:
                 step_text = str(step)
 
-            lines.append(f"  {i}. {step_text}")
+            lines.append(f"• {step_text}")
 
     # Alternative routes
     if len(routes) > 1:
@@ -292,13 +295,6 @@ def _build_response(params: Dict[str, Any], result: Dict[str, Any]) -> str:
         lines.append("\n🗺️ *Open in Maps:*")
         for name, url in map_links.items():
             lines.append(f"  • [{name}]({url})")
-
-    # Transit note
-    if "transit" in mode_label.lower() and not ORS_API_KEY:
-        lines.append(
-            "\n💡 For detailed public transit routing, set ORS_API_KEY "
-            "(free at openrouteservice.org)"
-        )
 
     lines.append(f"\n{'━' * _SEP_FULL}")
     return "\n".join(lines)

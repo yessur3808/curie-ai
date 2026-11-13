@@ -36,6 +36,29 @@ _TEXT_OUTPUT = {
 
 def _schema_for(name: str) -> Mapping[str, Any]:
     return {
+        "observatory_project_analytics": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "project": {"type": "string"},
+                "days": {"type": "integer", "enum": [7, 30, 90]},
+            },
+        },
+        "bus_arrivals": {
+            "type": "object",
+            "properties": {
+                key: {"type": "string"}
+                for key in (
+                    "query",
+                    "operator",
+                    "route",
+                    "origin",
+                    "destination",
+                    "direction",
+                    "service_type",
+                )
+            },
+        },
         "weather": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -389,7 +412,8 @@ def definition(tool: Tool, **overrides: Any) -> CapabilityDefinition:
         ),
         required_permissions=frozenset(overrides.pop("required_permissions", ())),
         resource_policy=overrides.pop(
-            "resource_policy", ResourcePolicy(network=name in {"weather", "research"})
+            "resource_policy",
+            ResourcePolicy(network=name in {"weather", "research", "bus_arrivals"}),
         ),
         verification=overrides.pop("verification", verification),
         idempotency=overrides.pop("idempotency", idempotency),
@@ -524,7 +548,9 @@ class ToolRegistry:
         capability = self.get(name)
         available, reason = capability.availability()
         if not available:
-            raise RuntimeError(reason or f"Capability {name!r} is unavailable")
+            from agent.tooling.errors import CapabilityUnavailableError
+
+            raise CapabilityUnavailableError(name)
         _validate(capability.input_schema, params)
         if (
             context.permissions is not None
@@ -668,7 +694,10 @@ def _build_runtime_registry() -> ToolRegistry:
         ReminderDeleteTool,
         ReminderListTool,
     )
+    from agent.tooling.bus_tool import BusArrivalsTool
+    from agent.tooling.observatory_tool import ObservatoryProjectAnalyticsTool
     from agent.tooling.weather_tool import WeatherTool
+    from services.observatory_analytics import observatory_analytics_available
 
     gmail_probe = _dependency_probe(
         "connectors.google_oauth",
@@ -691,6 +720,27 @@ def _build_runtime_registry() -> ToolRegistry:
         ("X_OAUTH_CLIENT_ID", "X_OAUTH_REDIRECT_URI", "CURIE_CREDENTIAL_KEY"),
     )
     capabilities = [
+        definition(
+            ObservatoryProjectAnalyticsTool(),
+            description="Read aggregate GA4 page views, active users, sessions, and period comparisons for projects configured in Curie Observatory.",
+            examples=(
+                "Did my Atmosphere website get any views lately?",
+                "Show Personal website analytics for the last 7 days",
+            ),
+            availability_probe=observatory_analytics_available,
+            resource_policy=ResourcePolicy(timeout_seconds=5, concurrency_limit=2),
+            tags=("observatory", "analytics", "ga4", "projects", "read"),
+        ),
+        definition(
+            BusArrivalsTool(),
+            description="Check official live KMB and Citybus arrivals by route, boarding stop and destination, including morning and return commutes.",
+            examples=(
+                "Check my evening bus commute",
+                "18X from Ka On Street to Healthy Village",
+                "KMB 1A from Star Ferry to Sau Mau Ping",
+            ),
+            tags=("bus", "transit", "commute", "live"),
+        ),
         definition(
             EmergencyStopTool(),
             description="Stop all owner-scoped cancellable work immediately.",
@@ -788,7 +838,7 @@ def _build_runtime_registry() -> ToolRegistry:
         ),
         definition(
             DashboardSnapshotTool(),
-            description="Read the same bounded instance, model, connector, task, resource, error, and readiness data shown by Curie's dashboard.",
+            description="Read Curie AI operational health: instances, models, connectors, tasks, host resources, errors, and readiness. This is not website analytics.",
             resource_policy=ResourcePolicy(timeout_seconds=15, concurrency_limit=1),
             tags=("dashboard", "health", "telemetry", "self-awareness"),
         ),
@@ -1012,7 +1062,10 @@ def _build_runtime_registry() -> ToolRegistry:
             description="Convert units deterministically or currencies from a live rate source.",
             input_schema=_TEXT_INPUT,
             routing_hints=(
-                r"(?=.*\d)(?=.*\b(?:to|into|in)\b)(?:\bconvert\b|\bhow many\b|\bhow much\b|\bwhat(?:'s| is)\b|^\s*[\d.,]+)",
+                # A word-count constraint is not a quantity to convert. Keep
+                # the amount adjacent to its unit and conversion connector.
+                r"\b[-+]?\d[\d.,]*\s*[a-z°$€£]+(?:/[a-z]+)?\s+(?:to|into|in)\s+[a-z°$€£]+\b",
+                r"\bhow (?:many|much)\s+[a-z°$€£]+\s+(?:in|are in)\s+[-+]?\d[\d.,]*\s*[a-z°$€£]+\b",
             ),
             resource_policy=ResourcePolicy(
                 timeout_seconds=15, concurrency_limit=4, network=True
@@ -1091,7 +1144,8 @@ def _build_runtime_registry() -> ToolRegistry:
             "Coding Assistant",
             coding,
             True,
-            r"\b(?:code|coding|programming|python|javascript|typescript|function|class|algorithm|compile)\b",
+            r"\b(?:code|coding|programming|python|javascript|typescript|function|algorithm|compile)\b|"
+            r"\b(?:write|implement|define)\s+(?:a\s+)?class\b",
             "agent.skills.coding_assistant",
             ("coding",),
         ),
@@ -1164,7 +1218,15 @@ def _build_runtime_registry() -> ToolRegistry:
             ),
         )
     components = (
-        ("api", "REST API", "connectors.api", (), "connector", ("api",)),
+        (
+            "api",
+            "REST API",
+            "connectors.api",
+            (),
+            "connector",
+            ("api",),
+            "Receive owner-scoped chat, attachment, and optional voice-response requests through the REST API.",
+        ),
         (
             "telegram",
             "Telegram",
@@ -1172,6 +1234,7 @@ def _build_runtime_registry() -> ToolRegistry:
             ("TELEGRAM_BOT_TOKEN",),
             "connector",
             ("messaging",),
+            "Receive and deliver Telegram text, commands, locations, attachments, and voice messages.",
         ),
         (
             "discord",
@@ -1180,6 +1243,7 @@ def _build_runtime_registry() -> ToolRegistry:
             ("DISCORD_BOT_TOKEN",),
             "connector",
             ("messaging",),
+            "Receive and deliver Discord direct messages and supported media.",
         ),
         (
             "slack",
@@ -1188,6 +1252,7 @@ def _build_runtime_registry() -> ToolRegistry:
             ("SLACK_BOT_TOKEN",),
             "connector",
             ("messaging",),
+            "Receive and deliver Slack messages and supported media.",
         ),
         (
             "whatsapp",
@@ -1196,8 +1261,17 @@ def _build_runtime_registry() -> ToolRegistry:
             (),
             "connector",
             ("messaging",),
+            "Receive and deliver WhatsApp text and supported media.",
         ),
-        ("cron", "Cron Runner", "services.cron_runner", (), "service", ("scheduling",)),
+        (
+            "cron",
+            "Cron Runner",
+            "services.cron_runner",
+            (),
+            "service",
+            ("scheduling",),
+            "Run durable scheduled work and reminder checks in the background.",
+        ),
         (
             "sessions",
             "Session Manager",
@@ -1205,6 +1279,7 @@ def _build_runtime_registry() -> ToolRegistry:
             (),
             "service",
             ("memory",),
+            "Persist owner-scoped conversation history and support session history and reset controls.",
         ),
         (
             "proactive_messaging",
@@ -1213,6 +1288,7 @@ def _build_runtime_registry() -> ToolRegistry:
             (),
             "service",
             ("proactive",),
+            "Deliver opt-in, rate-limited reminders and evidence-grounded proactive suggestions.",
         ),
         (
             "x_autopost",
@@ -1221,6 +1297,88 @@ def _build_runtime_registry() -> ToolRegistry:
             (),
             "service",
             ("x", "social", "automation"),
+            "Run the separately configured and bounded X autopost scheduler.",
+        ),
+        (
+            "memory_service",
+            "Long-term Memory",
+            "memory.service",
+            (),
+            "workflow",
+            ("memory", "preferences", "privacy"),
+            "Store, retrieve, correct, inspect, export, and delete owner-scoped memories with provenance and conflict handling.",
+        ),
+        (
+            "media_ingestion",
+            "Media Ingestion",
+            "services.media_ingestion",
+            (),
+            "workflow",
+            ("attachments", "image", "document", "audio"),
+            "Extract bounded text from documents and audio and analyze supported images from connector attachments.",
+        ),
+        (
+            "voice_delivery",
+            "Voice Delivery",
+            "services.voice_delivery",
+            (),
+            "workflow",
+            ("voice", "audio", "speech"),
+            "Create owner-configured voice replies with text fallback and trained-voice isolation.",
+        ),
+        (
+            "durable_tasks",
+            "Durable Task Runtime",
+            "agent.task_runtime",
+            (),
+            "workflow",
+            ("tasks", "scheduling", "retries", "cancellation"),
+            "Run owner-scoped dependency-graph tasks with leases, retries, cancellation, verification, and audit receipts.",
+        ),
+        (
+            "capability_discovery",
+            "Capability Discovery",
+            "contracts.catalog",
+            (),
+            "workflow",
+            ("capabilities", "tools", "health"),
+            "Answer capability questions from the live registry instead of pretrained model assumptions.",
+        ),
+        (
+            "governance_controls",
+            "Governance Controls",
+            "services.self_diagnostics",
+            (),
+            "workflow",
+            ("audit", "privacy", "security", "diagnostics", "budgets"),
+            "Expose owner-scoped audit, privacy, security, health, diagnostic, and resource-budget controls.",
+        ),
+        (
+            "bounded_autonomy",
+            "Bounded Autonomy",
+            "services.bounded_autonomy",
+            (),
+            "workflow",
+            ("maintenance", "coding", "testing", "approval"),
+            "Observe Curie's repository, reproduce failures, and prepare tested immutable patches in an isolated worktree; applying changes always requires fresh owner approval and deployment is never autonomous.",
+        ),
+        (
+            "adaptive_learning",
+            "Controlled Learning",
+            "memory.adaptive",
+            (),
+            "workflow",
+            ("learning", "preferences", "skills"),
+            "Learn only from explicit corrections, verified outcomes, and owner-approved abilities without expanding permissions.",
+        ),
+        (
+            "personal_organization",
+            "Personal Organization",
+            "services.personal_ops",
+            (),
+            "workflow",
+            ("agenda", "birthdays", "personal-tasks"),
+            "Manage owner-scoped agenda items, birthdays, and personal tasks with preview-first external writes.",
         ),
         (
             "canvas",
@@ -1229,6 +1387,7 @@ def _build_runtime_registry() -> ToolRegistry:
             (),
             "canvas",
             ("canvas", "nodes"),
+            "Render live task and agent activity in Curie's local canvas view.",
         ),
         (
             "dashboard",
@@ -1237,15 +1396,16 @@ def _build_runtime_registry() -> ToolRegistry:
             (),
             "canvas",
             ("dashboard",),
+            "Display Curie's local operational status, tasks, models, connectors, and resource telemetry.",
         ),
     )
-    for name, display, module, env, category, tags in components:
+    for name, display, module, env, category, tags, description in components:
         capabilities.append(
             CapabilityDefinition(
                 name=name,
                 version="1.0",
                 display_name=display,
-                description=f"Operational {display} component.",
+                description=description,
                 examples=(),
                 input_schema=_OBJECT,
                 output_schema=_TEXT_OUTPUT,

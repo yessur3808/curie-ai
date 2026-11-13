@@ -21,8 +21,22 @@ def test_public_contract_catalog_is_versioned_and_matches_runtime_shapes():
         "media",
         "memory",
         "voice",
+        "model_capability_context",
         "response_policy",
     }
+    assert catalog["model_capability_context"]["exhaustive"] is True
+    assert (
+        catalog["model_capability_context"]["index"]
+        == "all_registered_capability_names"
+    )
+    assert (
+        catalog["model_capability_context"]["details"]
+        == "request_relevant_capabilities"
+    )
+    assert (
+        catalog["model_capability_context"]["refresh"]
+        == "every_conversational_model_invocation"
+    )
     plan = plan_response("Bonjour")
     assert set(catalog["response_policy"]["required_dimensions"]) <= set(plan)
     assert set(catalog["media"]["connectors"]) >= {

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Mapping
 
-TAXONOMY_VERSION = "3.0.0"
+TAXONOMY_VERSION = "3.1.0"
 
 
 class IntentLeaf(str, Enum):
@@ -48,6 +48,7 @@ class IntentLeaf(str, Enum):
     DEVICE_STATE_READ = "device_state_read"
     DEVICE_STATE_MUTATION = "device_state_mutation"
     EXTERNAL_MESSAGING = "external_messaging"
+    EXTERNAL_ACCOUNT_READ = "external_account_read"
     CODE_HOST_OPERATIONS = "code_host_operations"
     DEPLOYMENT = "deployment"
     CAPABILITY_HELP = "capability_help"
@@ -397,6 +398,14 @@ _SPECS: Mapping[
         ("destination", "content"),
         "Require exact destination and fresh approval.",
     ),
+    IntentLeaf.EXTERNAL_ACCOUNT_READ: (
+        "Search or read connected email, calendar events, or private messages without sending or changing anything.",
+        "Find emails about dinner in Gmail.",
+        "read_only",
+        ("gmail_search", "calendar_list", "x_dm_read"),
+        ("query",),
+        "Use the requested account and query; never send or change messages.",
+    ),
     IntentLeaf.CODE_HOST_OPERATIONS: (
         "Read or mutate a hosted source-code repository.",
         "Open a pull request for this branch.",
@@ -425,7 +434,7 @@ _SPECS: Mapping[
         "Inspect Curie's component health.",
         "Is Curie healthy?",
         "read_only",
-        (),
+        ("dashboard_snapshot",),
         (),
         "Report degraded components separately.",
     ),

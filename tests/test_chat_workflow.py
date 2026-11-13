@@ -42,6 +42,46 @@ def test_prompt_advertises_portable_rich_text_syntax():
     assert "**bold**" in prompt
     assert "++underline++" in prompt
     assert "Markdown tables" in prompt
+    assert "Presentation policy: lead with the answer or outcome" in prompt
+    assert "Keep formatting clean and professional" in prompt
+
+
+def test_process_message_polishes_every_connector_facing_result(monkeypatch):
+    workflow = ChatWorkflow(persona={"name": "Curie", "system_prompt": "Be helpful."})
+
+    async def routed(_normalized_input):
+        return {
+            "text": "Service report\nStatus: Ready\nSource: Live",
+            "message_parts": ["Service report\nStatus: Ready\nSource: Live"],
+            "model_used": "deterministic_tool",
+        }
+
+    monkeypatch.setattr(workflow, "_process_message_routed", routed)
+    monkeypatch.setattr(
+        "services.self_diagnostics.diagnostic_monitor.start",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "services.self_diagnostics.diagnostic_monitor.finish",
+        lambda *_args, **_kwargs: {"status": "ok"},
+    )
+
+    result = asyncio.run(
+        workflow.process_message(
+            {
+                "platform": "telegram",
+                "external_user_id": "1",
+                "external_chat_id": "1",
+                "message_id": "1",
+                "text": "Show the report",
+            }
+        )
+    )
+
+    assert result["text"] == (
+        "Service report\n\n- **Status:** Ready\n- **Source:** Live"
+    )
+    assert result["message_parts"] == [result["text"]]
 
 
 def test_prompt_uses_direct_casual_command_style_without_forced_french():

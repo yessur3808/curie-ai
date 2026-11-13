@@ -57,17 +57,30 @@ class VoicePaths:
             cfg = json.loads(self.config.read_text())
             return bool(
                 cfg.get("enabled")
-                and cfg.get("engine") == "chatterbox-nano"
+                and cfg.get("engine") in {"chatterbox-nano", "chatterbox-multilingual"}
+                and not (
+                    cfg.get("engine") == "chatterbox-multilingual"
+                    and cfg.get("adapter")
+                )
                 and self.speech_python.is_file()
                 and (self.home / cfg["profile"]).is_file()
                 and (not cfg.get("adapter") or (self.home / cfg["adapter"]).is_file())
                 and all(
                     (self.home / cfg["model"] / name).is_file()
                     for name in (
-                        "t3_nano_v1.safetensors",
-                        "s3gen_meanflow.safetensors",
-                        "ve.safetensors",
-                        "tokenizer_config.json",
+                        (
+                            cfg.get("t3Model", "t3_mtl23ls_v2.safetensors"),
+                            "s3gen.pt",
+                            "ve.pt",
+                            "grapheme_mtl_merged_expanded_v1.json",
+                        )
+                        if cfg.get("engine") == "chatterbox-multilingual"
+                        else (
+                            "t3_nano_v1.safetensors",
+                            "s3gen_meanflow.safetensors",
+                            "ve.safetensors",
+                            "tokenizer_config.json",
+                        )
                     )
                 )
             )

@@ -49,3 +49,35 @@ def test_repository_factory_selects_external_only_with_both_databases(monkeypatc
     monkeypatch.delenv("MONGODB_URI", raising=False)
     reset_repositories()
     assert get_repositories().backend == "sqlite"
+
+
+@pytest.mark.parametrize("approve", [True, False])
+def test_external_approval_claim_filters_connector_atomically(monkeypatch, approve):
+    from types import SimpleNamespace
+    from memory import database
+    from memory.repositories import ExternalApprovalRepository
+
+    calls = []
+
+    def claim(query, update, **kwargs):
+        calls.append((query, update))
+        return None
+
+    monkeypatch.setattr(
+        database,
+        "mongo_db",
+        SimpleNamespace(pending_actions=SimpleNamespace(find_one_and_update=claim)),
+    )
+    assert (
+        ExternalApprovalRepository().consume(
+            "owner", "ABCDEF12", approve, connector="telegram"
+        )
+        is None
+    )
+    query, update = calls.pop()
+    assert query["action.authorization.connector"] == "telegram"
+    assert query["internal_id"] == "owner"
+    assert query["token"] == "abcdef12"
+    assert query["status"] == "pending"
+    assert "$gt" in query["expires_at"]
+    assert update == {"$set": {"status": "approved" if approve else "rejected"}}

@@ -129,3 +129,29 @@ def test_fastflow_does_not_start_when_npu_is_owned_by_another_server():
     ):
         assert accelerators.ensure_fastflow_server() is False
         popen.assert_not_called()
+
+
+def test_model_specific_thread_override(monkeypatch):
+    from llm.manager import _model_threads
+
+    monkeypatch.setenv("LLM_THREADS", "12")
+    monkeypatch.setenv("LLM_THREADS_BY_MODEL", '{"critic.gguf": 8}')
+    assert _model_threads("critic.gguf") == 8
+    assert _model_threads("general.gguf") == 12
+
+
+def test_flash_attention_auto_is_gpu_only(monkeypatch):
+    from llm.manager import _flash_attention_enabled
+
+    monkeypatch.setenv("LLM_FLASH_ATTENTION", "auto")
+    assert _flash_attention_enabled(-1) is True
+    assert _flash_attention_enabled(0) is False
+
+
+def test_flash_attention_can_be_overridden(monkeypatch):
+    from llm.manager import _flash_attention_enabled
+
+    monkeypatch.setenv("LLM_FLASH_ATTENTION", "false")
+    assert _flash_attention_enabled(-1) is False
+    monkeypatch.setenv("LLM_FLASH_ATTENTION", "true")
+    assert _flash_attention_enabled(0) is True

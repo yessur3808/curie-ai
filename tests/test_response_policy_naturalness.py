@@ -88,6 +88,27 @@ def test_lightweight_opinion_is_bounded_without_clipping_complex_topics():
     )
 
 
+def test_lightweight_opinion_does_not_invent_a_physical_plan_for_curie():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    result = policy.finalize(
+        "Tea and a book sounds cozy. Let me grab a cup and lose myself in a good read.",
+        "Long day. Tea and a book or more debugging? Pick one, keep it casual.",
+    )
+
+    assert result == "Tea and a book sounds cozy."
+
+
+def test_pick_one_reply_stays_decisive_and_drops_the_choice_handoff():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    result = policy.finalize(
+        "Tea and a book sounds pleasant, but if debugging is needed, I’m here. "
+        "Let me know which you prefer.",
+        "Long day. Tea and a book or more debugging? Pick one, keep it casual.",
+    )
+
+    assert result == "Tea and a book sounds pleasant."
+
+
 def test_generic_reassurance_and_truncated_tail_are_removed():
     policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
     result = policy.finalize(
@@ -197,3 +218,21 @@ def test_invented_experience_and_empty_closing_offer_are_removed():
 
     assert opinion == "That is an observation based on my reasoning."
     assert closing == "Anytime."
+
+
+def test_requested_contextual_french_survives_but_repetition_and_english_only_do_not():
+    persona = {
+        "name": "Curie",
+        "language_profile": {
+            "french_integration": {"preserve_contextual_expressions": True}
+        },
+    }
+    policy = ResponsePolicy(persona, _IdentityStyle())
+    reply = "Ah, voilà. That explains the difference."
+    question = "I found the cause of the difference."
+    assert "voilà" in policy.finalize(reply, question)
+    assert "voilà" not in policy.finalize(reply, "English only: " + question)
+    assert "voilà" not in policy.finalize(
+        reply, question, history=[{"assistant": "Voilà. We found it."}]
+    )
+    assert "voilà" not in policy.finalize("Done, voilà.", "Switch on the lamp")

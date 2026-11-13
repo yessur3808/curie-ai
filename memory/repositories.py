@@ -27,12 +27,21 @@ class SessionRepository(Protocol):
     def add_message(
         self, platform: str, internal_id: str, role: str, content: str
     ) -> None: ...
+
     def reset_session(self, platform: str, internal_id: str) -> None: ...
 
 
 class ApprovalRepository(Protocol):
     def create(self, internal_id: str, action: dict, ttl_minutes: int = 30) -> str: ...
-    def consume(self, internal_id: str, token: str, approve: bool) -> dict | None: ...
+
+    def consume(
+        self,
+        internal_id: str,
+        token: str,
+        approve: bool,
+        *,
+        connector: str | None = None,
+    ) -> dict | None: ...
 
 
 class MutationRepository(Protocol):
@@ -126,10 +135,19 @@ class SQLiteApprovalRepository:
 
         return create_pending_action(str(internal_id), action, ttl_minutes)
 
-    def consume(self, internal_id: str, token: str, approve: bool) -> dict | None:
+    def consume(
+        self,
+        internal_id: str,
+        token: str,
+        approve: bool,
+        *,
+        connector: str | None = None,
+    ) -> dict | None:
         from memory.local_store import consume_pending_action
 
-        return consume_pending_action(str(internal_id), token, approve)
+        return consume_pending_action(
+            str(internal_id), token, approve, connector=connector
+        )
 
 
 class SQLiteMutationRepository:
@@ -440,16 +458,30 @@ class ExternalApprovalRepository:
         )
         return token
 
-    def consume(self, internal_id: str, token: str, approve: bool) -> dict | None:
+    def consume(
+        self,
+        internal_id: str,
+        token: str,
+        approve: bool,
+        *,
+        connector: str | None = None,
+    ) -> dict | None:
         from pymongo import ReturnDocument
         from memory.database import mongo_db
 
+        # Include the connector in the atomic claim, before changing status.
+        connector_filter = (
+            {"action.authorization.connector": connector}
+            if connector is not None
+            else {}
+        )
         row = mongo_db.pending_actions.find_one_and_update(
             {
                 "token": token.lower(),
                 "internal_id": str(internal_id),
                 "status": "pending",
                 "expires_at": {"$gt": datetime.now(timezone.utc)},
+                **connector_filter,
             },
             {"$set": {"status": "approved" if approve else "rejected"}},
             return_document=ReturnDocument.BEFORE,

@@ -25,6 +25,35 @@ class SpeechChunkTests(unittest.TestCase):
         self.assertEqual(chunks[0], "Bonjour, Yaser. I am here.")
         self.assertEqual(chunks[1], "Dr. Smith arrives at three thirty.")
 
+    def test_long_sentence_prefers_clause_boundary_without_dropping_words(self):
+        text = "Take your keys and your water bottle, then head downstairs and check the arrival time before you leave."
+        chunks = speech_chunks(text, limit=65, sentence_only=True)
+        self.assertEqual(chunks[0], "Take your keys and your water bottle,")
+        self.assertEqual(" ".join(chunks), text)
+        self.assertTrue(all(len(chunk) <= 65 for chunk in chunks))
+
+    def test_french_aside_flows_into_english_without_losing_words(self):
+        self.assertEqual(
+            speech_chunks(
+                "D’accord. Let’s take it one step at a time.", sentence_only=True
+            ),
+            ["D'accord, let's take it one step at a time."],
+        )
+        self.assertEqual(
+            speech_chunks(
+                "D'accord. Let's take it one step at a time.", sentence_only=True
+            ),
+            ["D'accord, let's take it one step at a time."],
+        )
+        self.assertEqual(
+            speech_chunks("Voilà. I found the keys.", sentence_only=True),
+            ["Voilà, I found the keys."],
+        )
+        self.assertEqual(
+            speech_chunks("D'accord. Vous avez raison.", sentence_only=True),
+            ["D'accord. Vous avez raison."],
+        )
+
     def test_empty_or_unbounded_words_fail(self):
         for text in ["", "https://example.com", "x" * 241]:
             with self.assertRaises(ValueError):

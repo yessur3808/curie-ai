@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import logging
 import hashlib
 import time
@@ -60,6 +61,7 @@ _response_cache_misses = 0
 
 # Memory management configuration
 MAX_MODELS_IN_CACHE = max(1, int(os.getenv("LLM_MAX_LOADED_MODELS", "2")))
+MAX_RESIDENT_MODEL_BYTES = max(0, int(os.getenv("LLM_MAX_RESIDENT_BYTES", "0")))
 _last_gc_time = 0
 _gc_interval = 300  # Run garbage collection every 5 minutes
 
@@ -104,7 +106,10 @@ def _cleanup_excess_models():
     global llama_models_cache
     if len(llama_models_cache) > MAX_MODELS_IN_CACHE:
         while len(llama_models_cache) > MAX_MODELS_IN_CACHE:
-            model_name, _ = llama_models_cache.popitem(last=False)
+            model_name, model = llama_models_cache.popitem(last=False)
+            _model_inference_locks.pop(model_name, None)
+            if hasattr(model, "close"):
+                model.close()
             try:
                 from services.runtime_kernel import model_supervisor
 
@@ -118,20 +123,37 @@ def _cleanup_excess_models():
         _trigger_garbage_collection()
 
 
+def _model_file_bytes(model_name: str) -> int:
+    try:
+        return os.path.getsize(os.path.join("models", model_name))
+    except OSError:
+        return 0
+
+
+def _resident_model_bytes() -> int:
+    return sum(_model_file_bytes(name) for name in llama_models_cache)
+
+
 def _evict_for_shared_worker(preferred_model):
-    """Keep at most one GPU-resident model; a CPU reviewer may remain warm."""
+    """Bound GPU residency, model count, and aggregate checkpoint bytes."""
     from llm.accelerators import select_llama_gpu_layers
 
     wants_gpu = select_llama_gpu_layers(preferred_model) != 0
+    preferred_bytes = _model_file_bytes(preferred_model)
     while llama_models_cache:
         gpu_names = [
             name
             for name, model in llama_models_cache.items()
             if getattr(model, "_curie_gpu_layers", 0) != 0
         ]
+        exceeds_byte_budget = bool(
+            MAX_RESIDENT_MODEL_BYTES
+            and preferred_bytes
+            and _resident_model_bytes() + preferred_bytes > MAX_RESIDENT_MODEL_BYTES
+        )
         if wants_gpu and gpu_names:
             old_name = gpu_names[0]
-        elif len(llama_models_cache) >= MAX_MODELS_IN_CACHE:
+        elif len(llama_models_cache) >= MAX_MODELS_IN_CACHE or exceeds_byte_budget:
             old_name = next(iter(llama_models_cache))
         else:
             break
@@ -144,6 +166,14 @@ def _evict_for_shared_worker(preferred_model):
         supervisor = model_supervisor()
         if supervisor is not None:
             supervisor.remove(old_name, False)
+        logger.info(
+            "Evicted %s before loading %s (models=%d, checkpoint_bytes=%d, limit=%d)",
+            old_name,
+            preferred_model,
+            len(llama_models_cache),
+            _resident_model_bytes(),
+            MAX_RESIDENT_MODEL_BYTES,
+        )
     gc.collect()
 
 
@@ -280,8 +310,6 @@ def _load_model_with_fallback(
 
     # Try each candidate in order
     seen = set()
-    # Default to all logical CPU cores rather than a hardcoded magic number.
-    n_threads = _get_int_env("LLM_THREADS", os.cpu_count() or 4)
     # Select CPU, GPU, or CPU+iGPU automatically. The selected llama.cpp build
     # still verifies backend compatibility while loading and falls back below.
     from llm.accelerators import select_llama_gpu_layers
@@ -300,6 +328,7 @@ def _load_model_with_fallback(
             continue
 
         n_gpu_layers = select_llama_gpu_layers(model_name)
+        n_threads = _model_threads(model_name)
 
         supervisor = None
         try:
@@ -339,7 +368,11 @@ def _load_model_with_fallback(
                     model_path=model_path,
                     n_ctx=MODEL_CONTEXT_SIZE,
                     n_threads=n_threads,
+                    n_threads_batch=n_threads,
                     n_gpu_layers=layers,
+                    flash_attn=_flash_attention_enabled(layers),
+                    offload_kqv=True,
+                    op_offload=True,
                     verbose=verbose,
                 )
                 _configure_thinking_template(model)
@@ -380,6 +413,31 @@ def _get_int_env(key, default):
             f"Invalid value '{os.getenv(key)}' for {key}, using default {default}"
         )
         return default
+
+
+def _model_threads(model_name: str) -> int:
+    """Return a measured per-model CPU thread count with a safe global fallback."""
+
+    fallback = max(1, _get_int_env("LLM_THREADS", os.cpu_count() or 4))
+    try:
+        overrides = json.loads(os.getenv("LLM_THREADS_BY_MODEL", "{}"))
+        value = overrides.get(model_name) if isinstance(overrides, dict) else None
+        if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 256:
+            return value
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Invalid LLM_THREADS_BY_MODEL configuration; using default")
+    return fallback
+
+
+def _flash_attention_enabled(gpu_layers: int) -> bool:
+    """Enable measured GPU Flash Attention while keeping CPU models conservative."""
+
+    configured = os.getenv("LLM_FLASH_ATTENTION", "auto").strip().casefold()
+    if configured in {"1", "true", "yes", "on"}:
+        return True
+    if configured in {"0", "false", "no", "off"}:
+        return False
+    return gpu_layers != 0
 
 
 MODEL_CONTEXT_SIZE = _get_int_env(
@@ -630,6 +688,7 @@ def ask_llm(
     max_tokens=None,
     role=None,
     owner_scope=None,
+    on_delta=None,
 ):
     """Query the local llama.cpp model.
 
@@ -651,14 +710,36 @@ def ask_llm(
     repetitive, the call is retried once with a slightly higher temperature to
     encourage more diverse token generation.
     """
+    # Internal raw draft callback. Review/finalization still owns delivery.
+    # Streaming is deliberately restricted to ordinary local chat; specialist
+    # and JSON paths retain their existing atomic response contract.
+    if on_delta is not None and (
+        not callable(on_delta)
+        or role not in {None, "general", "fast"}
+        or getattr(prompt, "json_output", False)
+    ):
+        raise ValueError("unsupported_stream_request")
     if (
         os.getenv("CURIE_INFERENCE_SOCKET")
         and os.getenv("CURIE_INFERENCE_WORKER") != "1"
     ):
-        from llm.local_gateway import request
+        from llm.gateway_failover import request_with_failover
+
+        if on_delta is not None:
+            from llm.local_gateway import request_stream
+
+            return request_stream(
+                prompt,
+                on_delta,
+                model_name=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                role=role,
+                owner_scope=owner_scope,
+            )
 
         try:
-            return request(
+            return request_with_failover(
                 prompt,
                 model_name=model_name,
                 temperature=temperature,
@@ -668,6 +749,26 @@ def ask_llm(
             )
         except (OSError, ValueError, KeyError):
             return "[Error: shared local inference gateway unavailable]"
+    if role == "alternate":
+        from llm.alternate import ask_ollama, enabled
+
+        if not enabled() or os.getenv("CURIE_INFERENCE_WORKER") != "1":
+            return "[Error: alternate requires the enabled shared worker]"
+        # The worker serializes requests. Release its resident GGUFs before
+        # Ollama allocates the alternate on the same shared-memory GPU.
+        from services.runtime_kernel import model_supervisor
+
+        supervisor = model_supervisor()
+        while llama_models_cache:
+            name, model = llama_models_cache.popitem(last=False)
+            if hasattr(model, "close"):
+                model.close()
+            _model_inference_locks.pop(name, None)
+            if supervisor is not None:
+                supervisor.remove(name, False)
+        gc.collect()
+        return ask_ollama(prompt, temperature=temperature, max_tokens=max_tokens)
+
     # Periodically trigger garbage collection
     _trigger_garbage_collection()
 
@@ -684,7 +785,11 @@ def ask_llm(
         try:
             from llm.accelerators import ask_npu, should_use_npu
 
-            if str(role).lower() == "npu" or should_use_npu(prompt):
+            if (
+                on_delta is None
+                and not getattr(prompt, "json_output", False)
+                and (str(role).lower() == "npu" or should_use_npu(prompt))
+            ):
                 npu_response = ask_npu(prompt, temperature, max_tokens)
                 if npu_response and _response_quality_ok(npu_response):
                     return npu_response
@@ -729,6 +834,8 @@ def ask_llm(
                 str(owner_scope),
             )
             if cached_response:
+                if on_delta is not None:
+                    on_delta(cached_response)
                 return cached_response
 
         # Try to use cached model first
@@ -838,7 +945,16 @@ def ask_llm(
             )
             if use_chat_template and hasattr(llama_model, "create_chat_completion"):
                 output_options = (
-                    {"response_format": {"type": "json_object"}}
+                    {
+                        "response_format": {
+                            "type": "json_object",
+                            **(
+                                {"schema": prompt.json_schema}
+                                if getattr(prompt, "json_schema", None) is not None
+                                else {}
+                            ),
+                        }
+                    }
                     if getattr(prompt, "json_output", False)
                     else {}
                 )
@@ -849,10 +965,32 @@ def ask_llm(
                     repeat_penalty=1.1,
                     top_p=0.95,
                     top_k=40,
+                    **({"stream": True} if on_delta is not None else {}),
                     **output_options,
                 )
-                raw = result["choices"][0]["message"]["content"] or ""
+                if on_delta is not None:
+                    pieces = []
+                    try:
+                        for event in result:
+                            choices = event.get("choices", [])
+                            delta = (
+                                choices[0].get("delta", {}).get("content")
+                                if choices
+                                else None
+                            )
+                            if delta:
+                                pieces.append(delta)
+                                on_delta(delta)
+                    finally:
+                        close = getattr(result, "close", None)
+                        if close is not None:
+                            close()
+                    raw = "".join(pieces)
+                else:
+                    raw = result["choices"][0]["message"]["content"] or ""
                 raw = raw.strip()
+            elif on_delta is not None:
+                return "[Error: streaming requires a chat-template backend]"
             elif getattr(prompt, "json_output", False):
                 return "[Error: constrained JSON requires a chat-template backend]"
             else:
@@ -902,7 +1040,7 @@ def ask_llm(
             # Quality retry: if the first attempt produces a very short or
             # apology-only response, retry once with a slightly higher temperature
             # to encourage more diverse, complete output.
-            if _response_quality_ok(response) is False:
+            if on_delta is None and _response_quality_ok(response) is False:
                 logger.info(
                     "Response quality check failed (len=%d words); retrying with higher temperature",
                     len(response.split()),
@@ -926,6 +1064,8 @@ def ask_llm(
 
             return response
         except Exception as e:
+            if on_delta is not None:
+                raise  # Preserve cancellation; never replace an emitted draft.
             return f"[Error during inference: {e}]"
         finally:
             if supervisor is not None and supervisor_acquired and selected_model:

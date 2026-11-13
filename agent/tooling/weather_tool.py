@@ -83,14 +83,29 @@ def _recent_weather_context(
         rows = get_session_manager().get_history(context.platform, context.internal_id)
         city = None
         requested = None
-        from utils.temporal_context import recent_rows
+        from utils.temporal_context import local_now, parse_time, recent_rows
+
+        today = local_now(context.profile).date()
 
         for row in reversed(recent_rows(rows[-12:])):
             if row.get("role") != "user":
                 continue
             content = str(row.get("content", ""))
             city = city or extract_city_from_message(content)
-            requested = requested or _requested_range(content)
+            # Relative years belong to the historical request's local date,
+            # not the date on which a later city correction is received.
+            stamp = parse_time(row.get("created_at") or row.get("timestamp"))
+            requested_on = local_now(context.profile, stamp).date() if stamp else today
+            requested = requested or _requested_range(content, requested_on)
+            if requested is None and re.search(
+                r"\b(?:weather|forecast|rain|umbrella)\b", content, re.I
+            ):
+                relative = re.search(r"\b(today|tomorrow)\b", content, re.I)
+                if relative:
+                    target = requested_on + timedelta(
+                        days=int(relative.group(1).lower() == "tomorrow")
+                    )
+                    requested = (target, target)
             if city and requested:
                 break
         return city, requested

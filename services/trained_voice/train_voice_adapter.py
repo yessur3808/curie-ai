@@ -17,6 +17,35 @@ import resource
 import time
 
 
+def select_training_rows(data, target_source, supplement_source):
+    target = [
+        d for r, d in data if r["split"] == "train" and r["source"] == target_source
+    ]
+    supplement = (
+        [
+            d
+            for r, d in data
+            if r["split"] == "train" and r["source"] == supplement_source
+        ]
+        if supplement_source != "none"
+        else []
+    )
+    validation = [
+        d
+        for r, d in data
+        if r["split"] == "validation" and r["source"] == target_source
+    ]
+    if (
+        len(target) < 50
+        or len(validation) < 5
+        or (supplement_source != "none" and not supplement)
+    ):
+        raise ValueError(
+            "Insufficient target training, held-out validation or requested supplement data"
+        )
+    return target, supplement, validation
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
@@ -24,6 +53,15 @@ def main():
     parser.add_argument("--steps", type=int, default=240)
     parser.add_argument("--learning-rate", type=float, default=0.0001)
     parser.add_argument("--threads", type=int, default=6)
+    parser.add_argument(
+        "--initial-adapter", help="Continue an existing adapter with a fresh optimizer"
+    )
+    parser.add_argument("--target-source", default="curie")
+    parser.add_argument(
+        "--supplement-source",
+        default="french-english",
+        help="Use none for a single-personality corpus",
+    )
     args = parser.parse_args()
     os.environ.update(
         OMP_NUM_THREADS=str(args.threads),
@@ -51,6 +89,10 @@ def main():
     t3 = model.t3
     del model.s3gen, model.ve
     adapters = attach(t3)
+    if args.initial_adapter:
+        from .voice_lora import restore
+
+        restore(adapters, args.initial_adapter)
     params = [p for p in t3.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=args.learning_rate, weight_decay=0.01)
     data = []
@@ -61,13 +103,9 @@ def main():
         if (d["target"] >= 6561).any() or len(d["target"]) < 5:
             raise ValueError("Invalid speech targets")
         data.append((row, d))
-    curie = [d for r, d in data if r["split"] == "train" and r["source"] == "curie"]
-    french = [
-        d for r, d in data if r["split"] == "train" and r["source"] == "french-english"
-    ]
-    validation = [d for r, d in data if r["split"] == "validation"]
-    if len(curie) < 50 or len(validation) < 5 or not french:
-        raise ValueError("Insufficient training or validation data")
+    curie, french, validation = select_training_rows(
+        data, args.target_source, args.supplement_source
+    )
 
     def loss(d):
         cond = T3Cond(
@@ -105,16 +143,21 @@ def main():
     started = time.perf_counter()
     baseline = validate()
     best = baseline
+    save(adapters, out / "best.safetensors")
     history = [{"step": 0, "validationLoss": baseline}]
     report = {
         "method": "LoRA weight fine-tuning",
+        "initialAdapter": args.initial_adapter,
+        "bestStep": 0,
         "rank": 8,
         "alpha": 16,
         "contract": 2,
         "seed": 852,
         "trainableParameters": sum(p.numel() for p in params),
-        "curieClips": len(curie),
-        "frenchEnglishClips": len(french),
+        "targetSource": args.target_source,
+        "targetClips": len(curie),
+        "supplementSource": args.supplement_source,
+        "supplementClips": len(french),
         "validationClips": len(validation),
         "learningRate": args.learning_rate,
         "history": history,
@@ -127,7 +170,7 @@ def main():
     optimizer.zero_grad(set_to_none=True)
     for step in range(1, args.steps + 1):
         for micro in range(2):
-            if rng.random() < 0.15:
+            if french and rng.random() < 0.15:
                 d = rng.choice(french)
             else:
                 if not queue:

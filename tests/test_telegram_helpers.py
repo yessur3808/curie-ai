@@ -47,7 +47,7 @@ def test_reply_in_chunks_uses_safe_telegram_html():
     message = SimpleNamespace(reply_text=reply_text)
     asyncio.run(telegram.reply_in_chunks(message, "**Ready**\n- Lamp is off"))
 
-    assert replies == [("<b>Ready</b>\n• Lamp is off", "HTML")]
+    assert replies == [("<b>Ready</b>\n\n• Lamp is off", "HTML")]
 
 
 def test_reply_with_result_sends_deliberate_parts_as_separate_messages():
@@ -119,6 +119,38 @@ def test_proactive_send_uses_client_owned_by_calling_loop(monkeypatch):
             {
                 "chat_id": 42,
                 "text": "hello",
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+        ]
+    finally:
+        telegram._runtime.application = previous_app
+        telegram._runtime.loop = previous_loop
+
+
+def test_proactive_send_polishes_structured_message_as_safe_html(monkeypatch):
+    observed = []
+
+    class Bot:
+        async def send_message(self, **kwargs):
+            observed.append(kwargs)
+
+    previous_app, previous_loop = telegram._runtime.application, telegram._runtime.loop
+    telegram._runtime.application = SimpleNamespace(bot=Bot())
+    telegram._runtime.loop = None
+    try:
+        assert (
+            asyncio.run(
+                telegram.send_message(
+                    "42", "Service report\nStatus: Ready\nSource: Live"
+                )
+            )
+            is True
+        )
+        assert observed == [
+            {
+                "chat_id": 42,
+                "text": "Service report\n\n• <b>Status:</b> Ready\n• <b>Source:</b> Live",
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }

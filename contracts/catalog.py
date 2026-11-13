@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any
 
@@ -55,6 +57,22 @@ def contract_catalog() -> dict[str, Any]:
             "profiles": ("clear", "soft", "expressive", "french", "custom"),
             "required_fallback": "complete_text",
         },
+        "model_capability_context": {
+            "version": "1.0",
+            "source": "live_runtime_registry",
+            "exhaustive": True,
+            "refresh": "every_conversational_model_invocation",
+            "index": "all_registered_capability_names",
+            "details": "request_relevant_capabilities",
+            "includes": (
+                "availability",
+                "scope",
+                "risk",
+                "approval_policy",
+                "required_permissions",
+                "input_names",
+            ),
+        },
         "response_policy": {
             "version": "1.0",
             "required_dimensions": (
@@ -100,12 +118,195 @@ def discover_capabilities(*, include_unavailable: bool = False) -> dict[str, Any
     }
 
 
+def model_capability_manifest(registry=None) -> dict[str, Any]:
+    """Build the exhaustive, live capability snapshot supplied to Curie's model."""
+
+    if registry is None:
+        from agent.tooling import get_runtime_registry
+
+        registry = get_runtime_registry()
+
+    items: list[dict[str, Any]] = []
+    for definition in registry.all():
+        available, reason = definition.availability()
+        properties = definition.input_schema.get("properties", {})
+        inputs = (
+            sorted(str(name) for name in properties)
+            if isinstance(properties, dict)
+            else []
+        )
+        items.append(
+            {
+                "name": definition.name,
+                "display_name": definition.display_name,
+                "description": re.sub(r"\s+", " ", definition.description).strip(),
+                "category": definition.category,
+                "scope": (
+                    "chat_tool" if definition.chat_routable else "runtime_component"
+                ),
+                "available": bool(available),
+                "unavailable_reason": (
+                    None if available else str(reason or "Unavailable")
+                ),
+                "risk": definition.risk,
+                "approval_policy": definition.approval_policy,
+                "required_permissions": sorted(definition.required_permissions),
+                "inputs": inputs,
+            }
+        )
+
+    serialized = json.dumps(
+        items, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return {
+        "schema_version": "1.0",
+        "contract_version": CONTRACT_VERSION,
+        "source": "live_runtime_registry",
+        "total": len(items),
+        "available": sum(item["available"] for item in items),
+        "unavailable": sum(not item["available"] for item in items),
+        "fingerprint": hashlib.sha256(serialized.encode()).hexdigest(),
+        "capabilities": items,
+    }
+
+
+_CAPABILITY_SEARCH_STOPWORDS = frozenset(
+    "a an and are as at be by can current do does for from have help how i in is it "
+    "me my of on or please that the this to use what when where which who with you your "
+    "bounded model models multiple queue recommendation recommend reject review".split()
+)
+
+
+def _capability_search_terms(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(value or "").casefold())
+        if len(token) > 1 and token not in _CAPABILITY_SEARCH_STOPWORDS
+    }
+
+
+def _relevant_model_capabilities(
+    manifest: dict[str, Any], query: str, limit: int
+) -> list[dict[str, Any]]:
+    """Select a bounded detail set while the compact index retains every name."""
+
+    query_terms = _capability_search_terms(query)
+    if not query_terms:
+        return []
+    normalized_query = re.sub(r"[^a-z0-9]+", " ", query.casefold()).strip()
+    ranked: list[tuple[int, str, dict[str, Any]]] = []
+    for item in manifest["capabilities"]:
+        name_text = item["name"].replace("_", " ").casefold()
+        name_terms = _capability_search_terms(name_text)
+        display_terms = _capability_search_terms(item["display_name"])
+        description_terms = _capability_search_terms(item["description"])
+        category_terms = _capability_search_terms(item["category"])
+        input_terms = _capability_search_terms(" ".join(item["inputs"]))
+        score = 0
+        if name_text and name_text in normalized_query:
+            score += 40
+        score += 10 * len(query_terms & name_terms)
+        score += 6 * len(query_terms & display_terms)
+        score += 4 * len(query_terms & description_terms)
+        score += 2 * len(query_terms & category_terms)
+        score += 2 * len(query_terms & input_terms)
+        if score:
+            ranked.append((score, item["name"], item))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    return [item for _, _, item in ranked[: max(1, min(limit, 12))]]
+
+
+def model_capability_prompt(
+    registry=None, *, query: str = "", max_relevant: int = 8
+) -> str:
+    """Render a complete compact index plus details relevant to this request.
+
+    Every registered capability name remains visible on every invocation, so the
+    model never falls back to stale pretrained assumptions. Verbose descriptions,
+    inputs and permission metadata are retrieved only when they overlap the current
+    request. The application router remains the sole tool-selection authority.
+    """
+
+    try:
+        manifest = model_capability_manifest(registry)
+    except Exception:
+        return (
+            "[CURRENT RUNTIME CAPABILITY INDEX]\n"
+            "The live registry could not be read for this invocation. Describe Curie's "
+            "abilities cautiously, do not infer tool access from pretrained knowledge, and "
+            "never claim an action ran without application-supplied evidence."
+        )
+
+    available_chat = sorted(
+        item["name"]
+        for item in manifest["capabilities"]
+        if item["available"] and item["scope"] == "chat_tool"
+    )
+    available_runtime = sorted(
+        item["name"]
+        for item in manifest["capabilities"]
+        if item["available"] and item["scope"] == "runtime_component"
+    )
+    unavailable = sorted(
+        item["name"] for item in manifest["capabilities"] if not item["available"]
+    )
+    lines = [
+        "[CURRENT RUNTIME CAPABILITY INDEX]",
+        (
+            f"Complete live index: {manifest['total']} registered, "
+            f"{manifest['available']} available, {manifest['unavailable']} unavailable. "
+            f"Fingerprint: {manifest['fingerprint'][:16]}. The names below are exhaustive, "
+            "while verbose details are request-relevant."
+        ),
+        "Available chat tools: " + (", ".join(available_chat) or "none"),
+        "Available runtime components: " + (", ".join(available_runtime) or "none"),
+        "Currently unavailable: " + (", ".join(unavailable) or "none"),
+    ]
+
+    relevant = _relevant_model_capabilities(manifest, query, max_relevant)
+    if relevant:
+        lines.append("Relevant capability details for this request:")
+    for item in relevant:
+        attributes = [
+            "available" if item["available"] else "unavailable",
+            item["scope"],
+            item["category"],
+            item["risk"],
+        ]
+        if item["approval_policy"] != "never":
+            attributes.append(f"approval={item['approval_policy']}")
+        if item["required_permissions"]:
+            attributes.append("permissions=" + ",".join(item["required_permissions"]))
+        if item["inputs"]:
+            attributes.append("inputs=" + ",".join(item["inputs"]))
+        line = f"- {item['name']} [{'; '.join(attributes)}]: {item['description']}"
+        if not item["available"]:
+            line += f" Unavailable reason: {item['unavailable_reason']}"
+        lines.append(line)
+
+    lines.extend(
+        (
+            "Capability rules:",
+            "- Treat this live index, current owner permissions/account connections, and actual "
+            "tool results as authoritative. Do not deny an available listed capability merely "
+            "because it is absent from pretrained model knowledge.",
+            "- Available is service-level readiness, not proof of this owner's connection, "
+            "permission, required input, or approval.",
+            "- Only Curie's application router executes chat tools. Runtime components support "
+            "the application and are not directly invocable by the model.",
+            "- Never simulate execution or claim completion without application evidence. Writes "
+            "retain their approval and permission requirements.",
+        )
+    )
+    return "\n".join(lines)
+
+
 _GENERAL_CAPABILITY_QUESTION = re.compile(
     r"^(?:(?:curie[, ]+)?(?:capability audit[.! ]+)?(?:simulation only[.: ]+)?"
     r"(?:do not execute tools or change anything[.! ]+)?)?"
     r"(?:in one short answer[, ]+)?(?:what (?:can|are) you (?:actually )?(?:do|capable of)|"
     r"what kinds? of work can you (?:genuinely |actually )?help me with|"
-    r"what (?:useful )?(?:things )?can you (?:actually )?help me with"
+    r"what (?:useful )?(?:things )?can you (?:actually |genuinely )?help me with"
     r"(?: from here)?|"
     r"what are your (?:current )?capabilities|"
     r"what (?:tools|skills|abilities) (?:do you have|are available|are active)|"
@@ -115,7 +316,8 @@ _GENERAL_CAPABILITY_QUESTION = re.compile(
     re.I,
 )
 _CAPABILITY_FORMAT_SUFFIX = re.compile(
-    r"\s+(?:give|show|format|keep|not the marketing version)\b.{0,160}$", re.I
+    r"\s+(?:give|show|format|keep|just|not the marketing version)\b.{0,160}$",
+    re.I,
 )
 _ONE_CAPABILITY_QUESTION = re.compile(
     r"^(?:interrupt that[.! ]+)?(?:name|give me|tell me) one "
@@ -152,8 +354,8 @@ _FOCUSED_CAPABILITY_QUESTION = re.compile(
     r"^(?:(?:can|could|do) you (?:currently |still |directly )?"
     r"(?:access|use|read|check|control|track|find|send|reply (?:with|using))|"
     r"do you (?:currently |still )?have access to)\s+"
-    r"(?P<subject>(?:the |my )?(?:dashboard(?: info(?:rmation)?)?|google calendar|calendar|"
-    r"devices?|lights?|smart home|flights?|maps?|places?|voice messages?|audio messages?))"
+    r"(?P<subject>(?:the |my )?(?:dashboard(?: info(?:rmation)?)?|(?:website|project|observatory) analytics|google calendar|calendar|"
+    r"gmail|devices?|lights?|smart home|flights?|maps?|places?|(?:voice|audio) (?:messages?|notes?)))"
     r"(?:\s+(?:directly|right now|for me|today))*[?.! ]*$",
     re.I,
 )
@@ -197,8 +399,13 @@ def _natural_capability_summary(report: dict[str, Any]) -> str:
             "**Google services:** read or schedule Calendar events and work with Gmail",
         ),
         (
-            {"dashboard_snapshot", "hardware", "network_speed"},
-            "**Operations:** read the Curie dashboard, health, hardware, network, tasks, and diagnostics",
+            {
+                "dashboard_snapshot",
+                "observatory_project_analytics",
+                "hardware",
+                "network_speed",
+            },
+            "**Dashboards:** read Curie operations and Observatory project analytics, plus health, hardware, network, tasks, and diagnostics",
         ),
         (
             {"x_read", "x_search", "x_post", "x_reply"},
@@ -249,8 +456,13 @@ def _practical_capability_summary(report: dict[str, Any]) -> str:
             "- Research current information and compare reliable sources",
         ),
         (
-            {"dashboard_snapshot", "hardware", "network_speed"},
-            "- Read Curie's dashboard and diagnose health, latency, hardware, or network issues",
+            {
+                "dashboard_snapshot",
+                "observatory_project_analytics",
+                "hardware",
+                "network_speed",
+            },
+            "- Read Curie's operations dashboard or Observatory project analytics and diagnose health, latency, hardware, or network issues",
         ),
         (
             {"inspect_project", "project_change", "run_tests", "organize_files"},
@@ -332,8 +544,13 @@ def _top_capabilities_answer(report: dict[str, Any]) -> str:
             "Travel and places: track flights, plan routes, and find nearby places with real links",
         ),
         (
-            ("dashboard_snapshot", "hardware", "network_speed"),
-            "Diagnostics: inspect Curie’s dashboard, latency, hardware, and network health",
+            (
+                "dashboard_snapshot",
+                "observatory_project_analytics",
+                "hardware",
+                "network_speed",
+            ),
+            "Dashboards: inspect Curie operations, Observatory project analytics, latency, hardware, and network health",
         ),
         (
             ("research", "weather"),
@@ -371,7 +588,9 @@ def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
 
     lookup = {
         "dashboard": ("dashboard_snapshot",),
+        "analytics": ("observatory_project_analytics",),
         "calendar": ("calendar_list", "calendar_create"),
+        "gmail": ("gmail_search", "gmail_send"),
         "device": ("home_status", "home_control"),
         "light": ("home_status", "home_control"),
         "smart home": ("home_status", "home_control"),
@@ -388,6 +607,8 @@ def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
     items = [item for name in names if (item := _capability_item(report, name))]
     available = [item for item in items if item.get("available")]
     if available:
+        if "analytics" in lowered:
+            return "Yes. I can read aggregate GA4 views, users, sessions, and period comparisons from Curie Observatory for configured projects."
         if "dashboard" in lowered:
             return "Yes. I can read live health, model, connector, task, resource, and error data from Curie’s dashboard."
         if "calendar" in lowered:
@@ -395,6 +616,19 @@ def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
                 "Calendar tools are available, but that does not prove your account connection "
                 "in this turn. I need to verify the connection before reading events; any event "
                 "write still requires a clear preview and approval."
+            )
+        if "gmail" in lowered:
+            ready_names = {item["name"] for item in available}
+            read_status = (
+                "available" if "gmail_search" in ready_names else "unavailable"
+            )
+            send_status = "available" if "gmail_send" in ready_names else "unavailable"
+            return (
+                "Some Gmail tools are available, but that does not prove your account connection "
+                "in this turn. I need to verify access before reading messages; sending "
+                "still requires the applicable authorization and approval.\n\n"
+                f"- Read/search: {read_status}\n"
+                f"- Send: {send_status}"
             )
         if any(word in lowered for word in ("device", "light", "smart home")):
             return "Yes. I can match natural device names, read their live state, control them, and verify the result."
@@ -404,9 +638,11 @@ def _focused_capability_answer(subject: str, report: dict[str, Any]) -> str:
             return "Yes. I can provide directions, Google Maps links, and nearby place suggestions."
         descriptions = "; ".join(str(item["description"]) for item in available)
         return f"Yes. {descriptions}"
-    reasons = [str(item.get("error")) for item in items if item.get("error")]
-    if reasons:
-        return f"Not yet. {reasons[0]}"
+    if items:
+        return (
+            f"Not right now. The capability for {label} is currently unavailable. "
+            "Check its connection or configuration before trying again."
+        )
     return f"I do not currently have a verified, active capability for {label}."
 
 

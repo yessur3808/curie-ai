@@ -99,6 +99,8 @@ htmlcov/
 .tox/
 .nox/
 evaluation/reports/*.json
+/evaluation/reports/*
+!/evaluation/reports/README.md
 
 ### Documentation ###
 docs/_build/
@@ -137,5 +139,7 @@ target/
 
 # Trained voice data and isolated inference runtimes are private local assets.
 /data/trained-voice/
+/data/
+/.letta/
 /.trained-voice-venv/
 /.transcription-venv/

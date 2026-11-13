@@ -6,6 +6,8 @@ It never records prompts, responses, credentials, or other user content.
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -51,6 +53,7 @@ _DEFAULTS: dict[str, FeatureBudget] = {
     "x_research": FeatureBudget(1_000, 300, 2, 96, True),
     "open_source_planning": FeatureBudget(8_000, 600, 8, 256, True),
     "open_source_coding": FeatureBudget(20_000, 1_200, 8, 512, True),
+    "bounded_autonomy": FeatureBudget(12_000, 600, 2, 512, True),
     "proactive_messaging": FeatureBudget(12_000, 300, 36, 96, True),
     "action_preview": FeatureBudget(8_000, 300, 120, 64),
 }
@@ -63,7 +66,7 @@ class ResourceGovernor:
         instance = os.getenv("CURIE_INSTANCE", "default").strip().casefold()
         self.path = path or Path(
             os.getenv("CURIE_RESOURCE_BUDGET_PATH")
-            or Path.home() / ".curie" / f"resource-budgets-{instance}.json"
+            or assistant_state_dir() / f"resource-budgets-{instance}.json"
         )
         self._lock = threading.RLock()
         self._events: list[dict[str, Any]] = []

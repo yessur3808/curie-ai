@@ -9,12 +9,19 @@ from typing import Any, Iterable, Mapping
 
 _CORRECTION_PATTERNS = (
     re.compile(
+        r"^correction:\s+(?:(?:the|my|our)\s+)?"
+        r"(?!(?:it|this|that|there|these|those)\b)"
+        r"(?P<target>[A-Za-z][A-Za-z0-9 '\-_]{0,80}?)\s+(?:is|are)\s+\S",
+        re.I,
+    ),
+    re.compile(
         r"\bthere\s+(?:is|are)\s+no\s+(?:device\s+called\s+)?"
+        r"(?!(?:need|reason|requirement|obligation)\b)"
         r"(?P<target>[A-Za-z0-9][A-Za-z0-9 '\-_]{0,80})",
         re.I,
     ),
     re.compile(
-        r"\b(?:that(?:'s| is)\s+wrong|no)[,. ]+(?:i\s+meant\s+)?"
+        r"\b(?:that(?:'s| is)\s+wrong[,. ]+|no\s*[,.:]\s*)(?:i\s+meant\s+)?"
         r"(?P<target>[A-Za-z0-9][A-Za-z0-9 '\-_]{0,80})",
         re.I,
     ),
@@ -25,6 +32,14 @@ _CORRECTION_PATTERNS = (
     ),
 )
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+# Split only clauses with their own explicit noun subject and copula. Do not
+# retain dependent fragments such as "and is 80 dollars" or "and it is final"
+# after removing their corrected antecedent.
+_INDEPENDENT_CLAUSE_BOUNDARY = re.compile(
+    r"(?:,?\s+and\s+|;\s*)(?=(?:the|our|my)\s+"
+    r"[A-Za-z][A-Za-z0-9 '\-_]{0,80}?\s+(?:is|are)\s+)",
+    re.I,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,11 +125,14 @@ def rewrite_summary_conflicts(
         return summary.strip()
     targets = {item.target.casefold() for item in corrections}
     sentences = _SENTENCE_BOUNDARY.split(summary.strip()) if summary.strip() else []
-    retained = [
-        sentence
-        for sentence in sentences
-        if not any(target in sentence.casefold() for target in targets)
-    ]
+    retained = []
+    for sentence in sentences:
+        if not any(target in sentence.casefold() for target in targets):
+            retained.append(sentence)
+            continue
+        for clause in _INDEPENDENT_CLAUSE_BOUNDARY.split(sentence):
+            if not any(target in clause.casefold() for target in targets):
+                retained.append(clause.rstrip(" ,;").rstrip(".") + ".")
     authoritative = [f"Explicit correction: {item.text}" for item in corrections]
     return " ".join([*retained, *authoritative]).strip()
 

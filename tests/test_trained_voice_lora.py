@@ -34,6 +34,27 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(torch.allclose(t3.tfmr.c_attn(x), expected, atol=1e-6))
         self.assertFalse(torch.equal(base.weight, original))
 
+    def test_resume_restores_exact_parameters_and_rejects_wrong_shape(self):
+        import torch
+        from transformers.pytorch_utils import Conv1D
+        from services.trained_voice.voice_lora import ProjectionAdapter, save, restore
+
+        source = ProjectionAdapter(Conv1D(6, 4), rank=2, alpha=4)
+        with torch.no_grad():
+            source.b.normal_(0, 0.1)
+        target = ProjectionAdapter(Conv1D(6, 4), rank=2, alpha=4)
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "adapter.safetensors"
+            save({"c_attn": source}, path)
+            restore({"c_attn": target}, path)
+            self.assertTrue(torch.equal(source.a, target.a))
+            self.assertTrue(torch.equal(source.b, target.b))
+            invalid = ProjectionAdapter(Conv1D(7, 4), rank=2, alpha=4)
+            original = invalid.a.detach().clone()
+            with self.assertRaises(ValueError):
+                restore({"c_attn": invalid}, path)
+            self.assertTrue(torch.equal(original, invalid.a))
+
     def test_new_adapter_preserves_original_output(self):
         import torch
         from transformers.pytorch_utils import Conv1D

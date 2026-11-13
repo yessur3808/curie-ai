@@ -45,6 +45,7 @@ GENERIC_FLATTERY_SENTENCE_PATTERN = re.compile(
 GENERIC_FOLLOWUP_PATTERN = re.compile(
     r"(?:\s+|^)(?:would you like (?:me to )?.+|what would you like me to .+|"
     r"how can i (?:help|assist).+|let me know if (?:you need|i can|there(?:'s| is)) .+|"
+    r"let me know (?:which|what) you prefer.+|"
     r"let me know (?:whether )?there(?:'s| is) anything else.+|"
     r"i['’]m here if you need anything.+)\?*\s*$",
     re.I,
@@ -61,6 +62,13 @@ INVENTED_EXPERIENCE_PATTERN = re.compile(
 INVENTED_EXPERIENCE_PHRASE_PATTERN = re.compile(
     r"\b(?:(?:based on|from) (?:my )?(?:lived )?experience|"
     r"grounded in (?:my )?(?:lived )?experience)\b",
+    re.I,
+)
+INVENTED_PHYSICAL_PLAN_SENTENCE_PATTERN = re.compile(
+    r"(?:^|(?<=[.!?])\s+)(?:let me|i(?:['’]ll| will)|i(?:['’]m| am) "
+    r"(?:going|planning) to)\s+(?:grab|brew|pour|eat|drink|read|sleep|nap|"
+    r"walk|run|cook|watch|listen|curl up|lie down|head out|lose myself)\b"
+    r"[^.!?\n]*[.!?]?",
     re.I,
 )
 CODE_BLOCK_PATTERN = re.compile(r"```[\s\S]*?```|```[\s\S]*$", re.M)
@@ -231,6 +239,14 @@ def _meaningful_terms(text: str) -> set[str]:
 def remove_redundant_opening(response: str, user_text: str) -> str:
     """Drop a first sentence that merely parrots a detailed user situation."""
 
+    # Drafting and rewriting intentionally repeat the owner's supplied facts.
+    # Lexical overlap is not evidence of a redundant opening in these tasks.
+    if re.search(
+        r"\b(?:draft|write|rewrite|rephrase|translate|proofread|revise)\b",
+        user_text,
+        re.I,
+    ):
+        return response.strip()
     match = re.match(r"^(.+?[.!?])\s+(.+)$", response.strip(), re.S)
     if not match:
         return response.strip()
@@ -312,6 +328,15 @@ def enforce_line_and_tone_constraints(response: str, user_text: str) -> str:
 
     clean = response.strip()
     user = str(user_text or "")
+    word_limit = re.search(r"\bat most\s+([1-9]\d{0,3})\s+words?\b", user, re.I)
+    if word_limit and len(clean.split()) > int(word_limit.group(1)):
+        # Drop only a standalone acknowledgment, never truncate factual or
+        # safety-bearing content merely to satisfy a numerical length target.
+        without_filler = re.sub(
+            r"^(?:got it|noted|understood)[.!]\s+(?=\S)", "", clean, count=1, flags=re.I
+        )
+        if without_filler.strip():
+            clean = without_filler.strip()
     if NO_CONGRATULATIONS_PATTERN.search(user):
         clean = CONGRATULATIONS_PATTERN.sub("", clean).strip()
     if ONE_LINE_PATTERN.search(user):
@@ -332,6 +357,14 @@ def enforce_line_and_tone_constraints(response: str, user_text: str) -> str:
         and LIGHTWEIGHT_OPINION_PATTERN.search(user)
         and not COMPLEX_DOMAIN_PATTERN.search(user)
     )
+    if lightweight_opinion and re.search(r"\bpick one\b", user, re.I):
+        clean = re.sub(
+            r",?\s+but if\b[^.!?\n]*[.!?]?",
+            ".",
+            clean,
+            count=1,
+            flags=re.I,
+        ).strip()
     if lightweight_opinion and not structured_list and "```" not in clean:
         sentences = [
             part.strip() for part in re.split(r"(?<=[.!?])\s+", clean) if part.strip()
@@ -446,6 +479,21 @@ class ResponsePolicy:
         self, response: str, user_text: str, profile=None, history=None
     ) -> str:
         sanitized = self.sanitize(response)
+        allow_contextual_french = bool(
+            self.persona.get("language_profile", {})
+            .get("french_integration", {})
+            .get("preserve_contextual_expressions")
+            and not re.search(
+                r"\b(?:english[ -]only|only (?:in )?english|no french|without french|exact wording|verbatim)\b",
+                str(user_text or ""),
+                re.I,
+            )
+            and not OPERATIONAL_REPLY_PATTERN.search(str(user_text or ""))
+            and not any(
+                FRENCH_MANNERISM_PATTERN.search(m)
+                for m in _recent_assistant_messages(history)
+            )
+        )
         styled = self.personality_context.apply_response_style(
             sanitized, user_text, user_profile=profile, history=history
         )
@@ -464,7 +512,15 @@ class ResponsePolicy:
                 FRENCH_MANNERISM_PATTERN.search(message)
                 for message in _recent_assistant_messages(history)
             )
-            if recent_french or OPERATIONAL_REPLY_PATTERN.search(str(user_text or "")):
+            if (
+                recent_french
+                or OPERATIONAL_REPLY_PATTERN.search(str(user_text or ""))
+                or re.search(
+                    r"\b(?:english[ -]only|only (?:in )?english|no french|without french)\b",
+                    str(user_text or ""),
+                    re.I,
+                )
+            ):
                 cleaned = _remove_short_french_asides(styled)
                 if cleaned:
                     styled = cleaned
@@ -476,7 +532,11 @@ class ResponsePolicy:
             if OVERDONE_CASUAL_REACTION_PATTERN.search(styled):
                 styled = _plain_personal_acknowledgement(str(user_text or ""))
             else:
-                cleaned = _remove_short_french_asides(styled)
+                cleaned = (
+                    styled
+                    if allow_contextual_french
+                    else _remove_short_french_asides(styled)
+                )
                 cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,")
                 if not re.search(r"\w", cleaned):
                     cleaned = ""
@@ -515,13 +575,23 @@ class ResponsePolicy:
             or recent_french
             or OPERATIONAL_REPLY_PATTERN.search(str(user_text or ""))
         ):
-            styled = LEADING_FRENCH_FILLER_PATTERN.sub("", styled).strip()
+            if not (
+                allow_contextual_french
+                and re.match(r"^\s*(?:(?:ah|oh)[,!. ]+)?voilà\b", styled, re.I)
+            ):
+                styled = LEADING_FRENCH_FILLER_PATTERN.sub("", styled).strip()
         styled = REDUNDANT_ACKNOWLEDGEMENT_OPENING_PATTERN.sub("", styled).strip()
         styled = GENERIC_FLATTERY_SENTENCE_PATTERN.sub("", styled).strip()
         styled = INVENTED_EXPERIENCE_PATTERN.sub("", styled).strip()
         styled = INVENTED_EXPERIENCE_PHRASE_PATTERN.sub(
             "based on my reasoning", styled
         ).strip()
+        if LIGHTWEIGHT_OPINION_PATTERN.search(str(user_text or "")):
+            without_physical_plan = INVENTED_PHYSICAL_PLAN_SENTENCE_PATTERN.sub(
+                "", styled
+            ).strip()
+            if without_physical_plan:
+                styled = without_physical_plan
         styled = GENERIC_FOLLOWUP_PATTERN.sub("", styled).strip()
         styled = GENERIC_REASSURANCE_SENTENCE_PATTERN.sub("", styled).strip()
         styled = remove_trailing_fragment(styled)

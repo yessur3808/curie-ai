@@ -58,12 +58,33 @@ asks for a voice/audio reply, or when replying to an inbound voice note.
 
 ## Awareness, dashboard, and growth
 
-The live capability registry is injected into Curie's response directives, so
-she distinguishes registered tools from unavailable integrations. Political,
-social, legal, scientific, market, and news questions with current wording route
-to live research. `dashboard_snapshot` reads the same bounded instance,
-connector, task, model, resource, error, and readiness data used by Curie's
-operations dashboard.
+An exhaustive compact index from the live capability registry is injected at every
+conversational model invocation. It names every registered chat tool and runtime
+component, including unavailable integrations, and includes a registry fingerprint.
+For the capabilities relevant to the current request it also supplies availability,
+scope, risk, approval policy, required permissions, accepted input names, and the
+live description. There is no fixed-size name subset or manually maintained tool
+list. Registry status and actual execution evidence remain authoritative, so model
+awareness cannot grant permission or fabricate a completed action.
+
+Political, social, legal, scientific, market, and news questions with current
+wording route to live research. `dashboard_snapshot` reads the same bounded
+instance, connector, task, model, resource, error, and readiness data used by
+Curie's operations dashboard.
+
+`observatory_project_analytics` separately reads bounded aggregate GA4 reports
+from Curie Observatory's local cache. It exposes project name, reporting range,
+views, users, sessions, previous-period totals, source status, and update time;
+it never reads the dashboard access key, Google credentials, or detailed page
+breakdowns. The default data directory is
+`~/Desktop/server/dashboard/data`; override it with
+`CURIE_OBSERVATORY_DATA_DIR` when Observatory is installed elsewhere.
+
+Examples:
+
+- `Did my Atmosphere website get any views lately?`
+- `Show Personal website analytics for the last 7 days`
+- `/analytics Atmosphere 30`
 
 Learning stays controlled: explicit corrections, verified tool outcomes,
 owner-approved learned abilities, and measured evaluations may improve future

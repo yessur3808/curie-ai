@@ -23,6 +23,8 @@ The canvas is self-contained (no CDN dependencies) and uses:
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 import json
 import socket
 import threading
@@ -35,7 +37,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # tasks.json location (mirrors cli/tasks.py)
 # ---------------------------------------------------------------------------
-_CURIE_DIR = Path.home() / ".curie"
+_CURIE_DIR = assistant_state_dir()
 _TASKS_FILE = _CURIE_DIR / "tasks.json"
 
 _SHUTDOWN_EVENT = threading.Event()

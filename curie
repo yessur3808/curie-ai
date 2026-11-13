@@ -25,6 +25,9 @@ if os.path.isfile(_venv_python) and os.path.abspath(sys.prefix) != os.path.abspa
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
+from utils.installation import bootstrap
+bootstrap(_repo_root)
+
 from cli.main import main
 
 if __name__ == "__main__":

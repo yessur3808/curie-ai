@@ -534,10 +534,13 @@ class ProactiveMessagingService:
         self._generation_reasons: dict[str, str] = {}
         self._generation_topics: dict[str, str] = {}
         self._generation_finding_ids: dict[str, str] = {}
+        self._generation_autonomy_report_ids: dict[str, str] = {}
         self._research_threads: dict[str, threading.Thread] = {}
         self._research_threads_lock = threading.Lock()
         self._open_source_threads: dict[str, threading.Thread] = {}
         self._open_source_threads_lock = threading.Lock()
+        self._bounded_autonomy_threads: dict[str, threading.Thread] = {}
+        self._bounded_autonomy_threads_lock = threading.Lock()
         self._companion_draft_threads: dict[str, threading.Thread] = {}
         self._companion_draft_threads_lock = threading.Lock()
         self._companion_draft_state_lock = threading.Lock()
@@ -560,9 +563,11 @@ class ProactiveMessagingService:
         # opt-in. Its occasional shares still pass through the ordinary
         # proactive quiet hours, delivery caps, and connector path below.
         from services.autonomous_learning import AutonomousLearningService
+        from services.bounded_autonomy import BoundedAutonomyService
         from services.open_source_contributions import OpenSourceContributionService
 
         self._autonomous_learning = AutonomousLearningService()
+        self._bounded_autonomy = BoundedAutonomyService()
         self._open_source_contributions = OpenSourceContributionService()
 
         # Cron job runner – started/stopped alongside this service
@@ -674,6 +679,7 @@ class ProactiveMessagingService:
             self._run_open_source_contributions(
                 self._get_open_source_contribution_users()
             )
+            self._run_bounded_autonomy(self._get_bounded_autonomy_users())
 
             from agent.task_engine import (
                 claim_scheduled,
@@ -1052,6 +1058,67 @@ class ProactiveMessagingService:
         finally:
             with self._research_threads_lock:
                 self._research_threads.pop(internal_id, None)
+
+    def _get_bounded_autonomy_users(self) -> list[dict]:
+        """Return owners who explicitly enabled bounded repository maintenance."""
+        from memory.repositories import get_repositories
+
+        try:
+            users = []
+            seen: set[str] = set()
+            for user in get_repositories().profiles.list_with_identities():
+                internal_id = str(user.get("internal_id") or "")
+                facts = user.get("facts") or {}
+                if (
+                    internal_id
+                    and internal_id not in seen
+                    and facts.get("bounded_autonomy_enabled", False)
+                ):
+                    seen.add(internal_id)
+                    users.append({"internal_id": internal_id})
+            return users
+        except Exception as exc:
+            logger.error("Error querying bounded-autonomy users: %s", exc)
+            return []
+
+    def _run_bounded_autonomy(self, users: list[dict]) -> None:
+        """Launch due maintenance away from latency-sensitive conversations."""
+        for user in users:
+            internal_id = str(user.get("internal_id") or "")
+            if not internal_id:
+                continue
+            with self._bounded_autonomy_threads_lock:
+                active = self._bounded_autonomy_threads.get(internal_id)
+                if active and active.is_alive():
+                    continue
+                thread = threading.Thread(
+                    target=self._run_bounded_autonomy_owner,
+                    args=(internal_id,),
+                    name=f"curie-autonomy-{internal_id[:8]}",
+                    daemon=True,
+                )
+                self._bounded_autonomy_threads[internal_id] = thread
+                thread.start()
+
+    def _run_bounded_autonomy_owner(self, internal_id: str) -> None:
+        try:
+            profile = UserManager.get_user_profile(internal_id) or {}
+            report = self._bounded_autonomy.run_due(internal_id, profile)
+            if report:
+                logger.info(
+                    "Bounded autonomy completed with %s for owner %s",
+                    report.get("status"),
+                    internal_id,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Bounded autonomy failed safely for owner %s: %s",
+                internal_id,
+                exc,
+            )
+        finally:
+            with self._bounded_autonomy_threads_lock:
+                self._bounded_autonomy_threads.pop(internal_id, None)
 
     def _get_open_source_contribution_users(self) -> list[dict]:
         """Return owners who explicitly enabled proactive repository discovery."""
@@ -1591,7 +1658,32 @@ class ProactiveMessagingService:
         pending_open_source = str(
             user_profile.get("open_source_pending_preview_id") or ""
         )
-        if pending_open_source:
+        pending_autonomy = str(
+            user_profile.get("bounded_autonomy_pending_report_id") or ""
+        )
+        message = ""
+        open_source_message = False
+        if pending_autonomy:
+            try:
+                from services.bounded_autonomy import get_report, render_digest
+
+                report = get_report(str(internal_id), pending_autonomy)
+                if report is None:
+                    raise LookupError("bounded-autonomy report not found")
+                message = render_digest(report)
+                self._generation_reasons[str(internal_id)] = (
+                    "You enabled bounded repository maintenance and this cycle produced an actionable result."
+                )
+                self._generation_topics[str(internal_id)] = "Curie maintenance"
+                self._generation_autonomy_report_ids[str(internal_id)] = (
+                    pending_autonomy
+                )
+            except Exception:
+                UserManager.update_user_profile(
+                    internal_id, {"bounded_autonomy_pending_report_id": ""}
+                )
+                pending_autonomy = ""
+        if not message and pending_open_source:
             try:
                 from services.action_previews import preview_store
 
@@ -1612,6 +1704,7 @@ class ProactiveMessagingService:
                     "You enabled proactive open-source contribution discovery."
                 )
                 self._generation_topics[str(internal_id)] = "open-source contribution"
+                open_source_message = True
             except Exception:
                 UserManager.update_user_profile(
                     internal_id, {"open_source_pending_preview_id": ""}
@@ -1619,7 +1712,7 @@ class ProactiveMessagingService:
                 message = await self._generate_proactive_message(
                     internal_id, platform or "legacy"
                 )
-        else:
+        elif not message:
             message = await self._generate_proactive_message(
                 internal_id, platform or "legacy"
             )
@@ -1627,12 +1720,16 @@ class ProactiveMessagingService:
             self._generation_reasons.pop(str(internal_id), None)
             self._generation_topics.pop(str(internal_id), None)
             self._generation_finding_ids.pop(str(internal_id), None)
+            self._generation_autonomy_report_ids.pop(str(internal_id), None)
             logger.debug(
                 "No eligible proactive message was available for user %s", internal_id
             )
             return
         topic = self._generation_topics.pop(str(internal_id), _message_topic(message))
         finding_id = self._generation_finding_ids.pop(str(internal_id), None)
+        autonomy_report_id = self._generation_autonomy_report_ids.pop(
+            str(internal_id), None
+        )
         allowed, _reason = delivery_allowed(user_profile, topic, now)
         if not allowed:
             self._generation_reasons.pop(str(internal_id), None)
@@ -1668,7 +1765,12 @@ class ProactiveMessagingService:
                         **delivery_updates(user_profile, topic, safe_reason, now),
                         **(
                             {"open_source_pending_preview_id": ""}
-                            if pending_open_source
+                            if open_source_message
+                            else {}
+                        ),
+                        **(
+                            {"bounded_autonomy_pending_report_id": ""}
+                            if autonomy_report_id
                             else {}
                         ),
                     },
@@ -1760,6 +1862,17 @@ class ProactiveMessagingService:
                 )
         except Exception as exc:
             logger.debug("Personal agenda briefing unavailable: %s", exc)
+
+        # Add bounded concierge offers only for owners who explicitly enabled
+        # them. These prepare or propose; they never perform external actions.
+        try:
+            from services.proactive_concierge import build_concierge_candidates
+
+            candidates.extend(
+                build_concierge_candidates(str(internal_id), user_profile, history)
+            )
+        except Exception as exc:
+            logger.debug("Proactive concierge unavailable: %s", exc)
 
         # Prefer a grounded, permission-seeking helpful suggestion when the
         # neural predictor has enough evidence. It can propose but never act.

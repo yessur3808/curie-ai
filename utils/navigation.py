@@ -1,8 +1,8 @@
 # utils/navigation.py
 """
 Navigation utilities: geocoding via Nominatim (OpenStreetMap) and routing via OSRM.
-Supports walking, cycling, and driving.  Transit routing requires an optional
-OpenRouteService API key (ORS_API_KEY env var).
+Supports walking, cycling, and driving. Transit routing uses Google Routes
+(GOOGLE_ROUTES_API_KEY); without a key it returns a transit Maps link.
 Optional real-time traffic data via TomTom API (TOMTOM_API_KEY env var).
 """
 
@@ -495,6 +495,18 @@ async def route(
             traffic (optional),
             error (str, only on failure)
     """
+    if mode.lower().strip() in {
+        "transit",
+        "bus",
+        "train",
+        "public",
+        "public transit",
+        "public transport",
+    }:
+        from utils.transit_directions import directions
+
+        return await directions(origin, destination, "transit")
+
     # Resolve mode → profile
     mode_lower = mode.lower().strip()
     osrm_profile = _OSRM_PROFILES.get(mode_lower)

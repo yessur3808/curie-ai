@@ -11,7 +11,15 @@ from services.api_voice_runtime import required_native
 from services.trained_voice.paths import VoicePaths
 
 ROOT = Path(__file__).resolve().parents[1]
-_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "XDG_CACHE_HOME")
+_ENV_ALLOWLIST = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "XDG_CACHE_HOME",
+    "CURIE_VOICE_AFFECT",
+)
 
 
 class SpeechRecognitionError(RuntimeError):
@@ -49,6 +57,7 @@ async def transcribe_audio_native(
     accent: str | None = None,
     auto_detect: bool = True,
     root: Path | None = None,
+    warm: bool = False,
 ) -> dict[str, str]:
     native = required_native()
     selected_root = (root or ROOT).resolve()
@@ -99,13 +108,35 @@ async def transcribe_audio_native(
     from services.media_transport import supervise_process
 
     try:
-        result = await supervise_process(
-            plan["command"],
-            cwd=plan["cwd"],
-            environment=_environment(),
-            timeout=float(os.getenv("CURIE_TRANSCRIBE_TIMEOUT_SECONDS", "110")),
-            max_stdout_bytes=1024 * 1024,
-        )
+        result = None
+        if warm and os.getenv("CURIE_WARM_TRANSCRIPTION", "true").lower() == "true":
+            from services.trained_voice.warm_worker import recognition_worker
+            from types import SimpleNamespace
+
+            try:
+                worker = recognition_worker(
+                    selected_root, paths.transcription_python, _environment()
+                )
+                transcript = await worker.transcribe(
+                    audio_path,
+                    None if auto_detect else language.split("-", 1)[0].lower(),
+                    timeout=float(os.getenv("CURIE_TRANSCRIBE_TIMEOUT_SECONDS", "110")),
+                )
+                result = SimpleNamespace(
+                    return_code=0, stdout=json.dumps(transcript).encode()
+                )
+                plan["backend"] = "faster-whisper-isolated-warm"
+            except (RuntimeError, ValueError, OSError):
+                # A broken resident worker falls back to the proven one-shot path.
+                result = None
+        if result is None:
+            result = await supervise_process(
+                plan["command"],
+                cwd=plan["cwd"],
+                environment=_environment(),
+                timeout=float(os.getenv("CURIE_TRANSCRIBE_TIMEOUT_SECONDS", "110")),
+                max_stdout_bytes=1024 * 1024,
+            )
     except TimeoutError as exc:
         raise SpeechRecognitionError("speech_worker_timeout") from exc
     if result.return_code:
@@ -120,7 +151,11 @@ async def transcribe_audio_native(
                 raise ValueError("speech_transcript_invalid")
     except (IndexError, UnicodeError, RuntimeError, ValueError) as exc:
         raise SpeechRecognitionError("speech_worker_output_invalid") from exc
+    from services.trained_voice.affect import safe_cues
+
+    raw = json.loads(result.stdout.decode().splitlines()[-1])
     return {
+        "voice_cues": safe_cues(raw.get("voice_cues")),
         "text": str(parsed["text"]),
         "language": str(parsed["language"]),
         "backend": plan["backend"],

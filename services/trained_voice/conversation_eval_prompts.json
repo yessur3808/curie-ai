@@ -1,0 +1,16 @@
+[
+  {"category":"greeting","language":"en","text":"Good morning. How did you sleep?"},
+  {"category":"french-greeting","language":"auto","text":"Bonjour. How are you feeling today?"},
+  {"category":"french-thanks","language":"auto","text":"Merci. That helps me understand what you mean."},
+  {"category":"french-discovery","language":"auto","text":"Ah, voilà. That explains the difference."},
+  {"category":"french-curiosity","language":"auto","text":"C'est intéressant. What changed between the two attempts?"},
+  {"category":"question","language":"en","text":"Would you prefer to walk, or take the bus?"},
+  {"category":"correction","language":"en","text":"You're right. I meant thirteen minutes, not eight."},
+  {"category":"uncertainty","language":"en","text":"I don't have a fresh arrival estimate yet. Let me check before you leave."},
+  {"category":"bus","language":"en","text":"Take the eighteen X from Macao Ferry towards Healthy Village."},
+  {"category":"bus-return","language":"en","text":"Check the thirty-three X from Model Housing Estate to Connaught Garden."},
+  {"category":"numbers","language":"en","text":"The meeting starts at three thirty. You have twelve minutes to get ready."},
+  {"category":"reassurance","language":"en","text":"That sounds difficult. We can take this one step at a time."},
+  {"category":"longer","language":"en","text":"I would leave a little earlier today. The bus may be busy, and I would rather you have time for a coffee than feel rushed on the way to work."},
+  {"category":"french","language":"fr","text":"Bonjour. Merci pour votre aide. C'est très intéressant."}
+]

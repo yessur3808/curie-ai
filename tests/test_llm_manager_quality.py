@@ -31,6 +31,9 @@ def test_empty_error_or_apology_answers_fail_quality_check(response):
 def test_incomplete_npu_response_falls_through_to_general_path(monkeypatch):
     from llm import accelerators, manager
 
+    # This is an in-process fallback unit test. A developer's live shared-worker
+    # socket must not turn it into an integration request.
+    monkeypatch.delenv("CURIE_INFERENCE_SOCKET", raising=False)
     monkeypatch.setattr(accelerators, "should_use_npu", lambda prompt: True)
     monkeypatch.setattr(
         accelerators,

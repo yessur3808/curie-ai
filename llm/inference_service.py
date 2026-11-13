@@ -256,7 +256,13 @@ class ManagedInferenceService:
                 text = "".join(chunks) if chunks else (returned or "")
                 finished = time.perf_counter()
                 first = first_token_at or finished
-                generation_seconds = max(0.001, finished - first)
+                # Verified responses are intentionally emitted only after every
+                # solver/reviewer stage completes. Measuring from that single
+                # final emit made throughput appear to be tens of thousands of
+                # tokens per second. Report effective end-to-end throughput from
+                # worker start so this metric remains meaningful for both
+                # streamed and verified-complete delivery.
+                generation_seconds = max(0.001, finished - started)
                 token_count = max(0, int(len(text.split()) * 1.33))
                 result = InferenceResult(
                     text=text,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -29,7 +31,7 @@ class ContributionLearningStore:
     """Small local preference model based only on explicit outcomes."""
 
     def __init__(self, root: Path | None = None):
-        self.root = root or Path.home() / ".curie" / "contribution-learning"
+        self.root = root or assistant_state_dir() / "contribution-learning"
         self._lock = threading.Lock()
 
     def _path(self, owner_id: str) -> Path:

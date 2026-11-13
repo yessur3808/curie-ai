@@ -24,7 +24,10 @@ def json_list(name: str) -> list[dict[str, Any]]:
 
 def owner_credentials(owner_id: str, provider: str) -> dict[str, Any]:
     """Load an encrypted owner record when the vault is enabled."""
-    if not os.getenv("CURIE_CREDENTIAL_KEY", "").strip():
+    if (
+        os.getenv("CURIE_CREDENTIAL_BACKEND", "file") == "file"
+        and not os.getenv("CURIE_CREDENTIAL_KEY", "").strip()
+    ):
         return {}
     try:
         from services.credential_vault import get_credential

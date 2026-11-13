@@ -22,6 +22,8 @@ Commands:
 
 from __future__ import annotations
 
+from utils.instance_paths import assistant_state_dir
+
 import json
 import re
 import time
@@ -40,7 +42,7 @@ except ImportError:
     _RICH = False
     _console = None
 
-CURIE_DIR = Path.home() / ".curie"
+CURIE_DIR = assistant_state_dir()
 CRON_FILE = CURIE_DIR / "cron.json"
 
 

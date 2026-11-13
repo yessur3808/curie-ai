@@ -129,7 +129,9 @@ async def transcribe_audio(
                 accent=accent,
                 auto_detect=auto_detect,
             )
-            return result["text"]
+            from services.trained_voice.affect import VoiceTranscript
+
+            return VoiceTranscript(result["text"], result.get("voice_cues"))
         except Exception as exc:
             logger.error("Native speech recognition failed: %s", exc)
             return None

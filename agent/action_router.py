@@ -254,11 +254,11 @@ async def execute_request(
         return str(req.params["message"])
     if req.action in {"approve", "reject"}:
         approved = req.action == "approve"
+        connector = str(profile.get("_connector", "unknown"))
         pending = _repositories().approvals.consume(
-            internal_id, req.params["token"], approved
+            internal_id, req.params["token"], approved, connector=connector
         )
         binding_hash = str((pending or {}).pop("approval_binding_hash", ""))
-        connector = str(profile.get("_connector", "unknown"))
         if not pending or not _valid_approval_binding(
             pending,
             internal_id=str(internal_id),
@@ -595,11 +595,13 @@ async def execute_request(
 
             consume_materialized_preview(str(internal_id), materialized_preview)
         verification_status = _verification_status(req.action, tool_result.data)
+        execution_failed = verification_status in {"failed", "contradicted"}
+        execution_status = "failed" if execution_failed else "completed"
         if mutation_key:
             _repositories().mutations.finish(
                 str(internal_id),
                 mutation_key,
-                "completed",
+                execution_status,
                 _safe_receipt(
                     result,
                     tool_result.data,
@@ -611,7 +613,7 @@ async def execute_request(
         _audit(
             internal_id,
             req.action,
-            "completed",
+            execution_status,
             connector=profile.get("_connector", "unknown"),
             validated_action=req.action,
             parameters=safe_params,
@@ -630,15 +632,21 @@ async def execute_request(
                 else None
             ),
             citations=citations,
-            outcome={"status": "completed", "summary": result[:1000]},
+            outcome={"status": execution_status, "summary": result[:1000]},
             verification_status=verification_status,
         )
         _capture(
             _outcome,
             status=(
-                "already_satisfied"
-                if verification_status == "already_satisfied"
-                else ("verified" if verification_status == "verified" else "completed")
+                "failed"
+                if execution_failed
+                else (
+                    "already_satisfied"
+                    if verification_status == "already_satisfied"
+                    else (
+                        "verified" if verification_status == "verified" else "completed"
+                    )
+                )
             ),
             capability=req.action,
             verification_status=verification_status,
@@ -720,7 +728,7 @@ async def execute_request(
 async def handle_action_request(
     text: str, internal_id: str, profile: dict
 ) -> Optional[str]:
-    request = await resolve_request(text)
+    request = await resolve_request(text, timezone_name=(profile or {}).get("timezone"))
     if request is None:
         return None
     return await execute_request(request, str(internal_id), profile or {})

@@ -74,6 +74,7 @@ def request(prompt, **kwargs):
                 "messages": prompt.messages,
                 "evidence": prompt.evidence,
                 "json_output": prompt.json_output,
+                "json_schema": prompt.json_schema,
                 **kwargs,
             },
         )
@@ -94,7 +95,56 @@ def status():
         return receive(connection)
 
 
-def execute(payload, ask):
+def request_stream(prompt, on_delta, **kwargs):
+    """Internal draft transport, NOT a verified user-facing token stream.
+
+    Deltas can contain reasoning or text removed by final cleanup. Consumers
+    must buffer them until their own review policy allows release. No failover
+    or replay is attempted after emission. A callback exception closes the
+    socket, stopping the worker at its next write (not during native prefill).
+    """
+    path = os.environ["CURIE_INFERENCE_SOCKET"]
+    _check_socket(path)
+    prompt = as_chat_prompt(prompt)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(
+            float(os.getenv("CURIE_INFERENCE_TIMEOUT_SECONDS", "240"))
+        )
+        connection.connect(path)
+        send(
+            connection,
+            {
+                **kwargs,
+                "messages": prompt.messages,
+                "evidence": prompt.evidence,
+                "json_output": prompt.json_output,
+                "json_schema": prompt.json_schema,
+                "stream": True,
+            },
+        )
+        total = 0
+        while True:
+            event = receive(connection)
+            if not isinstance(event, dict):
+                raise ValueError("invalid_gateway_stream")
+            if (
+                event.get("type") == "draft_delta"
+                and isinstance(event.get("text"), str)
+                and event["text"]
+            ):
+                total += len(event["text"].encode("utf-8"))
+                if total > MAX_FRAME:
+                    raise ValueError("gateway_stream_too_large")
+                on_delta(event["text"])
+            elif event.get("type") == "done" and isinstance(event.get("text"), str):
+                return event["text"]
+            elif event.get("type") == "error":
+                raise RuntimeError("gateway_stream_failed")
+            else:
+                raise ValueError("invalid_gateway_stream")
+
+
+def execute(payload, ask, on_delta=None):
     if not isinstance(payload, dict):
         raise ValueError("invalid_gateway_request")
     messages = payload.get("messages")
@@ -124,12 +174,18 @@ def execute(payload, ask):
         "critic",
         "vision",
         "npu",
+        "alternate",
     }:
         raise ValueError("invalid_gateway_role")
     temperature = float(payload.get("temperature", 0.3))
     json_output = payload.get("json_output", False)
     if not isinstance(json_output, bool):
         raise ValueError("invalid_gateway_output_format")
+    json_schema = payload.get("json_schema")
+    if json_schema is not None and (
+        not isinstance(json_schema, dict) or not json_output
+    ):
+        raise ValueError("invalid_gateway_json_schema")
     tokens = payload.get("max_tokens")
     if not 0 <= temperature <= 2 or (
         tokens is not None and (not isinstance(tokens, int) or not 1 <= tokens <= 8192)
@@ -137,8 +193,19 @@ def execute(payload, ask):
         raise ValueError("invalid_gateway_budget")
     text = "\n".join(m["role"] + ": " + m["content"] for m in messages)
     prompt = ChatPrompt(
-        text, messages, evidence=payload.get("evidence", []), json_output=json_output
+        text,
+        messages,
+        evidence=payload.get("evidence", []),
+        json_output=json_output,
+        json_schema=json_schema,
     )
+    streaming = payload.get("stream", False)
+    if not isinstance(streaming, bool) or (
+        streaming
+        and (on_delta is None or json_output or role not in {None, "general", "fast"})
+    ):
+        raise ValueError("invalid_gateway_stream_request")
+    options = {"on_delta": on_delta} if streaming else {}
     return ask(
         prompt,
         model_name=name,
@@ -146,6 +213,7 @@ def execute(payload, ask):
         temperature=temperature,
         max_tokens=tokens,
         owner_scope=payload.get("owner_scope"),
+        **options,
     )
 
 
@@ -156,8 +224,10 @@ class Gateway(socketserver.UnixStreamServer):
 class Handler(socketserver.BaseRequestHandler):
     def handle(self):
         self.request.settimeout(240)
+        streaming = False
         try:
             payload = receive(self.request)
+            streaming = isinstance(payload, dict) and payload.get("stream") is True
             from llm.manager import ask_llm, llama_models_cache, MAX_MODELS_IN_CACHE
 
             if isinstance(payload, dict) and payload.get("operation") == "status":
@@ -178,11 +248,28 @@ class Handler(socketserver.BaseRequestHandler):
                 )
                 return
 
-            result = execute(payload, ask_llm)
-            send(self.request, {"text": result})
-        except (OSError, ValueError, TypeError, KeyError):
+            result = execute(
+                payload,
+                ask_llm,
+                lambda text: send(self.request, {"type": "draft_delta", "text": text}),
+            )
+            if streaming:
+                if not isinstance(result, str) or result.startswith("[Error"):
+                    send(self.request, {"type": "error"})
+                else:
+                    send(self.request, {"type": "done", "text": result})
+            else:
+                send(self.request, {"text": result})
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
             try:
-                send(self.request, {"text": "[Error: local model request failed]"})
+                send(
+                    self.request,
+                    (
+                        {"type": "error"}
+                        if streaming
+                        else {"text": "[Error: local model request failed]"}
+                    ),
+                )
             except OSError:
                 pass
 

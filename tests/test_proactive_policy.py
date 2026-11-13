@@ -112,6 +112,12 @@ def test_controls_enable_disable_snooze_settings_and_why(monkeypatch):
     assert stored["proactive_style"] == "companion"
     assert stored["proactive_interval_hours"] == 3
     assert stored["proactive_ignored_count"] == 0
+    assert "help, assist, ease, fun" in handle_proactive_command(
+        "u1", "/proactive categories help assist ease fun"
+    )
+    assert stored["proactive_categories"] == ["help", "assist", "ease", "fun"]
+    assert stored["proactive_concierge_enabled"] is True
+    assert "concierge enabled" in handle_proactive_command("u1", "/proactive status")
 
 
 def test_candidates_are_grounded_ranked_and_excluded():
@@ -147,3 +153,27 @@ def test_candidates_are_grounded_ranked_and_excluded():
     )
     assert [item["kind"] for item in ranked] == ["deadline", "check_in"]
     assert "urgency=" in ranked[0]["ranking_reason"]
+
+
+def test_categories_filter_candidate_lanes_without_changing_legacy_candidates():
+    candidates = [
+        {
+            "kind": "practical_help",
+            "topic": "project plan",
+            "reason": "Explicit project signal",
+            "confidence": 1.0,
+            "usefulness": 0.8,
+        },
+        {
+            "kind": "entertainment",
+            "topic": "brain break",
+            "reason": "Entertainment opted in",
+            "confidence": 1.0,
+            "usefulness": 0.5,
+        },
+    ]
+    ranked = rank_candidates(candidates, {"proactive_categories": ["fun"]})
+    assert [item["topic"] for item in ranked] == ["brain break"]
+    assert ranked[0]["category"] == "fun"
+
+    assert len(rank_candidates(candidates, {})) == 2
