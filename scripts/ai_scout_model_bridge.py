@@ -14,7 +14,10 @@ import time
 
 
 def ranking_messages(payload):
-    if payload.get("model") != "curie-ai-scout" or payload.get("tools"):
+    if payload.get("model") not in {
+        "curie-ai-scout",
+        "curie-specialist",
+    } or payload.get("tools"):
         raise ValueError("ranking_only_endpoint")
     messages = payload.get("messages")
     if not isinstance(messages, list) or not 1 <= len(messages) <= 16:
@@ -36,7 +39,7 @@ def ranking_messages(payload):
     return result
 
 
-def make_handler(token, ask):
+def make_handler(token, ask, specialist_ask=None):
     gate = threading.BoundedSemaphore(1)
 
     class Handler(BaseHTTPRequestHandler):
@@ -66,7 +69,16 @@ def make_handler(token, ask):
                 {
                     "object": "list",
                     "data": [
-                        {"id": "curie-ai-scout", "object": "model", "owned_by": "local"}
+                        {
+                            "id": "curie-ai-scout",
+                            "object": "model",
+                            "owned_by": "local",
+                        },
+                        {
+                            "id": "curie-specialist",
+                            "object": "model",
+                            "owned_by": "local",
+                        },
                     ],
                 },
             )
@@ -87,7 +99,12 @@ def make_handler(token, ask):
             if not gate.acquire(blocking=False):
                 return self.json(429, {"error": {"message": "scout_busy"}})
             try:
-                text = ask(messages)
+                callback = (
+                    specialist_ask if payload["model"] == "curie-specialist" else ask
+                )
+                if callback is None:
+                    raise ValueError("specialist_not_configured")
+                text = callback(messages)
             except Exception:
                 return self.json(
                     503, {"error": {"message": "local_inference_unavailable"}}
@@ -97,7 +114,7 @@ def make_handler(token, ask):
             common = {
                 "id": "scout-local",
                 "created": int(time.time()),
-                "model": "curie-ai-scout",
+                "model": payload["model"],
             }
             if payload.get("stream"):
                 self.send_response(200)
@@ -149,6 +166,20 @@ def ask_shared_model(messages):
     )
 
 
+def ask_shared_specialist(messages):
+    from llm.chat_prompt import ChatPrompt
+    from llm.local_gateway import request
+
+    prompt = ChatPrompt("\n".join(item["content"] for item in messages), messages)
+    return request(
+        prompt,
+        role="general",
+        temperature=0.1,
+        max_tokens=512,
+        owner_scope="letta-specialist",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--socket", required=True)
@@ -169,7 +200,8 @@ def main():
     os.environ["CURIE_INFERENCE_TIMEOUT_SECONDS"] = "55"
 
     ThreadingHTTPServer(
-        ("127.0.0.1", args.port), make_handler(token, ask_shared_model)
+        ("127.0.0.1", args.port),
+        make_handler(token, ask_shared_model, ask_shared_specialist),
     ).serve_forever()
 
 

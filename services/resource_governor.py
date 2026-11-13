@@ -45,6 +45,7 @@ class BudgetDecision:
 
 
 _DEFAULTS: dict[str, FeatureBudget] = {
+    "letta_specialist": FeatureBudget(8192, 360, 4, 512, True),
     "conversation": FeatureBudget(250_000, 1_800, 240, 96),
     "autonomous_learning": FeatureBudget(32_000, 900, 24, 256, True),
     "x_research": FeatureBudget(1_000, 300, 2, 96, True),

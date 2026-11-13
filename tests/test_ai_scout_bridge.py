@@ -81,3 +81,22 @@ def test_shared_model_uses_real_gateway_prompt(monkeypatch):
         ask_shared_model([{"role": "user", "content": "Rank this packet"}])
         == '{"selected_ids":["one"]}'
     )
+
+
+def test_specialist_alias_uses_existing_general_worker(monkeypatch):
+    from scripts.ai_scout_model_bridge import ask_shared_specialist
+    import llm.local_gateway as gateway
+
+    observed = []
+    monkeypatch.setattr(
+        gateway, "request", lambda prompt, **kw: observed.append(kw) or "Assessment"
+    )
+    assert (
+        ask_shared_specialist([{"role": "user", "content": "Review supplied evidence"}])
+        == "Assessment"
+    )
+    assert observed[0]["role"] == "general"
+    assert observed[0]["max_tokens"] == 512
+    assert ranking_messages(
+        {"model": "curie-specialist", "messages": [{"role": "user", "content": "task"}]}
+    )

@@ -643,6 +643,8 @@ def _build_runtime_registry() -> ToolRegistry:
     from agent.tooling.conversion_tool import ConversionTool
     from agent.tooling.control_tools import EmergencyStopTool
     from agent.tooling.research_tool import ResearchTool
+    from agent.tooling.letta_tools import LettaSpecialistTool
+    from services.letta_specialists import available as letta_available
     from agent.tooling.specialist_tools import (
         SpecialistTool,
         browser,
@@ -1121,6 +1123,45 @@ def _build_runtime_registry() -> ToolRegistry:
                 ),
                 tags=tags,
             )
+        )
+    for specialty, description, hint in (
+        (
+            "workflow",
+            "Compare supplied agent tools and design practical developer workflows with a trained Letta adviser; supply current source evidence for product claims.",
+            r"\b(?:compare|design|review|recommend)\b.{0,60}\b(?:agent workflow|agent setup|agent tools|coding harness)\b|\bletta workflow\b",
+        ),
+        (
+            "engineering",
+            "Review supplied code, architecture or test plans with a trained Letta engineering reviewer. Advice only; no repository reads or edits.",
+            r"\b(?:review|critique)\b.{0,40}\b(?:architecture|test plan|code change|code snippet)\b|\bletta engineering\b",
+        ),
+        (
+            "operations",
+            "Diagnose supplied service symptoms and sanitized logs with a trained Letta operations reviewer. Propose checks; never restart services or change configuration.",
+            r"\b(?:diagnose|triage)\b.{0,40}\b(?:service|outage|failure|latency)\b|\bletta operations\b",
+        ),
+    ):
+        capabilities.insert(
+            0,
+            definition(
+                LettaSpecialistTool(specialty),
+                description=description,
+                input_schema=_TEXT_INPUT,
+                availability_probe=lambda kind=specialty: (
+                    letta_available(kind),
+                    (
+                        None
+                        if letta_available(kind)
+                        else "Local Letta specialist is not configured"
+                    ),
+                ),
+                routing_hints=(hint,),
+                tags=("letta", "review", specialty),
+                resource_policy=ResourcePolicy(
+                    timeout_seconds=100, concurrency_limit=1
+                ),
+                audit_redactions=frozenset({"text"}),
+            ),
         )
     components = (
         ("api", "REST API", "connectors.api", (), "connector", ("api",)),

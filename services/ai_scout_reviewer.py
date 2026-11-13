@@ -1,10 +1,8 @@
 """Optional local Letta ranking. It cannot change evidence or execute tools."""
 
-import asyncio
 import json
 import os
 from pathlib import Path
-import signal
 
 
 def parse_selection(output, candidates):
@@ -86,53 +84,12 @@ async def review(candidates, prefs):
             }
         )
     )
-    proc = None
+    from services.letta_specialists import run_local
+
+    result = await run_local([launcher], prompt, timeout=75)
+    if result.status != "completed":
+        return fallback, "letta_unavailable_deterministic_ranking:" + result.status
     try:
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key
-            in {"HOME", "PATH", "LANG", "USER", "XDG_CONFIG_HOME", "XDG_DATA_HOME"}
-            or key.startswith("LC_")
-        }
-        proc = await asyncio.create_subprocess_exec(
-            launcher,
-            "--tools",
-            "",
-            "--new",
-            "--stateless",
-            "--no-skills",
-            "--no-mods",
-            "--no-system-info-reminder",
-            "--output-format",
-            "json",
-            "-p",
-            "--",
-            prompt,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=75)
-        if proc.returncode or len(stdout) > 262144:
-            raise ValueError("review_failed")
-        return parse_selection(stdout, candidates), "letta_reviewed"
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        return fallback, "letta_unavailable_deterministic_ranking"
-    finally:
-        if proc and proc.returncode is None:
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=3)
-            except asyncio.TimeoutError:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                await proc.wait()
+        return parse_selection(result.text, candidates), "letta_reviewed"
+    except (ValueError, TypeError):
+        return fallback, "letta_unavailable_deterministic_ranking:invalid_selection"
