@@ -9,15 +9,25 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
-def main():
-    from dotenv import load_dotenv
-    from services.vault_runtime import load_runtime_secrets
+def load_environment(root):
+    from dotenv import dotenv_values
 
-    load_dotenv(ROOT / ".env")
     instance = os.getenv("CURIE_INSTANCE", "curie")
     if not instance.replace("_", "").replace("-", "").isalnum():
         raise ValueError("Invalid instance")
-    load_dotenv(ROOT / "instances" / f"{instance}.env", override=True)
+    values = {
+        **dotenv_values(root / ".env"),
+        **dotenv_values(root / "instances" / f"{instance}.env"),
+    }
+    for key, value in values.items():
+        if value is not None:
+            os.environ.setdefault(key, value)
+
+
+def main():
+    from services.vault_runtime import load_runtime_secrets
+
+    load_environment(ROOT)
     if not os.getenv("CURIE_VAULT_CONFIG"):
         raise RuntimeError("Vault configuration is required for this launcher")
     load_runtime_secrets()

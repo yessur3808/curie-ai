@@ -247,5 +247,35 @@ class VaultTests(unittest.TestCase):
                 self.store.delete("key")
 
 
+class LauncherTests(unittest.TestCase):
+    def test_instance_defaults_preserve_explicit_dashboard_settings(self):
+        from scripts.vault_exec import load_environment
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                os.environ,
+                {
+                    "CURIE_INSTANCE": "curie",
+                    "LLM_GENERAL_MODEL": "dashboard-model",
+                    "RUN_TELEGRAM": "false",
+                },
+                clear=True,
+            ),
+        ):
+            root = Path(directory)
+            (root / "instances").mkdir()
+            (root / ".env").write_text(
+                "CURIE_LOCAL_MEMORY_DB=base.sqlite\nLLM_GENERAL_MODEL=base-model\n"
+            )
+            (root / "instances/curie.env").write_text(
+                "CURIE_LOCAL_MEMORY_DB=instance.sqlite\nLLM_GENERAL_MODEL=main-model\nRUN_TELEGRAM=true\n"
+            )
+            load_environment(root)
+            self.assertEqual(os.environ["CURIE_LOCAL_MEMORY_DB"], "instance.sqlite")
+            self.assertEqual(os.environ["LLM_GENERAL_MODEL"], "dashboard-model")
+            self.assertEqual(os.environ["RUN_TELEGRAM"], "false")
+
+
 if __name__ == "__main__":
     unittest.main()
