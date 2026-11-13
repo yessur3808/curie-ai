@@ -47,7 +47,7 @@ async def review(candidates, prefs):
         + json.dumps(
             {
                 "preferences": prefs.get("weights", {}),
-                "preferred_accounts": prefs.get("preferred_accounts", [])[:8],
+                "preferred_accounts": prefs.get("preferred_accounts", [])[:12],
                 "discovery_focus": (
                     "Make practical agent tools, harnesses and reproducible workflow setups a major part "
                     "of useful updates. Favor concrete configurations, tool combinations, remote control, "
@@ -58,6 +58,15 @@ async def review(candidates, prefs):
                     "it; no mandatory daily count, proportion or forced announcement."
                     if prefs.get("discovery_focus") == "agent_workflows"
                     else "General engineering"
+                ),
+                "required_relevance": (
+                    "Prioritize hands-on agent harnesses, coding tools, remote control and persistent-memory setups. "
+                    "Only select concrete tools or reproducible setups with a clear software-engineering use. "
+                    "Exclude generic model news, benchmark headlines and routine maintenance releases. "
+                    "Explain workflow fit, how to try it and adoption trade-offs only when supported by the source. "
+                    "If none qualifies, return empty selected_ids."
+                    if prefs.get("discovery_scope") == "hands_on_agent_tools"
+                    else "Use the supplied reading focus."
                 ),
                 "reading_focus": (
                     "Practical tools and knowledge for a software engineer and technical lead: "

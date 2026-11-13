@@ -600,3 +600,34 @@ def test_workflow_focus_prioritizes_setup_over_general_release():
         NOW,
     )
     assert items[0]["id"] == "setup"
+
+
+def test_strict_workflow_focus_rejects_generic_news_even_without_reviewer():
+    prefs = {"discovery_scope": "hands_on_agent_tools"}
+    generic = release(
+        "generic",
+        excerpt="New agent benchmark improves model evaluation and inference latency.",
+    )
+    assert scout.rank_candidates([generic], {}, prefs, NOW) == []
+    for text in (
+        "A new agent harness with reproducible setup instructions.",
+        "ADE tier list with hands-on comparisons and workflow trade-offs.",
+        "Coding tools with a walkthrough of the development workflow.",
+        "Remote control for coding agents from your phone.",
+        "Persistent memory setup for agents across sessions.",
+    ):
+        item = release("useful", excerpt=text)
+        assert (
+            scout.rank_candidates([item, generic], {}, prefs, NOW)[0]["id"] == "useful"
+        )
+
+
+def test_strict_workflow_search_uses_requested_subjects():
+    prefs = {
+        "preferred_accounts": ["theo", "ThePrimeagen"],
+        "discovery_scope": "hands_on_agent_tools",
+    }
+    queries = scout.discovery_queries(prefs, 2, NOW)
+    assert len(queries) <= 3
+    assert "persistent memory" in queries[-1]
+    assert "from:theo" in queries[0]

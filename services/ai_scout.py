@@ -208,7 +208,7 @@ def discovery_queries(prefs, index, now):
     since = f" since:{(now - timedelta(days=1)).date()}"
     accounts = [
         handle
-        for handle in prefs.get("preferred_accounts", [])[:8]
+        for handle in prefs.get("preferred_accounts", [])[:12]
         if isinstance(handle, str) and re.fullmatch(r"[A-Za-z0-9_]{1,15}", handle)
     ]
     if accounts:
@@ -219,7 +219,17 @@ def discovery_queries(prefs, index, now):
             for group in groups
             if group
         ]
-        queries.append(list(TOPICS.values())[index % len(TOPICS)] + since)
+        focus_queries = (
+            '("agent harness" OR "coding agent" OR "coding tools")',
+            '("remote control" OR "remote coding") (agent OR coding)',
+            '("persistent memory" OR "agent memory") (setup OR tool OR workflow)',
+        )
+        query = (
+            focus_queries[index % len(focus_queries)]
+            if prefs.get("discovery_scope") == "hands_on_agent_tools"
+            else list(TOPICS.values())[index % len(TOPICS)]
+        )
+        queries.append(query + since)
         return queries[:3]
     return [
         list(TOPICS.values())[(index * 3 + n) % len(TOPICS)] + since for n in range(3)
@@ -248,6 +258,21 @@ def workflow_discovery(item):
         re.search(
             r"agent|harness|orchestrat|workflow|developer tool|coding tool|"
             r"t3 code|paseo|devin|hermes|letta|remote coding|persistent memory",
+            text,
+            re.I,
+        )
+    )
+
+
+def hands_on_agent_tool(item):
+    """Require a concrete workflow subject, not a generic AI/agent mention."""
+    text = item.get("title", "") + " " + item.get("excerpt", "")
+    return bool(
+        re.search(
+            r"\b(agent harness|agent development environment|ADE(?:Mark)?|agent orchestration|coding (?:agents?|assistants?|tools?|workflows?)|agentic coding|"
+            r"remote (?:control|coding|agent|access)|persistent (?:memory|agent)|"
+            r"agent memory|memory (?:for|across) agents|claude code|codex|"
+            r"t3 code|paseo|hermes|letta|devin|ade harness)\b",
             text,
             re.I,
         )
@@ -469,6 +494,10 @@ def rank_candidates(items, state, prefs, now):
             # A release existing is not enough to interrupt the reader.
             if engineering_score(raw) < 3 or len(useful_summary(raw)) < 60:
                 continue
+        if prefs.get(
+            "discovery_scope"
+        ) == "hands_on_agent_tools" and not hands_on_agent_tool(raw):
+            continue
         item = dict(raw)
         item["story_key"] = hashlib.sha256(
             " ".join(re.findall(r"[\w.-]+", item["title"].casefold())).encode()
