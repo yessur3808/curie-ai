@@ -371,6 +371,7 @@ jobs:
           CURIE_TASK_ENGINE: python
           CURIE_RUNTIME_KERNEL: python
           CURIE_API_VOICE_RUNTIME: python
+          CURIE_MEDIA_TRANSPORT: python
           CURIE_MODEL_SUPERVISOR: profiled
         run: pytest -q
 
@@ -389,6 +390,14 @@ jobs:
       - name: Install integration dependencies
         run: pip install -r requirements-ci.txt
       - name: Run local component boundaries
+        env:
+          CURIE_CONNECTOR_GATEWAY: python
+          CURIE_DEVICE_RESOLVER: python
+          CURIE_TASK_ENGINE: python
+          CURIE_RUNTIME_KERNEL: python
+          CURIE_API_VOICE_RUNTIME: python
+          CURIE_MEDIA_TRANSPORT: python
+          CURIE_MODEL_SUPERVISOR: profiled
         run: pytest -q -m integration
 
   security-tests:
@@ -406,6 +415,14 @@ jobs:
       - name: Install security test dependencies
         run: pip install -r requirements-ci.txt
       - name: Verify permissions, path safety, audit isolation, and tool schemas
+        env:
+          CURIE_CONNECTOR_GATEWAY: python
+          CURIE_DEVICE_RESOLVER: python
+          CURIE_TASK_ENGINE: python
+          CURIE_RUNTIME_KERNEL: python
+          CURIE_API_VOICE_RUNTIME: python
+          CURIE_MEDIA_TRANSPORT: python
+          CURIE_MODEL_SUPERVISOR: profiled
         run: >-
           pytest -q -m security
           --cov=agent.action_router

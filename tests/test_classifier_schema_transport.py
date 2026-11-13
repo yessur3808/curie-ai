@@ -18,7 +18,7 @@ def prompt():
 
 
 def test_schema_accepts_only_valid_tool_arguments_and_compiles():
-    from llama_cpp import LlamaGrammar
+    LlamaGrammar = pytest.importorskip("llama_cpp").LlamaGrammar
 
     schema = prompt().json_schema
     variants = schema["oneOf"]

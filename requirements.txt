@@ -36,6 +36,7 @@ icrawler==0.6.10
 
 # Voice/Audio processing (core dependencies only)
 # Note: openai-whisper is optional - see requirements-optional.txt
+numpy==2.3.5
 pydub==0.25.1
 SpeechRecognition==3.12.0
 

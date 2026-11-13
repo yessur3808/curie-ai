@@ -18,6 +18,8 @@ gitpython==3.2.1
 beautifulsoup4==4.12.3
 PyGithub==2.6.1
 python-multipart==0.0.32
+numpy==2.3.5
+psutil==7.2.2
 
 # Bounded public AI-news XML feeds.
 defusedxml==0.7.1
