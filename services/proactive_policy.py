@@ -220,6 +220,7 @@ def settings(profile: dict) -> dict:
             1.0, min(float(profile.get("proactive_interval_hours", 24)), 168.0)
         ),
         "style": str(profile.get("proactive_style", "balanced")),
+        "opportunity_only": profile.get("proactive_opportunity_only") is True,
         "concierge_enabled": profile.get("proactive_concierge_enabled") is True,
         "categories": list(dict.fromkeys(categories)),
         "snoozed_until": profile.get("proactive_snoozed_until"),
@@ -453,10 +454,15 @@ def handle_proactive_command(internal_id: str, text: str) -> str | None:
             return f"Why: {reason}"
         cfg = settings(profile)
         quiet = cfg["quiet_hours"]
+        cadence = (
+            "only when there is something relevant to share; no timed check-ins"
+            if cfg["opportunity_only"]
+            else f"cadence {cfg['interval_hours']:g}h"
+        )
         return (
             f"Proactive: {'enabled' if cfg['enabled'] else 'disabled'}; timezone {cfg['timezone']}; "
             f"mode {cfg['style']}; quiet hours {quiet['start']:02d}:00–{quiet['end']:02d}:00; "
-            f"cadence {cfg['interval_hours']:g}h; limits {cfg['daily_max']}/day, "
+            f"{cadence}; limits {cfg['daily_max']}/day, "
             f"{cfg['weekly_max']}/week; topic cooldown {cfg['topic_cooldown_hours']}h; "
             f"concierge {'enabled' if cfg['concierge_enabled'] else 'disabled'}; categories "
             f"{', '.join(cfg['categories']) or 'none'}; "

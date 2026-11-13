@@ -726,7 +726,18 @@ class ProactiveMessagingService:
                             1.0,
                             float(user_info.get("proactive_interval_hours", 24)),
                         )
-                        due = datetime.now(timezone.utc) + timedelta(hours=interval)
+                        profile = (
+                            UserManager.get_user_profile(
+                                str(user_info.get("internal_id"))
+                            )
+                            or {}
+                        )
+                        delay = (
+                            timedelta(seconds=self.check_interval)
+                            if profile.get("proactive_opportunity_only")
+                            else timedelta(hours=interval)
+                        )
+                        due = datetime.now(timezone.utc) + delay
                         upsert_scheduled(
                             {
                                 "id": work["id"],
@@ -1305,7 +1316,9 @@ class ProactiveMessagingService:
             seen.add(internal_id)
             try:
                 profile = UserManager.get_user_profile(internal_id) or {}
-                if profile.get("proactive_style") != "companion":
+                if profile.get("proactive_style") != "companion" or profile.get(
+                    "proactive_opportunity_only"
+                ):
                     continue
                 attempt = profile.get(_COMPANION_DRAFT_ATTEMPT_KEY) or {}
                 next_retry = _parse_utc(attempt.get("next_retry_at"))
@@ -1522,6 +1535,7 @@ class ProactiveMessagingService:
         user_profile = UserManager.get_user_profile(internal_id) or {}
 
         # Skip if user has disabled proactive messaging
+        opportunity_only = user_profile.get("proactive_opportunity_only") is True
         if not user_profile.get("proactive_messaging_enabled", False):
             return
 
@@ -1536,6 +1550,7 @@ class ProactiveMessagingService:
         if (
             user_profile.get("proactive_awaiting_response") is True
             and user_profile.get("proactive_style") != "companion"
+            and not opportunity_only
         ):
             logger.debug(
                 "User %s has not responded to the previous proactive message; skipping",
@@ -1559,7 +1574,7 @@ class ProactiveMessagingService:
                 )
             except ValueError:
                 last_generation = None
-        if isinstance(last_generation, datetime):
+        if isinstance(last_generation, datetime) and not opportunity_only:
             if last_generation.tzinfo is None:
                 last_generation = last_generation.replace(tzinfo=timezone.utc)
             cooldown_hours = max(
@@ -1633,7 +1648,7 @@ class ProactiveMessagingService:
         min_interval_hours = float(min_interval_hours) * min(4, 1 + negative_signals)
 
         # Check if enough time has passed
-        if last_contact_time:
+        if last_contact_time and not opportunity_only:
             hours_since_contact = (now - last_contact_time).total_seconds() / 3600
             if hours_since_contact < min_interval_hours:
                 logger.debug(
@@ -1642,7 +1657,7 @@ class ProactiveMessagingService:
                 return
 
         # Randomly decide whether to send (using class constant)
-        if random.random() > self.message_probability:
+        if not opportunity_only and random.random() > self.message_probability:
             logger.debug(
                 f"Random check skipped proactive message for user {internal_id}"
             )
@@ -1808,6 +1823,8 @@ class ProactiveMessagingService:
         user_profile = UserManager.get_user_profile(internal_id) or {}
         from utils.temporal_context import recent_rows
 
+        opportunity_only = user_profile.get("proactive_opportunity_only") is True
+
         history_rows = recent_rows(
             get_session_manager().get_history(platform, internal_id)
         )
@@ -1879,6 +1896,7 @@ class ProactiveMessagingService:
         if (
             user_profile.get("proactive_predictions_enabled", True)
             and user_profile.get("proactive_style", "balanced") != "companion"
+            and not opportunity_only
         ):
             try:
                 from memory.adaptive import generate_helpful_prediction
@@ -1908,7 +1926,7 @@ class ProactiveMessagingService:
                 logger.debug("Proactive prediction unavailable: %s", exc)
 
         companion_mode = user_profile.get("proactive_style") == "companion"
-        if companion_mode:
+        if companion_mode and not opportunity_only:
             conversational = await self._generate_conversational_candidate(
                 internal_id, user_profile, history
             )
@@ -1923,7 +1941,7 @@ class ProactiveMessagingService:
         recent_topics = list(
             (user_profile.get("proactive_topic_last_sent") or {}).keys()
         )[-3:]
-        if not companion_mode:
+        if not companion_mode and not opportunity_only:
             fallback_topic, fallback = next(
                 (
                     (topic, message)
@@ -1950,7 +1968,22 @@ class ProactiveMessagingService:
             return ""
         from services.proactive_policy import rank_candidates
 
+        if opportunity_only:
+            # A clock tick is not a reason to contact the user. Require an
+            # actual sourced discovery, agenda item, or conversation follow-up.
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.get("evidence") or candidate.get("kind") == "deadline"
+            ]
         ranked = rank_candidates(candidates, user_profile)
+        if opportunity_only:
+            ranked = [
+                candidate
+                for candidate in ranked
+                if delivery_allowed(user_profile, candidate["topic"])[0]
+                and candidate["message"].strip() not in recent_assistant
+            ]
         if not ranked:
             return ""
         selected = ranked[0]
