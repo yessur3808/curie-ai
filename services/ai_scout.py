@@ -795,7 +795,7 @@ class AIScoutWorker:
                 to_deliver = [
                     item for item in latest(owner, now) if item["url"] not in attempted
                 ][:3]
-            if not to_deliver:
+            if not to_deliver and state.get("delivery") != "uncertain":
                 state["delivery"] = "no_new_items"
             # Research may cross midnight; enforce quiet hours at delivery time.
             delivery_now = self.clock() if use_live_clock else now
