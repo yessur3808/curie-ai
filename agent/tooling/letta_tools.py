@@ -9,7 +9,7 @@ class LettaSpecialistTool:
 
     def __init__(self, specialty):
         self.specialty = specialty
-        self.name = f"letta_{specialty}_review"
+        self.name = f"letta_{specialty}_skill"
 
     async def execute(self, params, context):
         result = await letta_specialists.review(

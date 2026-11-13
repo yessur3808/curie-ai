@@ -148,7 +148,7 @@ def test_specialists_are_discoverable_and_routable(enabled):
         ("Diagnose service latency", "operations"),
     ]:
         capability = registry.select(text)
-        assert capability.name == f"letta_{kind}_review"
+        assert capability.name == f"letta_{kind}_skill"
         assert capability.risk == "read_only"
 
 
@@ -185,3 +185,25 @@ async def test_concurrent_specialists_do_not_queue_duplicate_work(enabled, monke
     assert second.status == "busy"
     release.set()
     assert (await first).status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_normal_conversation_adapter_executes_specialist(enabled, monkeypatch):
+    from agent.orchestration.specialist_router import SpecialistRouter
+    from agent.tooling.registry import _build_runtime_registry
+
+    runner = AsyncMock(
+        return_value=specialists.ReviewResult(
+            "completed",
+            "Need the component boundaries before judging the architecture.",
+        )
+    )
+    monkeypatch.setattr(specialists, "run_local", runner)
+    result = await SpecialistRouter(_build_runtime_registry()).handle(
+        "Review this architecture", "owner", "telegram"
+    )
+    assert result is not None
+    assert "component boundaries" in result.text
+    assert runner.await_count == 1
+    argv = runner.call_args.args[0]
+    assert "--system" in argv and "curie-specialist" in argv

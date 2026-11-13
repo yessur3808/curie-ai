@@ -210,6 +210,8 @@ async def review(owner, specialty, text):
                     "local",
                     "--agent",
                     config["agents"][specialty],
+                    "--system",
+                    "curie-specialist",
                     "--reflection-trigger",
                     "off",
                     "--toolset",

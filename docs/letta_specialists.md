@@ -1,7 +1,7 @@
 # Curie's Letta specialists
 
 Curie can request three bounded local assessments through the capability registry:
-`letta_workflow_review`, `letta_engineering_review`, and `letta_operations_review`.
+`letta_workflow_skill`, `letta_engineering_skill`, and `letta_operations_skill`.
 Natural routes include “compare agent tools”, “review this architecture” and
 “diagnose service latency”. Each accepts `text` containing the request and relevant
 sanitized evidence. They do not retrieve files or current web facts themselves.
@@ -46,3 +46,9 @@ Validate with `tests/test_letta_specialists.py`, `tests/test_ai_scout_bridge.py`
 roles on synthetic tasks, with no outbound user messages or production mutations.
 Enable/reload only Curie's main service and the existing model bridge; preserve
 VPN/Meshnet, open X browser and unrelated inference services.
+
+The CLI's blank personality still produced a20KB general-purpose system prompt.
+Install `config/letta-curie-specialist.md` as `~/.letta/agents/curie-specialist.md`;
+the supported `--system curie-specialist` option selects this compact prompt for
+only these agents. This avoids irrelevant coding-harness prefill. The `_skill`
+capability suffix is required by Curie's normal conversation specialist adapter.
