@@ -172,6 +172,16 @@ def ask_shared_specialist(messages):
     from llm.chat_prompt import ChatPrompt
     from llm.local_gateway import request
 
+    # Dedicated advisory endpoint replaces the CLI coding-harness system prompt.
+    system = (
+        (Path(__file__).resolve().parents[1] / "config/letta-curie-specialist.md")
+        .read_text()
+        .split("---", 2)[-1]
+        .strip()
+    )
+    messages = [{"role": "system", "content": system}] + [
+        item for item in messages if item["role"] != "system"
+    ]
     prompt = ChatPrompt("\n".join(item["content"] for item in messages), messages)
     return request(
         prompt,

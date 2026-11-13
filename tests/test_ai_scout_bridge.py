@@ -89,14 +89,23 @@ def test_specialist_alias_uses_existing_fast_worker(monkeypatch):
 
     observed = []
     monkeypatch.setattr(
-        gateway, "request", lambda prompt, **kw: observed.append(kw) or "Assessment"
+        gateway,
+        "request",
+        lambda prompt, **kw: observed.append((prompt, kw)) or "Assessment",
     )
     assert (
-        ask_shared_specialist([{"role": "user", "content": "Review supplied evidence"}])
+        ask_shared_specialist(
+            [
+                {"role": "system", "content": "Unused coding harness"},
+                {"role": "user", "content": "Review supplied evidence"},
+            ]
+        )
         == "Assessment"
     )
-    assert observed[0]["role"] == "fast"
-    assert observed[0]["max_tokens"] == 256
+    assert observed[0][1]["role"] == "fast"
+    assert observed[0][1]["max_tokens"] == 256
+    assert "Unused coding harness" not in str(observed[0][0])
+    assert "Review supplied evidence" in str(observed[0][0])
     assert ranking_messages(
         {"model": "curie-specialist", "messages": [{"role": "user", "content": "task"}]}
     )

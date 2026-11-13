@@ -48,7 +48,8 @@ Enable/reload only Curie's main service and the existing model bridge; preserve
 VPN/Meshnet, open X browser and unrelated inference services.
 
 The CLI's blank personality still produced a20KB general-purpose system prompt.
-Install `config/letta-curie-specialist.md` as `~/.letta/agents/curie-specialist.md`;
-the supported `--system curie-specialist` option selects this compact prompt for
-only these agents. This avoids irrelevant coding-harness prefill. The `_skill`
-capability suffix is required by Curie's normal conversation specialist adapter.
+The dedicated specialist bridge replaces that framework system message with
+`config/letta-curie-specialist.md` before inference, preserving the supplied task
+and curriculum. The installed CLI rejects custom named system presets when
+resuming agents, so no unsupported CLI option is used. The `_skill` capability
+suffix is required by Curie's normal conversation specialist adapter.

@@ -206,4 +206,4 @@ async def test_normal_conversation_adapter_executes_specialist(enabled, monkeypa
     assert "component boundaries" in result.text
     assert runner.await_count == 1
     argv = runner.call_args.args[0]
-    assert "--system" in argv and "curie-specialist" in argv
+    assert argv[argv.index("--agent") + 1] == "agent-local-fixture-engineering"
