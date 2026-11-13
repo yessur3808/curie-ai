@@ -631,3 +631,12 @@ def test_strict_workflow_search_uses_requested_subjects():
     assert len(queries) <= 3
     assert "persistent memory" in queries[-1]
     assert "from:theo" in queries[0]
+
+
+def test_ade_comparison_survives_engineering_filter():
+    item = release(
+        "comparison",
+        excerpt="An ADE comparison based on daily use, with concrete workspace trade-offs and reproducible examples.",
+    )
+    prefs = {"focus": "engineering_lead", "discovery_scope": "hands_on_agent_tools"}
+    assert scout.rank_candidates([item], {}, prefs, NOW)[0]["id"] == "comparison"

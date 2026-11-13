@@ -492,7 +492,12 @@ def rank_candidates(items, state, prefs, now):
             continue
         if prefs.get("focus") == "engineering_lead":
             # A release existing is not enough to interrupt the reader.
-            if engineering_score(raw) < 3 or len(useful_summary(raw)) < 60:
+            relevant_setup = prefs.get(
+                "discovery_scope"
+            ) == "hands_on_agent_tools" and hands_on_agent_tool(raw)
+            if (engineering_score(raw) < 3 and not relevant_setup) or len(
+                useful_summary(raw)
+            ) < 60:
                 continue
         if prefs.get(
             "discovery_scope"
