@@ -79,7 +79,7 @@ async def run_local(argv, prompt, timeout=90):
             "--",
             prompt,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
             env=env,
         )
@@ -95,8 +95,31 @@ async def run_local(argv, prompt, timeout=90):
                 chunks.append(chunk)
             await proc.wait()
 
-        await asyncio.wait_for(collect(), timeout=timeout)
+        error_chunks = []
+
+        async def collect_errors():
+            kept = 0
+            if proc.stderr is None:
+                return
+            while chunk := await proc.stderr.read(8192):
+                if kept < 65536:
+                    error_chunks.append(chunk[: 65536 - kept])
+                    kept += len(error_chunks[-1])
+
+        await asyncio.wait_for(
+            asyncio.gather(collect(), collect_errors()), timeout=timeout
+        )
         if proc.returncode:
+            diagnostic = b"".join(error_chunks).decode(errors="replace")
+            for marker in (
+                "local_inference_timeout",
+                "invalid_ranking_packet",
+                "scout_busy",
+                "local_inference_unavailable",
+                "authentication_required",
+            ):
+                if marker in diagnostic:
+                    return ReviewResult(marker)
             return ReviewResult("process_failed")
         envelope = json.loads(b"".join(chunks))
         if not isinstance(envelope, dict) or envelope.get("is_error"):
@@ -104,6 +127,8 @@ async def run_local(argv, prompt, timeout=90):
         answer = envelope.get("result")
         if not isinstance(answer, str) or not answer.strip():
             return ReviewResult("invalid_output")
+        if answer.lstrip().startswith("[Error"):
+            return ReviewResult("inference_failed")
         return ReviewResult("completed", answer.strip())
     except asyncio.TimeoutError:
         return ReviewResult("timeout")
@@ -159,13 +184,13 @@ async def review(owner, specialty, text):
     decision = resource_governor.admit(
         "letta_specialist",
         owner,
-        512,
+        256,
         diagnostics=recent_diagnostics(
             diagnostic_monitor.snapshot(owner_id=owner, limit=30),
             datetime.now(timezone.utc),
         ),
     )
-    if not decision.allowed or decision.max_tokens < 512:
+    if not decision.allowed or decision.max_tokens < 256:
         return ReviewResult("resource_deferred")
     lock_path = Path.home() / ".cache/curie-letta-specialists.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -197,7 +222,7 @@ async def review(owner, specialty, text):
             resource_governor.record(
                 "letta_specialist",
                 owner,
-                tokens=512,
+                tokens=256,
                 wall_seconds=time.monotonic() - started,
                 outcome=result.status,
             )

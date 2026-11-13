@@ -83,7 +83,7 @@ def test_shared_model_uses_real_gateway_prompt(monkeypatch):
     )
 
 
-def test_specialist_alias_uses_existing_general_worker(monkeypatch):
+def test_specialist_alias_uses_existing_fast_worker(monkeypatch):
     from scripts.ai_scout_model_bridge import ask_shared_specialist
     import llm.local_gateway as gateway
 
@@ -95,8 +95,8 @@ def test_specialist_alias_uses_existing_general_worker(monkeypatch):
         ask_shared_specialist([{"role": "user", "content": "Review supplied evidence"}])
         == "Assessment"
     )
-    assert observed[0]["role"] == "general"
-    assert observed[0]["max_tokens"] == 512
+    assert observed[0]["role"] == "fast"
+    assert observed[0]["max_tokens"] == 256
     assert ranking_messages(
         {"model": "curie-specialist", "messages": [{"role": "user", "content": "task"}]}
     )

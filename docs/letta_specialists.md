@@ -22,11 +22,11 @@ Local setup uses named, distinct Letta agents and a private config at
 are rejected before inference. Config contains no provider credentials.
 
 The existing authenticated localhost scout bridge now advertises `curie-specialist`.
-Its general-role requests reuse Curie's Unix-socket inference worker, capped at512
+Its fast-role requests reuse Curie's Unix-socket inference worker, capped at256
 output tokens; the scout remains fast-role128. Letta agents use model handle
 `openai-compatible/curie-specialist`, toolset none, reflection off, no mods/skills,
 and a new stateless conversation for each assessment. Agents are logical identities,
-not additional resident model workers. Model choice follows Curie's general role.
+not additional resident model workers. Model choice follows Curie's fast role; the initial general-role smoke test failed near the inference deadline. Complex reviews should request more evidence rather than claim deep verification.
 
 One specialist runs at a time across processes, with a nonblocking lock. Governor
 limits:4calls/hour,360seconds/hour,8192reserved output tokens/day. Severe recent

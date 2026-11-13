@@ -105,7 +105,7 @@ async def test_runner_reports_sanitized_causes(monkeypatch, payload, code, expec
     stream.feed_data(json.dumps(payload).encode())
     stream.feed_eof()
     proc = SimpleNamespace(
-        stdout=stream, returncode=code, wait=AsyncMock(return_value=code)
+        stdout=stream, stderr=None, returncode=code, wait=AsyncMock(return_value=code)
     )
     spawn = AsyncMock(return_value=proc)
     monkeypatch.setattr(specialists.asyncio, "create_subprocess_exec", spawn)
@@ -123,7 +123,11 @@ async def test_timeout_kills_only_its_own_process_group(monkeypatch):
         await asyncio.sleep(1)
 
     proc = SimpleNamespace(
-        stdout=SimpleNamespace(read=slow), returncode=None, pid=12345, wait=AsyncMock()
+        stdout=SimpleNamespace(read=slow),
+        stderr=None,
+        returncode=None,
+        pid=12345,
+        wait=AsyncMock(),
     )
     monkeypatch.setattr(
         specialists.asyncio, "create_subprocess_exec", AsyncMock(return_value=proc)

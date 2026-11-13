@@ -105,6 +105,8 @@ def make_handler(token, ask, specialist_ask=None):
                 if callback is None:
                     raise ValueError("specialist_not_configured")
                 text = callback(messages)
+            except TimeoutError:
+                return self.json(503, {"error": {"message": "local_inference_timeout"}})
             except Exception:
                 return self.json(
                     503, {"error": {"message": "local_inference_unavailable"}}
@@ -173,9 +175,9 @@ def ask_shared_specialist(messages):
     prompt = ChatPrompt("\n".join(item["content"] for item in messages), messages)
     return request(
         prompt,
-        role="general",
+        role="fast",
         temperature=0.1,
-        max_tokens=512,
+        max_tokens=256,
         owner_scope="letta-specialist",
     )
 
