@@ -162,7 +162,13 @@ def test_natural_analytics_request_routes_separately_from_operations_dashboard()
     assert opinion is None
 
 
-def test_runtime_prompt_retrieves_relevant_tool_descriptions_not_only_names():
+def test_runtime_prompt_retrieves_relevant_tool_descriptions_not_only_names(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "observatory"
+    _write_observatory_fixture(root)
+    monkeypatch.setenv("CURIE_OBSERVATORY_DATA_DIR", str(root))
+
     manifest = model_capability_prompt(query="How many views did my website get?")
     directives = "\n".join(PersonalityContext({}).build_prompt_directives("Hello"))
 

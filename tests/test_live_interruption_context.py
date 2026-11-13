@@ -5,6 +5,7 @@ from agent.orchestration.contracts import ResponseCandidate
 
 @pytest.mark.asyncio
 async def test_interruption_is_context_not_claim_that_full_reply_was_heard(monkeypatch):
+    monkeypatch.setenv("PERSONA_FILE", "curie.json")
     from services.trained_voice import api
 
     captured = []

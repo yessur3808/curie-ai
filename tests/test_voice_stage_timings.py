@@ -6,6 +6,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_stream_reports_first_audio_and_total_without_text(monkeypatch, tmp_path):
+    monkeypatch.setenv("PERSONA_FILE", "curie.json")
     from services.trained_voice import api
 
     @asynccontextmanager
@@ -31,6 +32,7 @@ async def test_stream_reports_first_audio_and_total_without_text(monkeypatch, tm
 
 @pytest.mark.asyncio
 async def test_chat_times_reply_separately_from_speech(monkeypatch):
+    monkeypatch.setenv("PERSONA_FILE", "curie.json")
     from services.trained_voice import api
     from agent.orchestration.contracts import ResponseCandidate
 

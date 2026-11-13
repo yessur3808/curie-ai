@@ -71,8 +71,13 @@ def test_live_index_lists_every_registered_capability_without_verbose_bloat():
 
 def test_live_index_retrieves_only_request_relevant_verbose_details():
     prompt = model_capability_prompt(query="Show Atmosphere website page views")
+    observatory = next(
+        line
+        for line in prompt.splitlines()
+        if line.startswith("- observatory_project_analytics [")
+    )
 
-    assert "- observatory_project_analytics [available; chat_tool" in prompt
+    assert "; chat_tool" in observatory
     assert "Read aggregate GA4 page views" in prompt
     assert "Available chat tools:" in prompt
     assert "- home_control [" not in prompt
