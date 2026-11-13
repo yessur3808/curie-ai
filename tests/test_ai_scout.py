@@ -241,7 +241,6 @@ def test_engineering_digest_keeps_evidence_and_proposes_rather_than_claims_tests
     [
         {"selected_ids": ["invented"]},
         {"selected_ids": ["one", "one"]},
-        {"selected_ids": []},
         {"url": "https://evil.test"},
     ],
 )
@@ -567,3 +566,37 @@ def test_preferred_x_lead_survives_release_heavy_packet_without_evidence_upgrade
         item["url"] == lead["url"] and item["evidence"] == "unverified_x_lead"
         for item in ranked
     )
+
+
+def test_reviewer_can_abstain():
+    assert parse_selection('{"selected_ids":[]}', [release()]) == []
+
+
+@pytest.mark.asyncio
+async def test_review_abstention_does_not_force_a_digest_or_evening_recap(runtime):
+    service = worker(reviewer=AsyncMock(return_value=([], "letta_reviewed")))
+    await service.run_owner("owner", NOW)
+    await service.run_owner("owner", NOW + timedelta(hours=14))
+    service.send.assert_not_awaited()
+    assert scout.state_for("owner")["delivery"] == "no_new_items"
+    assert scout.latest("owner", NOW) == []
+
+
+def test_workflow_focus_prioritizes_setup_over_general_release():
+    generic = release(
+        "generic",
+        topic="models",
+        excerpt="Model evaluation benchmark support with detailed test results.",
+    )
+    setup = release(
+        "setup",
+        topic="tools",
+        excerpt="A reproducible coding workflow using persistent agents and a remote harness.",
+    )
+    items = scout.rank_candidates(
+        [generic, setup],
+        {},
+        {"focus": "engineering_lead", "discovery_focus": "agent_workflows"},
+        NOW,
+    )
+    assert items[0]["id"] == "setup"

@@ -180,13 +180,23 @@ def set_focus(owner, focus):
 
 
 # Operator-curated discovery sources; familiarity never increases evidence confidence.
-ENGINEERING_ACCOUNTS = ("theo", "ThePrimeagen", "simonw", "addyosmani", "swyx")
+ENGINEERING_ACCOUNTS = (
+    "theo",
+    "ThePrimeagen",
+    "simonw",
+    "addyosmani",
+    "swyx",
+    "steipete",
+    "Teknium",
+    "charlespacker",
+)
 
 
 def set_source_preferences(owner):
     item = preferences(owner)
     item.update(
         preferred_accounts=list(ENGINEERING_ACCOUNTS),
+        discovery_focus="agent_workflows",
         source_basis="user_requested_theo_primeagen_and_similar_engineering_accounts",
         updated_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -230,6 +240,18 @@ def useful_summary(item):
     text = re.sub(r"[#*`<>\[\]]", "", text)
     text = " ".join(text.split()).strip(" :-")
     return text[:240].rsplit(" ", 1)[0] + "…" if len(text) > 240 else text
+
+
+def workflow_discovery(item):
+    text = item.get("title", "") + " " + item.get("excerpt", "")
+    return bool(
+        re.search(
+            r"agent|harness|orchestrat|workflow|developer tool|coding tool|"
+            r"t3 code|paseo|devin|hermes|letta|remote coding|persistent memory",
+            text,
+            re.I,
+        )
+    )
 
 
 def engineering_angle(item):
@@ -491,6 +513,8 @@ def rank_candidates(items, state, prefs, now):
             selected.append(item)
             categories.add(item["topic"])
     selected.extend(item for item in ranked if item not in selected)
+    if prefs.get("discovery_focus") == "agent_workflows":
+        selected.sort(key=lambda item: not workflow_discovery(item))
     preferred = {
         h.casefold() for h in prefs.get("preferred_accounts", []) if isinstance(h, str)
     }
@@ -732,8 +756,6 @@ class AIScoutWorker:
                         p["evidence"] == "unverified_x_lead" for p in approved
                     ):
                         approved.append(item)
-            if not approved:
-                approved = candidates[:1]
             for item in approved:
                 save_personal_item(
                     owner,
@@ -768,11 +790,13 @@ class AIScoutWorker:
             for old in list_personal_items(owner, FINDING)[:-200]:
                 delete_personal_item(owner, old["id"])
             to_deliver = approved
-            if index == len(slots(profile, now)) - 1:
+            if selected and index == len(slots(profile, now)) - 1:
                 attempted = set(state.get("reported_urls", []))
                 to_deliver = [
                     item for item in latest(owner, now) if item["url"] not in attempted
                 ][:3]
+            if not to_deliver:
+                state["delivery"] = "no_new_items"
             # Research may cross midnight; enforce quiet hours at delivery time.
             delivery_now = self.clock() if use_live_clock else now
             await self.deliver(
