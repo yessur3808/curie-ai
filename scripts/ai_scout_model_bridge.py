@@ -185,7 +185,7 @@ def ask_shared_specialist(messages):
     prompt = ChatPrompt("\n".join(item["content"] for item in messages), messages)
     return request(
         prompt,
-        role="fast",
+        role="general",
         temperature=0.1,
         max_tokens=256,
         owner_scope="letta-specialist",

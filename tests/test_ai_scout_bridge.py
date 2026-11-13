@@ -83,7 +83,7 @@ def test_shared_model_uses_real_gateway_prompt(monkeypatch):
     )
 
 
-def test_specialist_alias_uses_existing_fast_worker(monkeypatch):
+def test_specialist_alias_uses_existing_general_worker(monkeypatch):
     from scripts.ai_scout_model_bridge import ask_shared_specialist
     import llm.local_gateway as gateway
 
@@ -102,7 +102,7 @@ def test_specialist_alias_uses_existing_fast_worker(monkeypatch):
         )
         == "Assessment"
     )
-    assert observed[0][1]["role"] == "fast"
+    assert observed[0][1]["role"] == "general"
     assert observed[0][1]["max_tokens"] == 256
     assert "Unused coding harness" not in str(observed[0][0])
     assert "Review supplied evidence" in str(observed[0][0])
