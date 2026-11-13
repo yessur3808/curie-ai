@@ -47,9 +47,11 @@ module.exports = {
         {
             name: `${instanceName}-main`,
             cwd: __dirname,
-            script: path.join(__dirname, "main.py"),
+            script: path.join(__dirname, envConfig.CURIE_VAULT_CONFIG ? "scripts/vault_exec.py" : "main.py"),
             interpreter: path.join(__dirname, ".venv", "bin", "python"),
-            args: [],
+            args: envConfig.CURIE_VAULT_CONFIG
+                ? [path.join(__dirname, ".venv", "bin", "python"), path.join(__dirname, "main.py")]
+                : [],
             instances: 1,
             exec_mode: "fork",
             autorestart: true,
