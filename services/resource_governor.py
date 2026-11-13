@@ -123,6 +123,42 @@ class ResourceGovernor:
         snapshot = dict(diagnostics or {})
         last = dict(snapshot.get("last") or {})
         p95 = float(snapshot.get("p95_latency_ms") or 0)
+        records = snapshot.get("records")
+        if isinstance(records, list):
+            try:
+                pressure_window = max(
+                    60.0,
+                    float(os.getenv("CURIE_GOVERNOR_PRESSURE_WINDOW_SECONDS", "1800")),
+                )
+            except ValueError:
+                pressure_window = 1800.0
+            now = _utcnow()
+            dated_records: list[dict[str, Any]] = []
+            recent_records: list[dict[str, Any]] = []
+            for item in records:
+                if not isinstance(item, Mapping):
+                    continue
+                try:
+                    stamp = datetime.fromisoformat(
+                        str(item.get("recorded_at") or "").replace("Z", "+00:00")
+                    )
+                    if stamp.tzinfo is None:
+                        stamp = stamp.replace(tzinfo=timezone.utc)
+                except (TypeError, ValueError):
+                    continue
+                row = dict(item)
+                dated_records.append(row)
+                age = (now - stamp).total_seconds()
+                if -60 <= age <= pressure_window:
+                    recent_records.append(row)
+            if dated_records:
+                if not recent_records:
+                    return "normal", "runtime pressure is healthy"
+                last = recent_records[-1]
+                latencies = sorted(
+                    float(item.get("latency_ms") or 0) for item in recent_records
+                )
+                p95 = latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
         rss = float(last.get("rss_end_mb") or 0)
         warnings = set(last.get("warnings") or ())
         severe_ms = float(os.getenv("CURIE_GOVERNOR_SEVERE_LATENCY_MS", "18000"))

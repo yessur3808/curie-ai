@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,37 @@ def test_resource_governor_enforces_budget_and_downgrades(monkeypatch, tmp_path)
     assert decision.downgraded
     assert decision.model == "small"
     assert decision.max_tokens <= 400
+
+
+def test_resource_governor_ignores_stale_pressure_but_keeps_recent_pressure(tmp_path):
+    from services.resource_governor import ResourceGovernor
+
+    governor = ResourceGovernor(tmp_path / "budgets.json")
+    stale = {
+        "recorded_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+        "latency_ms": 140_000,
+        "rss_end_mb": 150,
+        "warnings": ["high_latency", "slow_model"],
+    }
+    recent = {
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "latency_ms": 500,
+        "rss_end_mb": 150,
+        "warnings": [],
+    }
+
+    assert governor.pressure_mode(
+        {"last": stale, "p95_latency_ms": 140_000, "records": [stale]}
+    ) == ("normal", "runtime pressure is healthy")
+    assert governor.pressure_mode(
+        {"last": recent, "p95_latency_ms": 140_000, "records": [stale, recent]}
+    ) == ("normal", "runtime pressure is healthy")
+
+    recent["latency_ms"] = 140_000
+    recent["warnings"] = ["high_latency", "slow_model"]
+    assert governor.pressure_mode(
+        {"last": recent, "p95_latency_ms": 140_000, "records": [recent]}
+    ) == ("paused", "runtime pressure is severe")
 
 
 def test_diagnostic_trends_are_dashboard_ready(tmp_path):
