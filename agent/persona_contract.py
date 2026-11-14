@@ -55,9 +55,6 @@ def build_persona_contract(
             .get("enabled")
         ):
             identity += " Natural contractions, soft pauses. Occasional brief French when apt; mostly English. Never force or repeat it."
-        reasoning = str(selected.get("reasoning_summary") or "").strip()
-        if reasoning:
-            identity += f" {reasoning}"
         return identity
     format_rule = (
         "Return exactly the requested machine-readable structure with no extra prose. "

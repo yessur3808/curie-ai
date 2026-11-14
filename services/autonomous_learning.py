@@ -635,6 +635,16 @@ class AutonomousLearningService:
         state = _state(owner_id)
         created: list[dict] = []
 
+        if profile.get("knowledge_library_enabled", False):
+            from services.knowledge_library import scout
+
+            try:
+                created.extend(await scout(owner_id, state, now))
+            except Exception as exc:
+                logger.warning("Knowledge scouting failed: %s", type(exc).__name__)
+            # Persist retry pacing even if a later news/research operation fails.
+            _save_state(owner_id, state)
+
         stale = next(
             (
                 item

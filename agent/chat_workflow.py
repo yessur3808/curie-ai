@@ -3112,6 +3112,14 @@ class ChatWorkflow:
                 prompt = prompt.with_reference({"x_research": x_discoveries})
         except Exception as exc:
             logger.debug("Awareness snapshot unavailable: %s", type(exc).__name__)
+        try:
+            from services.knowledge_library import recall
+
+            knowledge = recall(str(internal_id), user_text, now=now)
+            if knowledge:
+                prompt = prompt.with_reference({"source_linked_knowledge": knowledge})
+        except Exception as exc:
+            logger.debug("Knowledge recall unavailable: %s", type(exc).__name__)
         return prompt
 
     def _sanitize_output(self, response: str) -> str:
