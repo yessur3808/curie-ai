@@ -891,6 +891,10 @@ class AIScoutWorker:
             return
         parts = report_parts(findings, state["coverage"], prefs)
         message = "\n\n".join(parts)
+        from services.research_presentation import compact_research
+
+        message = compact_research(owner, message)
+        parts = [compact_research(owner, part, remember=False) for part in parts]
         key = slot_key + ":delivery"
         if reserve_mutation_attempt(
             owner,

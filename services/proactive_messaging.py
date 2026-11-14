@@ -1753,6 +1753,30 @@ class ProactiveMessagingService:
         # Send via appropriate connector
 
         if platform and external_user_id and platform in self.connectors:
+            if platform == "telegram" and finding_id:
+                from services.research_presentation import compact_research
+                from services.autonomous_learning import list_findings
+
+                finding = next(
+                    (
+                        item
+                        for item in list_findings(str(internal_id))
+                        if item["id"] == finding_id
+                    ),
+                    None,
+                )
+                if finding:
+                    # Candidate text is length-limited; preserve full journal URLs.
+                    message = (
+                        message.split("\n\nSources:", 1)[0]
+                        + "\n\nSources:\n"
+                        + "\n".join(
+                            source["url"]
+                            for source in finding.get("sources", [])
+                            if source.get("url")
+                        )
+                    )
+                message = compact_research(str(internal_id), message)
             connector = self.connectors[platform]
             success = await self._send_via_connector(
                 connector, external_user_id, message

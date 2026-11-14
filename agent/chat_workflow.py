@@ -1219,6 +1219,16 @@ class ChatWorkflow:
         try:
             from services.personal_ops import handle_personal_ops_command
 
+            from services.research_presentation import requested_sources
+
+            source_response = requested_sources(str(internal_id), user_text)
+            if source_response is not None:
+                return {
+                    "text": source_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "research_sources",
+                }
+
             personal_response = handle_personal_ops_command(str(internal_id), user_text)
             if personal_response is not None:
                 return {

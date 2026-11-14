@@ -79,6 +79,7 @@ _STARTUP_NOTIFICATION_LOCK = threading.Lock()
 # handler. Keep every workflow-owned command registered here so it remains
 # reachable instead of being silently discarded by the transport.
 WORKFLOW_COMMANDS = (
+    "sources",
     "agenda",
     "birthday",
     "task",

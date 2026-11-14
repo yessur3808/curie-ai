@@ -334,8 +334,13 @@ class ResearchFollowupWorker:
                 save_personal_item(owner, KIND, item)
                 return
             try:
+                report = item["report"]
+                if item["platform"] == "telegram":
+                    from services.research_presentation import compact_research
+
+                    report = compact_research(owner, report)
                 sent = await asyncio.wait_for(
-                    self.send(item["platform"], target, item["report"]), timeout=30
+                    self.send(item["platform"], target, report), timeout=30
                 )
                 if not sent:
                     raise RuntimeError("delivery_not_confirmed")

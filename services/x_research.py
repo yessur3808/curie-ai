@@ -545,6 +545,9 @@ class XResearchWorker:
         if not target:
             return
         message = digest(findings)
+        from services.research_presentation import compact_research
+
+        message = compact_research(owner, message)
         key = f"x-digest:{local_date}:{count}"
         if reserve_mutation_attempt(
             owner,
