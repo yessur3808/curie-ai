@@ -209,9 +209,6 @@ class PersonalBriefWorker:
                 )
         if not profile.get("portfolio_briefs_enabled"):
             return
-        allowed, _ = delivery_allowed(profile, "portfolio analytics", now)
-        if not allowed:
-            return
         last = profile.get("portfolio_briefs_checked_at")
         if last and now - datetime.fromisoformat(last) < timedelta(hours=1):
             return
@@ -252,6 +249,9 @@ class PersonalBriefWorker:
         )
         if result:
             text, fingerprint = result
+            allowed, _ = delivery_allowed(profile, "portfolio analytics", now)
+            if not allowed:
+                return
             if await self._deliver(owner, f"portfolio-brief:{fingerprint}", text):
                 UserManager.update_user_profile(
                     owner, {"portfolio_briefs_baseline_sent": True}
