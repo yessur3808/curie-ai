@@ -21,6 +21,9 @@ class AssistantBackgroundService:
         from services.x_research import XResearchWorker
 
         self.x_research = XResearchWorker(self._send)
+        from services.personal_briefs import PersonalBriefWorker
+
+        self.personal_briefs = PersonalBriefWorker(self._send)
 
     async def _send(self, platform, target, text):
         connector = self.connectors.get(platform)
@@ -32,6 +35,7 @@ class AssistantBackgroundService:
             (self._awareness_tick, "awareness"),
             (self.research.run_once, "research-followup"),
             (self.x_research.run_once, "x-browser-research"),
+            (self.personal_briefs.run_once, "personal-briefs"),
         ):
             thread = threading.Thread(
                 target=self._loop, args=(callback,), name=f"curie-{name}", daemon=True

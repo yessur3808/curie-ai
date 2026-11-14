@@ -1,6 +1,7 @@
 """Keep research readable while retaining owner-scoped source references."""
 
 import re
+import hashlib
 
 from memory.local_store import list_personal_items, save_personal_item
 
@@ -40,7 +41,21 @@ def compact_research(owner: str, message: str, *, remember: bool = True) -> str:
     text = re.sub(r"(?m)^\s*(?:Also reported|Spotted on X):\s*$", "", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text + "\n\nSources available—ask me for them."
+    text = text.replace("I found something worth sharing, monsieur: ", "")
+    openings = (
+        "This caught my scientific curiosity, monsieur.",
+        "A little discovery for you—this one deserves a closer look.",
+        "Something interesting from my reading. Let’s keep our curiosity and our scepticism together.",
+    )
+    opening = openings[
+        int(hashlib.sha256(text.encode()).hexdigest()[:8], 16) % len(openings)
+    ]
+    return (
+        opening
+        + "\n\n"
+        + text
+        + "\n\nI’ve kept the sources, if you’d like a closer look."
+    )
 
 
 def requested_sources(owner: str, text: str) -> str | None:
