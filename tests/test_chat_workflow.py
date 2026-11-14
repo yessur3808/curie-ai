@@ -91,8 +91,8 @@ def test_prompt_uses_direct_casual_command_style_without_forced_french():
 
     assert "lead with the verified result or blocker" in prompt
     assert "one or two crisp sentences" in prompt
-    assert "It is optional, never a quota" in prompt
-    assert "usually be omitted from commands and technical replies" in prompt
+    assert "optional, never a quota" in prompt
+    assert "shared voice specification above across conversation and commands" in prompt
     assert "like a good, trusted friend" in prompt
     assert "lightly romantic" not in prompt
 

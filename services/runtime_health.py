@@ -54,6 +54,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
     from services.api_voice_runtime import api_voice_runtime_status
     from services.speech_runtime import speech_recognition_status
     from services.self_diagnostics import diagnostic_monitor
+    from services.self_recovery import recovery_status
 
     models = []
     for value in os.getenv("LLM_MODELS", "").split(","):
@@ -164,6 +165,7 @@ def capability_health(workflow_ready: bool = True) -> dict:
         "slos": slo_metrics.snapshot(),
         "pipeline_rollout": PipelineFeatureFlags.from_env().status(),
         "self_diagnostics": diagnostics,
+        "self_recovery": recovery_status(),
     }
     required = (
         capabilities["text"]["ready"],

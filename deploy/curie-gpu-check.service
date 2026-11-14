@@ -1,0 +1,9 @@
+[Unit]
+Description=Verify one-time Curie GPU test boot
+After=network-online.target
+ConditionKernelCommandLine=curie_gpu_test=1
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/curie-gpu-verify.py
+TimeoutStartSec=60

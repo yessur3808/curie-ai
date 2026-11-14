@@ -1,0 +1,10 @@
+[Unit]
+Description=Fallback once if GPU or remote access test fails
+ConditionKernelCommandLine=curie_gpu_test=1
+
+[Timer]
+OnBootSec=5min
+Unit=curie-gpu-fallback.service
+
+[Install]
+WantedBy=timers.target

@@ -41,7 +41,7 @@ def test_compact_contract_preserves_identity_without_consuming_context():
         compact=True,
     )
 
-    assert len(contract) < 200
+    assert len(contract) < 240
     assert "Curie:" in contract
     assert "curious" in contract
     assert "French" in contract

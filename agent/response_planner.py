@@ -190,8 +190,10 @@ def plan_response(text: str, preferences: dict | None = None) -> dict[str, Any]:
     french = preferences.get("french_frequency", "natural")
     formal = bool(_FORMAL.search(text))
     mode = select_response_mode(text, preferences=preferences)
-    if urgent or interaction == "command" or formal or _TECHNICAL.search(text):
+    if urgent or formal or _TECHNICAL.search(text):
         french = "none"
+    elif interaction == "command" and french == "natural":
+        french = "subtle"
     return {
         "mode": mode.value,
         "emotion": emotion,
@@ -230,7 +232,7 @@ def planner_directives(plan: dict[str, Any]) -> list[str]:
         f"acknowledgement={plan['acknowledgement']}, "
         f"next_action={plan['next_action']}, length={plan['length']}.",
         f"- Relational expression: personality={plan['personality']}, affection={plan['affection']}, "
-        f"French={plan['french']}. Do not end with a question by default.",
+        f"French words={plan['french']}; preserve the active voice identity. Do not end with a question by default.",
         "- Use one sincere acknowledgement at most. Never imply need, exclusivity, jealousy, guilt, "
         "human feelings, or that the user should withdraw from other people.",
     ]

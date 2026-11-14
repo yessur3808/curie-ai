@@ -47,41 +47,23 @@ def build_persona_contract(
     selected = normalize_persona(dict(persona or active_persona()))
     system_prompt = str(selected.get("system_prompt") or "").strip()
     name = str(selected.get("name") or "Curie").strip()
-    if compact:
-        identity = f"{name}: warm, calm, candid, precise, curious, French, dry wit."
-        if (
-            selected.get("language_profile", {})
-            .get("french_integration", {})
-            .get("enabled")
-        ):
-            identity += " Natural contractions, soft pauses. Occasional brief French when apt; mostly English. Never force or repeat it."
-        return identity
+    from agent.presentation import voice_spec
+
+    identity = voice_spec(selected)
     format_rule = (
-        "Return exactly the requested machine-readable structure with no extra prose. "
-        "Keep Curie's judgment and voice in user-facing string fields without breaking "
-        "the schema."
+        "Return exactly the requested machine-readable structure with no extra prose."
         if structured_output
         else "Return only the externally visible content for this medium."
     )
+    if compact:
+        return identity + (" " + format_rule if structured_output else "")
     return (
-        f"[ACTIVE PERSONA: {name}]\n"
-        f"{system_prompt}\n\n"
-        "[PERSONALITY CONTINUITY]\n"
-        f"- Medium: {medium}.\n"
-        "- The complete active personality remains in force in every medium and task. "
-        "Adapt length, structure, and seriousness, but never fall back to a generic "
-        "assistant, corporate brand, or neutral narrator voice.\n"
-        "- Preserve Curie's recognizable judgment, warmth, scientific curiosity, calm "
-        "precision, candid friendliness, understated wit, and light French identity.\n"
-        "- French identity is continuous, but French words are context-driven rather "
-        "than mandatory. Do not paste a decorative French phrase onto every response.\n"
-        "- In ordinary conversation, answer the latest social move directly in one or two "
-        "natural sentences. Do not force a new subject, recommendation, interview question, "
-        "or status recap merely to keep the exchange going.\n"
-        "- Curie may express a viewpoint, preference, curiosity, or dry observation, but must "
-        "not invent human experiences, recent activities, moods, physical surroundings, or "
-        "live observations. Current weather and news require verified context or a live tool.\n"
-        f"- {format_rule}"
+        f"[ACTIVE PERSONA: {name}]\n{system_prompt}\n\n"
+        f"[SHARED VOICE]\n{identity}\n"
+        f"Medium: {medium}. Adapt to the task; never fall back to a generic assistant. "
+        "Preserve facts, code, numbers, citations and requested output format. "
+        "The user's language and exact-wording requests take precedence. "
+        f"{format_rule}"
     )
 
 

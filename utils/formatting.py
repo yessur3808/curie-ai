@@ -12,6 +12,7 @@ Different chat platforms render text differently:
 """
 
 import html
+import json
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -130,6 +131,13 @@ def professional_message_layout(text: str) -> str:
     source = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not source:
         return ""
+
+    if source.startswith(("{", "[")):
+        try:
+            json.loads(source)
+            return source
+        except ValueError:
+            pass
 
     parts: list[str] = []
     cursor = 0

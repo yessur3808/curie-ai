@@ -47,7 +47,7 @@ def test_simple_command_stays_brief_and_skips_social_flourishes():
     assert plan["length"] == "brief"
     assert plan["acknowledgement"] == "result_or_blocker_only"
     assert plan["affection"] == "none"
-    assert plan["french"] == "none"
+    assert plan["french"] == "subtle"
 
 
 def test_explicitly_detailed_explanation_gets_deep_length():

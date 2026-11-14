@@ -1,0 +1,17 @@
+#!/bin/sh
+exec tail -n +3 "$0"
+menuentry 'Curie safe boot - existing kernel with framebuffer' --id curie-safe-boot {
+    insmod part_gpt
+    insmod ext2
+    search --no-floppy --fs-uuid --set=root 9462745e-b74f-4f1f-85a6-4ed8acde6ecf
+    linux /vmlinuz-7.0.0-42-generic root=/dev/mapper/ubuntu--vg-ubuntu--lv ro nomodeset
+    initrd /initrd.img-7.0.0-42-generic
+}
+menuentry 'Curie GPU test - kernel 7.0.0-43' --id curie-gpu-test {
+    insmod part_gpt
+    insmod ext2
+    search --no-floppy --fs-uuid --set=root 9462745e-b74f-4f1f-85a6-4ed8acde6ecf
+    linux /vmlinuz-7.0.0-43-generic root=/dev/mapper/ubuntu--vg-ubuntu--lv ro curie_gpu_test=1 panic=30
+    initrd /initrd.img-7.0.0-43-generic
+}
+

@@ -1,0 +1,11 @@
+[Unit]
+Description=Verify GPU test after startup
+ConditionKernelCommandLine=curie_gpu_test=1
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Unit=curie-gpu-check.service
+
+[Install]
+WantedBy=timers.target

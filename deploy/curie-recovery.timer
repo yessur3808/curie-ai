@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Curie recovery health every two minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=2min
+Unit=curie-recovery.service
+
+[Install]
+WantedBy=timers.target

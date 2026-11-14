@@ -31,10 +31,10 @@ class PersonalityContext:
             re.I,
         ):
             return "Honor the requested language or exact wording; do not add French expressions."
-        if runtime.get("mode") in {"urgent", "professional"} or runtime.get(
-            "interaction_kind"
-        ) in {"command", "correction"}:
+        if runtime.get("mode") in {"urgent", "professional"}:
             return "Keep instructions and factual details clear; do not add decorative French."
+        if runtime.get("interaction_kind") in {"command", "correction"}:
+            return "Keep the shared voice and verified result first. A natural brief French expression is optional; never add a decorative suffix."
         phrases = self.persona.get("french_phrases", [])
         if any(
             re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", recent, re.I)
@@ -42,7 +42,7 @@ class PersonalityContext:
             if len(p) > 3
         ):
             return "A recent reply already used French; avoid another French mannerism this turn unless requested."
-        return "Keep English dominant. Add one fitting French touch: bonjour for a greeting, d'accord for agreement, voilà for discovery, or je comprends for empathy. No redundant translation; honor exact wording."
+        return "Keep English dominant and the shared voice consistent. A fitting French expression is optional, never a quota; no redundant translation. Honor exact wording."
 
     def _curie_wit_directives(self, user_text: str, runtime: Dict) -> List[str]:
         """Guide generated conversation, never decorate tool/approval receipts."""

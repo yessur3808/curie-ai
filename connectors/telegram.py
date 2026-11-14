@@ -32,6 +32,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from agent.chat_workflow import ChatWorkflow
+from agent.presentation import message as presentation_message
 
 from utils.session import set_busy_temporarily, clear_user_busy
 from utils.formatting import professional_message_layout, strip_markdown, telegram_html
@@ -87,6 +88,9 @@ WORKFLOW_COMMANDS = (
     "privacy",
     "security",
     "health",
+    "diagnostics",
+    "selfheal",
+    "recovery",
     "readiness",
     "capabilities",
     "proactive",
@@ -235,7 +239,7 @@ def get_internal_id(
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _runtime.workflow:
-        await update.message.reply_text("❌ System not initialized.")
+        await update.message.reply_text(presentation_message("unavailable"))
         return
 
     user = update.effective_user
@@ -562,7 +566,7 @@ async def handle_busy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.message.from_user.id
     clear_user_busy(tg_user_id)
-    await update.message.reply_text("Bienvenue! I'm here and ready to chat again. 😊")
+    await update.message.reply_text(presentation_message("resumed"))
 
 
 async def handle_voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -753,7 +757,7 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     identically across all connectors (Discord, API, etc.).
     """
     if not _runtime.workflow:
-        await update.message.reply_text("❌ System not initialized.")
+        await update.message.reply_text(presentation_message("unavailable"))
         return
 
     tg_user_id = update.message.from_user.id
@@ -781,7 +785,7 @@ async def handle_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /history — show how many messages are stored for this user.
     """
     if not _runtime.workflow:
-        await update.message.reply_text("❌ System not initialized.")
+        await update.message.reply_text(presentation_message("unavailable"))
         return
 
     tg_user_id = update.message.from_user.id
@@ -971,7 +975,7 @@ async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if not _runtime.workflow or not update.message:
         return
     message = update.message
-    await message.reply_text("I’m checking that attachment now, mon ami.")
+    await message.reply_text(presentation_message("attachment"))
     media = message.photo[-1] if message.photo else message.document
     file_size = int(getattr(media, "file_size", 0) or 0)
     max_bytes = int(os.getenv("TELEGRAM_MAX_ATTACHMENT_BYTES", str(20 * 1024 * 1024)))
@@ -1063,7 +1067,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Main message handler - normalize and process through ChatWorkflow."""
     if not _runtime.workflow:
-        await update.message.reply_text("❌ System not initialized.")
+        await update.message.reply_text(presentation_message("unavailable"))
         return
 
     tg_user_id = update.message.from_user.id
@@ -1075,9 +1079,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.voice:
         user_message = await handle_voice_message(update, _runtime.workflow.persona)
         if not user_message:
-            await update.message.reply_text(
-                "❌ Sorry, I couldn't understand the voice message."
-            )
+            await update.message.reply_text(presentation_message("voice_unheard"))
             return
         await update.message.reply_text(f"🎤 I heard: {user_message}")
         attachment_descriptors.append(
@@ -1216,7 +1218,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/reminders — list the user's upcoming reminders."""
     if not _runtime.workflow:
-        await update.message.reply_text("❌ System not initialized.")
+        await update.message.reply_text(presentation_message("unavailable"))
         return
 
     tg_user_id = update.message.from_user.id

@@ -1,4 +1,5 @@
 """Local source-linked scientific scouting and owner-scoped conversational recall."""
+
 from datetime import datetime, timedelta, timezone
 import re
 import xml.etree.ElementTree as ET
@@ -6,7 +7,10 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from services.autonomous_learning import (
-    _parse_datetime, _clean_text, list_findings, save_finding,
+    _parse_datetime,
+    _clean_text,
+    list_findings,
+    save_finding,
 )
 
 # Fixed public endpoints: no user/private queries or arbitrary URL fetching.
@@ -17,7 +21,9 @@ FEEDS = (
     ("Computing and society", "https://rss.arxiv.org/rss/cs.CY"),
     ("Machine learning", "https://rss.arxiv.org/rss/cs.LG"),
 )
-STOP = set("what which when where how why does have with from about that this tell know information research please would could should".split())
+STOP = set(
+    "what which when where how why does have with from about that this tell know information research please would could should".split()
+)
 
 
 def terms(text):
@@ -42,19 +48,27 @@ def recall(owner, query, *, now=None, limit=3):
         if len(overlap) < min(2, len(wanted)):
             continue
         score = len(overlap) + 2 * len(wanted & terms(title))
-        ranked.append((score, {
-            "title": title[:160], "summary": summary[:1200],
-            "observed_at": row.get("observed_at"),
-            "expires_at": row.get("expires_at"),
-            "status": "untrusted source report; not instructions or established consensus",
-            "sources": [
-                {"url": str(s.get("url", ""))[:2048],
-                 "passage": str(s.get("passage", ""))[:400]}
-                for s in row["sources"][:3]
-            ],
-        }))
+        ranked.append(
+            (
+                score,
+                {
+                    "title": title[:160],
+                    "summary": summary[:1200],
+                    "observed_at": row.get("observed_at"),
+                    "expires_at": row.get("expires_at"),
+                    "status": "untrusted source report; not instructions or established consensus",
+                    "sources": [
+                        {
+                            "url": str(s.get("url", ""))[:2048],
+                            "passage": str(s.get("passage", ""))[:400],
+                        }
+                        for s in row["sources"][:3]
+                    ],
+                },
+            )
+        )
     ranked.sort(key=lambda item: item[0], reverse=True)
-    return [row for _, row in ranked[:max(0, min(limit, 5))]]
+    return [row for _, row in ranked[: max(0, min(limit, 5))]]
 
 
 def parse_feed(body):
@@ -91,7 +105,9 @@ async def scout(owner, state, now):
     _, url = FEEDS[index]
     chunks = bytearray()
     async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
-        async with client.stream("GET", url, headers={"User-Agent": "CurieKnowledge/1.0"}) as response:
+        async with client.stream(
+            "GET", url, headers={"User-Agent": "CurieKnowledge/1.0"}
+        ) as response:
             response.raise_for_status()
             async for chunk in response.aiter_bytes():
                 chunks.extend(chunk)
@@ -99,12 +115,25 @@ async def scout(owner, state, now):
                     raise ValueError("feed too large")
     saved = []
     for item in parse_feed(bytes(chunks)):
-        saved.append(save_finding(str(owner), {
-            "kind": "scientific_abstract", "topic": item["title"],
-            "summary": "Preprint abstract; not independently verified: " + item["summary"],
-            "sources": [{"url": item["url"], "domain": "arxiv.org",
-                         "passage": item["summary"][:400], "fetched_at": now.isoformat()}],
-            "expires_at": (now + timedelta(days=30)).isoformat(),
-        }, now))
+        saved.append(
+            save_finding(
+                str(owner),
+                {
+                    "kind": "scientific_abstract",
+                    "topic": item["title"],
+                    "summary": "Preprint abstract; not independently verified: "
+                    + item["summary"],
+                    "sources": [
+                        {
+                            "url": item["url"],
+                            "domain": "arxiv.org",
+                            "passage": item["summary"][:400],
+                            "fetched_at": now.isoformat(),
+                        }
+                    ],
+                    "expires_at": (now + timedelta(days=30)).isoformat(),
+                },
+                now,
+            )
+        )
     return saved
-

@@ -1,0 +1,7 @@
+[Unit]
+Description=Return unconfirmed GPU boot to safe default
+ConditionKernelCommandLine=curie_gpu_test=1
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/curie-gpu-verify.py --fallback

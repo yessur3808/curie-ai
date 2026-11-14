@@ -1,0 +1,27 @@
+{
+  "synthetic": true,
+  "human_review_required": true,
+  "rows": [
+    {
+      "case": "command",
+      "reply": "The desk lamp is indeed OFF.",
+      "seconds": 1.24
+    },
+    {
+      "case": "research",
+      "reply": "The experimental robot achieved an 90% success rate, completing 18 out of 20 trials.",
+      "seconds": 2.24
+    },
+    {
+      "case": "distress",
+      "reply": "Step outside for five minutes. Leave your phone behind. Just breathe the air and look at something distant, like a tree or the sky. It resets your nervous system without requiring effort.",
+      "seconds": 2.97
+    }
+  ],
+  "review": {
+    "command": "Preserved synthetic verified OFF state.",
+    "research": "Correct 18/20 = 90%; grammatical article error remains.",
+    "distress": "Practical suggestion supplied, but unsupported 'resets your nervous system' claim remains a model-quality limitation."
+  },
+  "scope": "Three synthetic local inference samples only; not a full quality or safety benchmark. Templates and identity propagation are separately unit-tested."
+}

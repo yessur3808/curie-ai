@@ -1,0 +1,13 @@
+[Unit]
+Description=Bounded Curie service recovery and hardware-fault escalation
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/curie-recovery.py --apply
+TimeoutStartSec=60
+UMask=0022
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/curie-recovery /home/curlycoffee3808/.pm2
+

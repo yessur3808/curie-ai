@@ -1363,6 +1363,15 @@ def _build_runtime_registry() -> ToolRegistry:
             "Observe Curie's repository, reproduce failures, and prepare tested immutable patches in an isolated worktree; applying changes always requires fresh owner approval and deployment is never autonomous.",
         ),
         (
+            "self_recovery",
+            "Self Recovery Status",
+            "services.self_recovery",
+            (),
+            "workflow",
+            ("selfheal", "recovery", "restart", "health"),
+            "Read /selfheal for the independent watchdog's live status. It can restart persistently errored Curie services within cooldown limits, respects deliberate stops, and can reboot for persistent GPU-reset failures only when its privileged policy is installed and enabled. It cannot execute arbitrary commands or edit code.",
+        ),
+        (
             "adaptive_learning",
             "Controlled Learning",
             "memory.adaptive",

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from memory import UserManager
 from memory.local_store import reserve_mutation_attempt, finish_mutation_attempt
 from services.proactive_policy import delivery_allowed, delivery_updates
+from agent.presentation import message as presentation_message
 
 
 async def refresh_portfolio_cache(projects):
@@ -42,9 +43,7 @@ def weather_brief(report):
     if len(days) != 4:
         raise ValueError("Four forecast days are required")
     today = days[0]
-    lines = [
-        f"Bonjour! A little meteorology before your day begins in {report['city']}."
-    ]
+    lines = [presentation_message("weather", city=report["city"])]
     for index, day in enumerate(days):
         label = (
             "Today"
@@ -126,10 +125,7 @@ def analytics_brief(reports, now, *, initial=False):
         signature.append((name, users, old, views, span))
     if not lines:
         return None
-    text = (
-        "A few numbers caught my eye in your Observatory, monsieur.\n\n"
-        + "\n\n".join(lines)
-    )
+    text = presentation_message("analytics") + "\n\n" + "\n\n".join(lines)
     text += "\n\nThese are analytics signals, not a diagnosis of what caused them."
     return (
         text,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 
 SPEAKER_TAG_PATTERN = re.compile(
     r"^\s*(?:User:|Curie:|Assistant:|Coder:|System:)", re.I | re.M
@@ -478,6 +479,22 @@ class ResponsePolicy:
     def finalize(
         self, response: str, user_text: str, profile=None, history=None
     ) -> str:
+        # Presentation must not rewrite machine data, code, or requested quotes.
+        exact = THINK_PATTERN.sub("", response).strip()
+        if re.search(
+            r"\b(?:verbatim|exact wording|exactly this|code only|json only)\b",
+            user_text,
+            re.I,
+        ):
+            return exact
+        if exact.startswith(("{", "[")):
+            try:
+                json.loads(exact)
+                return exact
+            except ValueError:
+                pass
+        if exact.startswith("```") and exact.endswith("```"):
+            return exact
         sanitized = self.sanitize(response)
         allow_contextual_french = bool(
             self.persona.get("language_profile", {})
@@ -488,7 +505,6 @@ class ResponsePolicy:
                 str(user_text or ""),
                 re.I,
             )
-            and not OPERATIONAL_REPLY_PATTERN.search(str(user_text or ""))
             and not any(
                 FRENCH_MANNERISM_PATTERN.search(m)
                 for m in _recent_assistant_messages(history)
@@ -512,14 +528,10 @@ class ResponsePolicy:
                 FRENCH_MANNERISM_PATTERN.search(message)
                 for message in _recent_assistant_messages(history)
             )
-            if (
-                recent_french
-                or OPERATIONAL_REPLY_PATTERN.search(str(user_text or ""))
-                or re.search(
-                    r"\b(?:english[ -]only|only (?:in )?english|no french|without french)\b",
-                    str(user_text or ""),
-                    re.I,
-                )
+            if recent_french or re.search(
+                r"\b(?:english[ -]only|only (?:in )?english|no french|without french)\b",
+                str(user_text or ""),
+                re.I,
             ):
                 cleaned = _remove_short_french_asides(styled)
                 if cleaned:
@@ -573,7 +585,6 @@ class ResponsePolicy:
         if (
             not EXPLICIT_FRENCH_REQUEST_PATTERN.search(str(user_text or ""))
             or recent_french
-            or OPERATIONAL_REPLY_PATTERN.search(str(user_text or ""))
         ):
             if not (
                 allow_contextual_french

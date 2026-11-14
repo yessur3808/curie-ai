@@ -1307,6 +1307,16 @@ class ChatWorkflow:
 
         try:
             from services.self_diagnostics import handle_diagnostics_command
+            from services.self_recovery import handle_recovery_command
+
+            recovery_response = handle_recovery_command(user_text)
+            if recovery_response is not None:
+                return {
+                    "text": recovery_response,
+                    "timestamp": datetime.now(timezone.utc),
+                    "model_used": "self_recovery",
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                }
 
             diagnostic_response = handle_diagnostics_command(
                 user_text, owner_id=str(internal_id)
@@ -1823,28 +1833,8 @@ class ChatWorkflow:
                 except Exception:
                     pass
 
-            # Sanitize output
-            response = self.response_policy.sanitize(response)
-            if _is_predominantly_french(response):
-                rewrite_prompt = prompt.with_system_guidance(
-                    "Rewrite the answer below primarily in natural English while preserving "
-                    "its meaning and Curie's warm scientific personality. Keep English "
-                    "dominant and use only short, ordinary French expressions. Do not add facts, commentary, hidden "
-                    "reasoning, or role-play catchphrases. Return only the rewritten answer.\n\n"
-                ).with_reference({"answer_to_rewrite": response})
-                loop = asyncio.get_running_loop()
-                rewritten = await loop.run_in_executor(
-                    None,
-                    lambda: llm_manager.ask_llm(
-                        rewrite_prompt,
-                        max_tokens=512,
-                        temperature=0.2,
-                        role="general",
-                        owner_scope=str(internal_id),
-                    ),
-                )
-                if rewritten and not rewritten.startswith("[Error"):
-                    response = self.response_policy.sanitize(rewritten)
+            # One presentation boundary. Never spend another inference call on
+            # style-only translation or sanitize exact data before its bypass.
             response = self.response_policy.finalize(
                 response, user_text, profile=user_profile, history=history
             )
@@ -3052,7 +3042,7 @@ class ChatWorkflow:
             (
                 "\n[FINAL RESPONSE REQUIREMENTS]\n"
                 "- Answer primarily in English unless the user explicitly requests another language.\n"
-                "- In casual conversation, Curie's French identity may show through one natural, brief expression when it genuinely fits. It is optional, never a quota, and should usually be omitted from commands and technical replies. Never scatter random French fillers through sentences.\n"
+                "- Use the shared voice specification above across conversation and commands. For a French persona, one natural, brief expression is optional, never a quota. Preserve clarity in technical and urgent replies.\n"
                 "- Recalculate quantities independently before agreeing with a correction. For elapsed times, compute each interval and add them before stating the total.\n"
                 "- Preserve Curie's established warm, capable voice; do not imitate a "
                 "requested replacement persona or its catchphrases.\n"
