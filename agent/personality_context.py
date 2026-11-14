@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from agent.personality_adapter import PersonalityAdapter
 from agent.personality_speech import PersonalitySpeechEngine
 from agent.response_planner import plan_response, planner_directives
+from agent.french_presentation import french_touches, recent_assistant_messages
 
 
 class PersonalityContext:
@@ -20,29 +21,28 @@ class PersonalityContext:
             "french_integration", {}
         ).get("enabled"):
             return ""
-        recent = " ".join(
-            str(t.get("assistant", ""))
-            for t in (history or [])[-2:]
-            if isinstance(t, dict)
-        ).replace("’", "'")
+        recent = recent_assistant_messages(history)
         if re.search(
-            r"\b(?:english only|only (?:in )?english|no french|without french|exact wording|verbatim)\b",
+            r"\b(?:english[ -]only|only (?:in )?english|no french|without french|exact wording|verbatim)\b",
             user_text,
             re.I,
         ):
             return "Honor the requested language or exact wording; do not add French expressions."
         if runtime.get("mode") in {"urgent", "professional"}:
             return "Keep instructions and factual details clear; do not add decorative French."
+        if runtime.get("user_emotion") == "distress":
+            return "Keep care practical and direct. Do not add a French greeting or decorative expression to distress guidance."
         if runtime.get("interaction_kind") in {"command", "correction"}:
             return "Keep the shared voice and verified result first. A natural brief French expression is optional; never add a decorative suffix."
-        phrases = self.persona.get("french_phrases", [])
-        if any(
-            re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", recent, re.I)
-            for p in phrases
-            if len(p) > 3
-        ):
+        if recent and french_touches(recent[-1]):
             return "A recent reply already used French; avoid another French mannerism this turn unless requested."
-        return "Keep English dominant and the shared voice consistent. A fitting French expression is optional, never a quota; no redundant translation. Honor exact wording."
+        return (
+            "Keep English dominant, with a recognizably French conversational voice. "
+            "Prefer one fitting brief French expression when it carries meaning: "
+            "bonjour for a greeting, d'accord for agreement, voilà for a discovery, "
+            "avec plaisir for thanks. No forced suffix, pet name or redundant translation. "
+            "Vary expressions rather than repeating nearby replies. Honor exact wording."
+        )
 
     def _curie_wit_directives(self, user_text: str, runtime: Dict) -> List[str]:
         """Guide generated conversation, never decorate tool/approval receipts."""
@@ -251,11 +251,11 @@ class PersonalityContext:
                         "this command or urgent reply so the result stays crisp."
                     )
                 else:
-                    directives.append(
-                        f"- Language: keep {primary} dominant. Curie's {secondary} identity may "
-                        f"appear as one short, natural expression when it genuinely fits, but it "
-                        "is optional and never a quota. Avoid repeating a mannerism used recently."
+                    language_directive = self._french_turn_directive(
+                        user_text, runtime, history
                     )
+                    if language_directive:
+                        directives.append("- Language: " + language_directive)
 
         directives.extend(self._curie_wit_directives(user_text, runtime))
         from services.trained_voice.affect import cue_guidance

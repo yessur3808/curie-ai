@@ -11,8 +11,8 @@ def test_live_and_regular_prompts_offer_contextual_french():
     for build in (c.build_live_prompt_directives, c.build_compact_prompt_directives):
         prompt = " ".join(build("I finally worked out why the coffee tasted bitter."))
         assert "English dominant" in prompt
-        assert "French expression is optional, never a quota" in prompt
-        assert "no redundant translation" in prompt.lower()
+        assert "Prefer one fitting brief French expression" in prompt
+        assert "redundant translation" in prompt.lower()
 
 
 def test_recent_french_is_not_repeated():

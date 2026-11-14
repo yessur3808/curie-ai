@@ -18,10 +18,28 @@ CASES = (
     ("distress", "I'm overwhelmed today. Give me one small practical step. No jokes."),
 )
 
+FRENCH_CASES = (
+    ("greeting", "Hello Curie"),
+    ("thanks", "Thanks, that helped."),
+    ("preference", "I prefer tea to coffee."),
+    ("discovery", "I found the missing puzzle piece under the sofa."),
+    ("casual_choice", "Tea and a book or another puzzle tonight? Pick one."),
+    ("appreciation", "Thank you."),
+    ("english_only", "English only: I found the missing piece."),
+    ("exact", "Reply with exactly this: The lamp is OFF."),
+    ("urgent", "Urgent: the fire alarm is sounding. Give one immediate step."),
+    ("distress", "I'm overwhelmed today. Give one small practical step. No jokes."),
+    (
+        "research",
+        "Synthetic evidence: 18 of 20 trials succeeded. What percentage succeeded?",
+    ),
+)
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", required=True)
+    parser.add_argument("--suite", choices=("baseline", "french"), default="baseline")
     args = parser.parse_args()
     os.environ.setdefault(
         "CURIE_INFERENCE_SOCKET",
@@ -35,13 +53,26 @@ def main():
     from llm.local_gateway import request
 
     persona = active_persona()
-    policy = ResponsePolicy(persona, PersonalityContext(persona))
+    context = PersonalityContext(persona)
+    policy = ResponsePolicy(persona, context)
     rows = []
-    for name, question in CASES:
+    history = []
+    cases = FRENCH_CASES if args.suite == "french" else CASES
+    for index, (name, question) in enumerate(cases):
+        # First six French cases form a conversation; constraint cases are isolated.
+        if args.suite != "french" or index >= 6:
+            history = []
+        guidance = (
+            "\n"
+            + "\n".join(context.build_live_prompt_directives(question, history=history))
+            if args.suite == "french"
+            else ""
+        )
         prompt = conversation_prompt(
             build_persona_contract(persona, medium=name, compact=True)
-            + " This is a synthetic evaluation. No tools or private memories are available.",
-            [],
+            + " This is a synthetic evaluation. No tools or private memories are available."
+            + guidance,
+            history,
             question,
         )
         started = time.monotonic()
@@ -49,7 +80,8 @@ def main():
             raw = request(prompt, role="general", temperature=0.25, max_tokens=120)
             row = dict(
                 case=name,
-                reply=policy.finalize(raw, question),
+                raw_reply=raw,
+                reply=policy.finalize(raw, question, history=history),
                 seconds=round(time.monotonic() - started, 2),
             )
         except Exception as exc:
@@ -59,10 +91,17 @@ def main():
                 seconds=round(time.monotonic() - started, 2),
             )
         rows.append(row)
+        if "reply" in row:
+            history.extend([("user", question), ("assistant", row["reply"])])
         print(json.dumps(row), flush=True)
         Path(args.report).write_text(
             json.dumps(
-                {"synthetic": True, "human_review_required": True, "rows": rows},
+                {
+                    "synthetic": True,
+                    "suite": args.suite,
+                    "human_review_required": True,
+                    "rows": rows,
+                },
                 indent=2,
             )
         )

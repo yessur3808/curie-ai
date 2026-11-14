@@ -5,6 +5,12 @@ from __future__ import annotations
 import re
 import json
 
+from agent.french_presentation import (
+    constrain_french_opening,
+    contextual_touch,
+    repeats_french,
+)
+
 SPEAKER_TAG_PATTERN = re.compile(
     r"^\s*(?:User:|Curie:|Assistant:|Coder:|System:)", re.I | re.M
 )
@@ -17,12 +23,12 @@ ACTION_PATTERN = re.compile(
 THINK_PATTERN = re.compile(r"<think>[\s\S]*?</think>|<think>[\s\S]*$", re.I)
 CANNED_FRENCH_SUFFIX_PATTERN = re.compile(
     r"(?:,\s*|\s+)\*?(?:c['’]est\s+(?:dommage|magnifique)|très\s+bien|"
-    r"ça\s+va|voilà|merci|d['’]accord|bien\s+sûr|bon\s+repos)\*?"
+    r"ça\s+va|voilà|merci|d['’]accord|bien\s+sûr|bon\s+repos|avec\s+plaisir)\*?"
     r"(?:,?\s*(?:oui|non))?[?!.]*\s*$",
     re.I,
 )
 CANNED_FRENCH_ASIDE_PATTERN = re.compile(
-    r"\s*\*(?:oui|non|bonjour|merci|voilà|d['’]accord|bien\s+sûr)\b[^*\n]{0,80}\*\s*$",
+    r"\s*\*(?:oui|non|bonjour|merci|voilà|d['’]accord|bien\s+sûr|avec\s+plaisir)\b[^*\n]{0,80}\*\s*$",
     re.I,
 )
 CANNED_ADDRESS_SUFFIX_PATTERN = re.compile(
@@ -202,23 +208,6 @@ def _rewrite_punctuation(text: str) -> str:
     text = re.sub(r"\s*[—–]\s*", ", ", text)
     text = re.sub(r";\s+([A-Z])", lambda match: ". " + match.group(1), text)
     return re.sub(r";\s*", ", ", text)
-
-
-def _recent_assistant_messages(history) -> list[str]:
-    messages: list[str] = []
-    for row in history or ():
-        if isinstance(row, dict):
-            if "assistant" in row:
-                role, content = "assistant", row.get("assistant")
-            else:
-                role, content = row.get("role"), row.get("content")
-        elif isinstance(row, (list, tuple)) and len(row) >= 2:
-            role, content = row[0], row[1]
-        else:
-            continue
-        if str(role).casefold() == "assistant":
-            messages.append(str(content or ""))
-    return messages[-3:]
 
 
 _REDUNDANCY_STOP_WORDS = frozenset(
@@ -505,10 +494,7 @@ class ResponsePolicy:
                 str(user_text or ""),
                 re.I,
             )
-            and not any(
-                FRENCH_MANNERISM_PATTERN.search(m)
-                for m in _recent_assistant_messages(history)
-            )
+            and not repeats_french(sanitized, history)
         )
         styled = self.personality_context.apply_response_style(
             sanitized, user_text, user_profile=profile, history=history
@@ -524,10 +510,7 @@ class ResponsePolicy:
             and not EXPLICIT_FRENCH_REQUEST_PATTERN.search(str(user_text or ""))
             and FRENCH_MANNERISM_PATTERN.search(styled)
         ):
-            recent_french = any(
-                FRENCH_MANNERISM_PATTERN.search(message)
-                for message in _recent_assistant_messages(history)
-            )
+            recent_french = repeats_french(styled, history)
             if recent_french or re.search(
                 r"\b(?:english[ -]only|only (?:in )?english|no french|without french)\b",
                 str(user_text or ""),
@@ -578,10 +561,7 @@ class ResponsePolicy:
                 flags=re.I,
             ).rstrip()
         styled = remove_redundant_opening(styled, str(user_text or ""))
-        recent_french = any(
-            FRENCH_MANNERISM_PATTERN.search(message)
-            for message in _recent_assistant_messages(history)
-        )
+        recent_french = repeats_french(styled, history)
         if (
             not EXPLICIT_FRENCH_REQUEST_PATTERN.search(str(user_text or ""))
             or recent_french
@@ -608,4 +588,8 @@ class ResponsePolicy:
         styled = remove_trailing_fragment(styled)
         styled = normalize_explicit_bullets(styled, str(user_text or ""))
         styled = enforce_line_and_tone_constraints(styled, str(user_text or ""))
-        return condense_priority_answer(styled, str(user_text or ""))
+        styled = condense_priority_answer(styled, str(user_text or ""))
+        styled = constrain_french_opening(
+            styled, str(user_text or ""), self.persona, history
+        )
+        return contextual_touch(styled, str(user_text or ""), self.persona, history)

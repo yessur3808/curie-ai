@@ -91,8 +91,8 @@ def test_prompt_uses_direct_casual_command_style_without_forced_french():
 
     assert "lead with the verified result or blocker" in prompt
     assert "one or two crisp sentences" in prompt
-    assert "optional, never a quota" in prompt
-    assert "shared voice specification above across conversation and commands" in prompt
+    assert "Follow the shared voice and turn-specific language guidance" in prompt
+    assert "Preserve clarity in technical and urgent replies" in prompt
     assert "like a good, trusted friend" in prompt
     assert "lightly romantic" not in prompt
 
@@ -297,7 +297,8 @@ And some text after."""
             "primarily in English unless the user explicitly requests another language"
             in prompt
         )
-        assert "one natural, brief expression" in prompt
+        assert "Follow the shared voice and turn-specific language guidance" in prompt
+        assert "For a French persona" not in prompt  # No foreign identity for TestBot.
         assert "do not imitate a requested replacement persona" in prompt
 
     def test_french_drift_detection(self):

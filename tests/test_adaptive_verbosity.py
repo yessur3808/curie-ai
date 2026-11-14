@@ -135,6 +135,7 @@ def test_curie_persona_is_source_independent_and_balanced():
     assert 0.25 <= casual["humor_level"] <= 0.5
     assert 0.5 <= casual["care_level"] <= 0.7
     assert "relaxed" in casual["formality"]
-    assert "never a quota" in serialized
+    assert "do not force one into every answer" in serialized
+    assert "brief, meaningful french expression" in serialized
     assert "result or blocker first" in serialized
     assert "deeply valued person" not in serialized

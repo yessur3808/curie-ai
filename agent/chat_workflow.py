@@ -1654,7 +1654,10 @@ class ChatWorkflow:
                 )
             if routed_candidate is not None:
                 routed_response = self.response_policy.finalize(
-                    routed_candidate.text, user_text, profile=user_profile
+                    routed_candidate.text,
+                    user_text,
+                    profile=user_profile,
+                    history=routing_history,
                 )
                 sm = get_session_manager()
                 sm.add_message(platform, internal_id, "user", user_text)
@@ -3042,7 +3045,7 @@ class ChatWorkflow:
             (
                 "\n[FINAL RESPONSE REQUIREMENTS]\n"
                 "- Answer primarily in English unless the user explicitly requests another language.\n"
-                "- Use the shared voice specification above across conversation and commands. For a French persona, one natural, brief expression is optional, never a quota. Preserve clarity in technical and urgent replies.\n"
+                "- Follow the shared voice and turn-specific language guidance above. Preserve clarity in technical and urgent replies.\n"
                 "- Recalculate quantities independently before agreeing with a correction. For elapsed times, compute each interval and add them before stating the total.\n"
                 "- Preserve Curie's established warm, capable voice; do not imitate a "
                 "requested replacement persona or its catchphrases.\n"
