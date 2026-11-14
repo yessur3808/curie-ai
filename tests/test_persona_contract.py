@@ -41,8 +41,24 @@ def test_compact_contract_preserves_identity_without_consuming_context():
         compact=True,
     )
 
-    assert len(contract) < 180
+    assert len(contract) < 450
+    assert "first principles" in contract
+    assert "admit uncertainty" in contract
     assert "Curie:" in contract
     assert "curious" in contract
     assert "French" in contract
     assert "dry wit" in contract
+
+
+def test_wisdom_guidance_preserves_curie_identity():
+    persona = load_persona("curie.json")
+    for structured in (False, True):
+        contract = build_persona_contract(
+            persona, medium="Telegram", structured_output=structured
+        )
+        assert "Vision-inspired reflective wisdom" in contract
+        assert "Ultron-inspired incisive analysis" in contract
+        assert "not a model upgrade" in contract
+        assert "warm French identity" in contract
+        if structured:
+            assert "machine-readable structure with no extra prose" in contract
