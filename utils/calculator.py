@@ -24,6 +24,14 @@ _REQUEST = re.compile(
     re.I,
 )
 _SAFE_EXPRESSION = re.compile(r"[\d\s().+*/%^-]+")
+_OUTCOME_PERCENTAGE = re.compile(
+    r"^(?:(?:synthetic )?evidence:\s*)?"
+    r"(?P<part>\d{1,6}) (?:out of|of) (?P<total>\d{1,6}) "
+    r"(?:trials|tests|requests|tasks|attempts|items) "
+    r"(?P<outcome>succeeded|passed|completed|failed)\.\s*"
+    r"What percent(?:age)? (?P=outcome)\?\s*$",
+    re.I,
+)
 
 
 def _evaluate(node, depth: int = 0):
@@ -47,6 +55,16 @@ def _evaluate(node, depth: int = 0):
 
 
 def calculate_request(text: str) -> str | None:
+    outcome = _OUTCOME_PERCENTAGE.fullmatch(text.strip())
+    if outcome:
+        part, total = int(outcome["part"]), int(outcome["total"])
+        if total == 0 or part > total:
+            return None
+        percentage = Decimal(part) / Decimal(total) * 100
+        rounded = percentage.quantize(Decimal("0.01"))
+        prefix = "≈" if rounded != percentage else ""
+        rendered = format(rounded.normalize(), "f")
+        return f"{prefix}{rendered}% {outcome['outcome'].lower()} ({part} of {total})."
     match = _REQUEST.fullmatch(text.strip())
     if not match:
         return None

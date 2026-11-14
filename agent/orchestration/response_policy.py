@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import json
+from agent.conversation_contract import trim_bare_choice, trim_idle_question
 
 from agent.french_presentation import (
     constrain_french_opening,
@@ -501,6 +502,9 @@ class ResponsePolicy:
         sanitized = constrain_french_opening(
             sanitized, str(user_text or ""), self.persona, history
         )
+        if str(self.persona.get("name", "")).casefold() == "curie":
+            sanitized = trim_idle_question(sanitized, str(user_text or ""))
+            sanitized = trim_bare_choice(sanitized, str(user_text or ""))
         styled = self.personality_context.apply_response_style(
             sanitized, user_text, user_profile=profile, history=history
         )

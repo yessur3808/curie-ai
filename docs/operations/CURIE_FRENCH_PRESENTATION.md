@@ -4,6 +4,36 @@ Curie's personality is presentation, not a model-intelligence upgrade. Inference
 remains local. The change adds no translation model, second generation pass,
 background training, or global conversation counter.
 
+## Conversation boundaries
+
+`agent/conversation_contract.py` shares closed acknowledgement detection between
+the social responder, planner, and personality adapter. Phrases such as “Thanks,
+that helped” use the existing local social fast path; extra requests and negative
+feedback are not swallowed. The shared response policy removes idle trailing
+questions only for narrowly recognized casual updates, and caps unrequested
+codas for short everyday “pick one” choices. Explicitly invited conversation,
+clarification, safety caveats, requested reasons, and protected payloads remain.
+These boundaries add no inference pass. They are not a general semantic fact
+checker. Grounding guidance also distinguishes partial progress from completion
+and previous assistant guesses from evidence; it does not guarantee factuality.
+The existing calculator fast path also handles explicit outcome fractions (for
+example, 18 of 20 trials succeeded → 90%), without generating the arithmetic.
+It requires matching reported/requested outcomes and rejects impossible totals
+or compound requests; rounded percentages are explicitly approximate.
+
+`tests/test_conversation_contract.py` covers these contracts. For opt-in local
+behavioral checks with synthetic history, run:
+
+```sh
+.venv/bin/python -m evaluation.presentation_probe --suite grounding \
+  --production-style --report evaluation/reports/grounding-review.json
+```
+
+Review both raw and final replies: unknown completion must stay unknown, explicit
+completion should be acknowledged, previous assistant guesses are not evidence,
+and requested questions should still work. These probes neither send Telegram
+messages nor write synthetic conversations to personal memory.
+
 ## Boundaries
 
 - `assets/personality/curie.json` owns the voice and the opt-in
@@ -47,7 +77,7 @@ reply will have natural personality. Inspect for redundant greetings, misplaced
 French, flattery, and repeated expressions before further tuning.
 
 For a closer generation-path check, add `--production-style`. It uses the actual
-production prompt builder and deterministic social responder, with live recall,
+production prompt builder, calculator, and deterministic social responder, with live recall,
 awareness, and time-network lookups stubbed out. It still does not execute tools,
 write conversation memory, or send Telegram messages. Reports identify the
 response source and include synthetic questions as well as raw/final replies.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from agent.orchestration.contracts import ResponseCandidate
+from agent.conversation_contract import ACKNOWLEDGEMENT
 
 
 class SocialConversationService:
@@ -39,11 +40,7 @@ class SocialConversationService:
         r"\b.{0,100}[.!?]*$",
         re.I | re.S,
     )
-    _ACKNOWLEDGEMENT = re.compile(
-        r"^(?:thanks(?: a lot)?|thank you|cheers|got it|okay|ok|cool|perfect|"
-        r"sounds good|all right|alright)[.! ]*$",
-        re.I,
-    )
+    _ACKNOWLEDGEMENT = ACKNOWLEDGEMENT
     _FACT_CORRECTION = re.compile(
         r"^(?:no[,!. ]+)?(?:there (?:is|are) no(?: such)?\s+.+|"
         r"there(?:['’]s| is) none)[.! ]*$",

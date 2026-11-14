@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from agent.kernel.contracts import ResponseMode
+from agent.conversation_contract import ACKNOWLEDGEMENT
 
 _SIGNALS = {
     "urgency": re.compile(r"\b(?:urgent|emergency|asap|right now|immediately)\b", re.I),
@@ -35,11 +36,7 @@ _CASUAL_QUIP = re.compile(
     r"\b.{0,100}[.!?]*$",
     re.I | re.S,
 )
-_SOCIAL_ACKNOWLEDGEMENT = re.compile(
-    r"^(?:thanks(?: a lot)?|thank you|cheers|got it|okay|ok|cool|perfect|"
-    r"sounds good|all right|alright)[.! ]*$",
-    re.I,
-)
+_SOCIAL_ACKNOWLEDGEMENT = ACKNOWLEDGEMENT
 _CORRECTION = re.compile(
     r"^(?:no[,!. ]+)?(?:there (?:is|are) (?:no|none)\b|there(?:'s| is) none\b|"
     r"that(?:['’]s| is) not\b|i (?:do not|don['’]t) (?:have|need|want)\b|"

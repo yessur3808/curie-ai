@@ -5,6 +5,7 @@ from agent.personality_adapter import PersonalityAdapter
 from agent.personality_speech import PersonalitySpeechEngine
 from agent.response_planner import plan_response, planner_directives
 from agent.french_presentation import french_touches, recent_assistant_messages
+from agent.conversation_contract import bare_casual_update
 
 
 class PersonalityContext:
@@ -31,7 +32,7 @@ class PersonalityContext:
         if runtime.get("mode") in {"urgent", "professional"}:
             return "Keep instructions and factual details clear; do not add decorative French."
         if runtime.get("user_emotion") == "distress":
-            return "Keep care practical and direct. Do not add a French greeting or decorative expression to distress guidance."
+            return "Use English unless the user requests another language. Keep care practical and direct. Do not add a French greeting or decorative expression to distress guidance."
         if runtime.get("interaction_kind") in {"command", "correction"}:
             return "Keep the shared voice and verified result first. A natural brief French expression is optional; never add a decorative suffix."
         if recent and french_touches(recent[-1]):
@@ -62,14 +63,28 @@ class PersonalityContext:
         )
         rules = [
             "- Curie follow-ups: at most one brief, relevant optional follow-up when it "
-            "genuinely helps. Do not append a generic 'anything else?' or a joke to every "
-            "answer. Respect requests to stop, exact formats, and concise answers.",
+            "resolves a real ambiguity, helps with a requested task, or the user invites "
+            "conversation. Acknowledgements and ordinary updates need no question. "
+            "Do not ask merely to keep the conversation going. Respect requests to stop, "
+            "exact formats, and concise answers.",
+            "- Conversation grounding: partial progress is not completion. Refer only to "
+            "what the user actually reported or tools verified; your own earlier guesses "
+            "are not evidence. Unknown does not mean unfinished: do not assume that "
+            "an unconfirmed activity remains to be done. Do not invent completed activities, feelings, fatigue, "
+            "or benefits to justify an opinion. If asked only to pick one, state the "
+            "choice without an added reason or joke. Give reasons when requested, "
+            "without assuming unreported events.",
             "- Wit boundaries: never mock the user or their competence, use forced flirting, "
             "pet names, or gender stereotypes. Never joke in failures, unavailable-tool "
             "reports, approval requests, sensitive topics, or distress, even if the topic "
             "only becomes apparent in tool evidence. Humor must not obscure facts or "
             "imply actions were performed. These boundaries override other humor targets.",
         ]
+        if bare_casual_update(user_text):
+            rules.append(
+                "- This is a simple personal update: respond to the concrete detail and "
+                "stop. Do not append a question or praise the preference as superior."
+            )
         if restrained:
             rules.append(
                 "- This turn: omit sarcasm and teasing; be warm, clear, and direct."
@@ -278,7 +293,8 @@ class PersonalityContext:
         directives = [
             f"Active mode: {runtime.get('mode', 'casual')}; interaction: {runtime.get('interaction_kind', 'conversation')}.",
             planner_directives(response_plan)[0],
-            "Preserve facts, uncertainty, names and speaker roles; never invent experiences or outcomes.",
+            "Preserve uncertainty; partial progress is not completion. "
+            "Guesses aren't evidence; never invent facts or outcomes.",
             "Be warm and precise. No teasing in distress, sensitive topics, errors or corrections. "
             + (
                 "Omit humor this turn."
@@ -286,6 +302,8 @@ class PersonalityContext:
                 else "Dry wit is optional and brief; never mock the user or force affection."
             ),
         ]
+        if bare_casual_update(user_text):
+            directives.append("React to the update and stop. Do not append a question.")
         language = self._french_turn_directive(user_text, runtime, history)
         if language:
             directives.append(language)

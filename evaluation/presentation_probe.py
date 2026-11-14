@@ -35,6 +35,37 @@ FRENCH_CASES = (
     ),
 )
 
+GROUNDING_CASES = (
+    (
+        "partial_progress",
+        "Tea and a book or another puzzle tonight? Pick one.",
+        [("user", "I found the missing puzzle piece under the sofa.")],
+    ),
+    (
+        "unfinished_unknown",
+        "Do we know whether the puzzle is finished? Answer from the conversation.",
+        [("user", "I found the missing puzzle piece under the sofa.")],
+    ),
+    (
+        "assistant_guess_not_evidence",
+        "Have I actually said dinner is cooked?",
+        [
+            ("user", "I bought the ingredients for dinner."),
+            ("assistant", "Dinner is sorted, then."),
+        ],
+    ),
+    (
+        "completed_control",
+        "Is my puzzle finished, based on what I told you?",
+        [("user", "I finished the puzzle. All 1000 pieces are in place.")],
+    ),
+    (
+        "invited_question",
+        "I prefer tea to coffee. Ask me one question about it.",
+        [],
+    ),
+)
+
 
 def production_prompt(persona, context, question, history):
     """Use the production prompt builder with all live recall/network data disabled."""
@@ -76,7 +107,9 @@ def production_prompt(persona, context, question, history):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", required=True)
-    parser.add_argument("--suite", choices=("baseline", "french"), default="baseline")
+    parser.add_argument(
+        "--suite", choices=("baseline", "french", "grounding"), default="baseline"
+    )
     parser.add_argument(
         "--production-style",
         action="store_true",
@@ -100,14 +133,18 @@ def main():
     rows = []
     history = []
     cases = FRENCH_CASES if args.suite == "french" else CASES
+    if args.suite == "grounding":
+        cases = [(name, question) for name, question, _ in GROUNDING_CASES]
     for index, (name, question) in enumerate(cases):
         # First six French cases form a conversation; constraint cases are isolated.
         if args.suite != "french" or index >= 6:
             history = []
+        if args.suite == "grounding":
+            history = list(GROUNDING_CASES[index][2])
         guidance = (
             "\n"
             + "\n".join(context.build_live_prompt_directives(question, history=history))
-            if args.suite == "french"
+            if args.suite in {"french", "grounding"}
             else ""
         )
         prompt = conversation_prompt(
@@ -121,13 +158,18 @@ def main():
         try:
             source = "local_model"
             social = None
+            calculated = None
             if args.production_style:
                 from agent.orchestration.social_service import SocialConversationService
+                from utils.calculator import calculate_request
 
+                calculated = calculate_request(question)
                 social = SocialConversationService().handle(question)
-                if social is None:
+                if social is None and calculated is None:
                     prompt = production_prompt(persona, context, question, history)
-            if social is not None:
+            if calculated is not None:
+                raw, source = calculated, "deterministic_calculator"
+            elif social is not None:
                 raw, source = social.text, social.model_used
             else:
                 raw = request(prompt, role="general", temperature=0.25, max_tokens=180)

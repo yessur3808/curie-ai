@@ -1,5 +1,6 @@
 import re
 from typing import Dict, List, Optional
+from agent.conversation_contract import ACKNOWLEDGEMENT
 
 
 class PersonalityAdapter:
@@ -32,11 +33,7 @@ class PersonalityAdapter:
         r"[?!. ]*$|^(?:hi+|hello+|hey+|bonjour)(?:\s+curie)?[?!. ]*$",
         re.IGNORECASE,
     )
-    _SOCIAL_ACKNOWLEDGEMENT_PATTERNS = re.compile(
-        r"^(?:thanks(?: a lot)?|thank you|cheers|got it|okay|ok|cool|perfect|"
-        r"sounds good|all right|alright)[.! ]*$",
-        re.IGNORECASE,
-    )
+    _SOCIAL_ACKNOWLEDGEMENT_PATTERNS = ACKNOWLEDGEMENT
     _CORRECTION_PATTERNS = re.compile(
         r"^(?:no[,!. ]+)?(?:there (?:is|are) (?:no|none)\b|there(?:'s| is) none\b|"
         r"that(?:['’]s| is) not\b|i (?:do not|don['’]t) (?:have|need|want)\b|"
