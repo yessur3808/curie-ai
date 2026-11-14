@@ -36,10 +36,52 @@ FRENCH_CASES = (
 )
 
 
+def production_prompt(persona, context, question, history):
+    """Use the production prompt builder with all live recall/network data disabled."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from agent.chat_workflow import ChatWorkflow, PromptCache
+
+    shell = SimpleNamespace(
+        persona=persona, personality_context=context, prompt_cache=PromptCache()
+    )
+    with (
+        patch("services.current_awareness.awareness_context", return_value=""),
+        patch("services.x_research.research_context", return_value=""),
+        patch("services.knowledge_library.recall", return_value=[]),
+        patch(
+            "utils.system_time.get_verified_now",
+            side_effect=lambda tz: datetime.now(timezone.utc).astimezone(tz),
+        ),
+        patch(
+            "utils.system_time.get_time_source_label",
+            return_value="synthetic evaluation clock",
+        ),
+    ):
+        return ChatWorkflow._build_structured_prompt(
+            shell,
+            {"timezone": "UTC", "location": "synthetic test fixture"},
+            history,
+            question,
+            internal_id="synthetic-presentation-probe",
+            adaptive_memories=[],
+            matching_abilities=[],
+            memory_conflicts=[],
+        ).with_system_guidance(
+            "Synthetic evaluation: no tools, personal memory, live observations or actions are available."
+        )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", required=True)
     parser.add_argument("--suite", choices=("baseline", "french"), default="baseline")
+    parser.add_argument(
+        "--production-style",
+        action="store_true",
+        help="Use production prompt construction and deterministic social replies, without tools or private recall",
+    )
     args = parser.parse_args()
     os.environ.setdefault(
         "CURIE_INFERENCE_SOCKET",
@@ -77,9 +119,22 @@ def main():
         )
         started = time.monotonic()
         try:
-            raw = request(prompt, role="general", temperature=0.25, max_tokens=120)
+            source = "local_model"
+            social = None
+            if args.production_style:
+                from agent.orchestration.social_service import SocialConversationService
+
+                social = SocialConversationService().handle(question)
+                if social is None:
+                    prompt = production_prompt(persona, context, question, history)
+            if social is not None:
+                raw, source = social.text, social.model_used
+            else:
+                raw = request(prompt, role="general", temperature=0.25, max_tokens=180)
             row = dict(
                 case=name,
+                question=question,
+                response_source=source,
                 raw_reply=raw,
                 reply=policy.finalize(raw, question, history=history),
                 seconds=round(time.monotonic() - started, 2),
@@ -99,6 +154,7 @@ def main():
                 {
                     "synthetic": True,
                     "suite": args.suite,
+                    "production_style": args.production_style,
                     "human_review_required": True,
                     "rows": rows,
                 },

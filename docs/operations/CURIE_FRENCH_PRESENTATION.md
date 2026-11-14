@@ -46,6 +46,17 @@ synthetic output for human review. Passing unit tests does not prove every real
 reply will have natural personality. Inspect for redundant greetings, misplaced
 French, flattery, and repeated expressions before further tuning.
 
+For a closer generation-path check, add `--production-style`. It uses the actual
+production prompt builder and deterministic social responder, with live recall,
+awareness, and time-network lookups stubbed out. It still does not execute tools,
+write conversation memory, or send Telegram messages. Reports identify the
+response source and include synthetic questions as well as raw/final replies.
+
+The November 14 conversation tests caught a misplaced greeting consuming the
+short-answer budget and hiding the practical advice. Known French openings are
+now constrained before sentence trimming. They also caught a model copying an
+unrelated stock joke from style examples; those examples were removed.
+
 Restart the relevant application process to load Python and cached persona
 changes; no inference-worker restart or host reboot is required. To disable only
 the deterministic insertion/normalization, set `contextual_surface_fallback` to

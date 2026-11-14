@@ -180,6 +180,15 @@ def test_generated_distress_greeting_is_removed_without_changing_guidance():
     )
 
 
+def test_distress_greeting_does_not_consume_the_practical_answer_budget():
+    result = policy().finalize(
+        "Bonjour. I hear you. Put one small task on paper. Leave the rest for later.",
+        "I'm overwhelmed today. Give me one small practical step. No jokes.",
+    )
+    assert "Put one small task on paper." in result
+    assert "Bonjour" not in result
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "history,expected",

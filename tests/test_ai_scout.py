@@ -231,7 +231,8 @@ def test_engineering_digest_keeps_evidence_and_proposes_rather_than_claims_tests
     assert all(item["url"] in message for item in items[:3])
     assert items[3]["url"] not in message
     assert "Unverified X lead" in message
-    assert message.count("**Try this:**") == 3
+    assert "**Try this:**" not in message  # No repeated category-level filler.
+    assert "**Why it matters:**" not in message
     assert "Not independently tested" in message
     assert len(message) < 4096
 

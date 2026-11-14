@@ -496,6 +496,11 @@ class ResponsePolicy:
             )
             and not repeats_french(sanitized, history)
         )
+        # Drop a misplaced greeting before the sentence budget, otherwise it can
+        # consume the budget and cause the actual practical answer to be clipped.
+        sanitized = constrain_french_opening(
+            sanitized, str(user_text or ""), self.persona, history
+        )
         styled = self.personality_context.apply_response_style(
             sanitized, user_text, user_profile=profile, history=history
         )
@@ -589,7 +594,4 @@ class ResponsePolicy:
         styled = normalize_explicit_bullets(styled, str(user_text or ""))
         styled = enforce_line_and_tone_constraints(styled, str(user_text or ""))
         styled = condense_priority_answer(styled, str(user_text or ""))
-        styled = constrain_french_opening(
-            styled, str(user_text or ""), self.persona, history
-        )
         return contextual_touch(styled, str(user_text or ""), self.persona, history)

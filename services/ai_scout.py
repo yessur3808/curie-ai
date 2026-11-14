@@ -238,7 +238,9 @@ def discovery_queries(prefs, index, now):
 
 def useful_summary(item):
     """Keep a concrete source claim, dropping release plumbing and attribution noise."""
-    text = _clean_text(item.get("excerpt", ""), 1500)
+    from services.scout_novelty import substantive_text
+
+    text = _clean_text(substantive_text(item), 1500)
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"\s+by @?[\w-]+(?:\s+in)?", "", text)
     text = re.sub(
@@ -472,7 +474,7 @@ async def fetch_releases(now, cache):
     return items, errors
 
 
-def rank_candidates(items, state, prefs, now):
+def rank_candidates(items, state, prefs, now, history=()):
     seen = set(state.get("seen_urls", []))
     stories = set(state.get("seen_stories", []))
     unique = {}
@@ -491,6 +493,10 @@ def rank_candidates(items, state, prefs, now):
         }:
             continue
         if prefs.get("focus") == "engineering_lead":
+            from services.scout_novelty import release_noise
+
+            if release_noise(raw):
+                continue
             # A release existing is not enough to interrupt the reader.
             relevant_setup = prefs.get(
                 "discovery_scope"
@@ -535,6 +541,10 @@ def rank_candidates(items, state, prefs, now):
         )
         unique.setdefault(item["url"], item)
     ranked = sorted(unique.values(), key=lambda item: (-item["score"], item["url"]))
+    if prefs.get("focus") == "engineering_lead":
+        from services.scout_novelty import novel_engineering
+
+        ranked = novel_engineering(ranked, history)
     novel = []
     for item in ranked:
         if item["story_key"] not in stories:
@@ -587,14 +597,21 @@ def report_parts(items, coverage, prefs=None):
             else "Source announcement"
         )
         lines = [f"**Curie’s engineering brief · {index}/{min(3, len(items))}**"]
-        if index == 1:
+        engineering = (prefs or {}).get("focus") == "engineering_lead"
+        if index == 1 and not engineering:
             lines.append("A little inspiration for your next build, monsieur.")
         lines.extend(
             [
                 f"\n**{title}**",
                 f"\n**What changed:** {summary or 'See the source for details.'}",
-                f"\n**Why it matters:** {why}",
-                f"\n**Try this:** {experiment}",
+                *(
+                    []
+                    if engineering
+                    else [
+                        f"\n**Why it matters:** {why}",
+                        f"\n**Try this:** {experiment}",
+                    ]
+                ),
                 f"\n[{label}]({item['url']}) · Not independently tested.",
             ]
         )
@@ -764,7 +781,11 @@ class AIScoutWorker:
                 x_posts=len(posts), release_items=len(items), feed_errors=errors
             )
             candidates = rank_candidates(
-                items + x_candidates(posts, now), state, preferences(owner), now
+                items + x_candidates(posts, now),
+                state,
+                preferences(owner),
+                now,
+                history=list_personal_items(owner, FINDING)[-200:],
             )
             # X leads remain explicitly unverified in all storage and output.
             # Agent suggestions cannot invent URLs, facts, sources, or access claims.
@@ -881,6 +902,18 @@ class AIScoutWorker:
             return
         prefs = preferences(owner)
         if prefs.get("focus") == "engineering_lead":
+            from services.scout_novelty import novel_engineering
+
+            reported = set(state.get("reported_urls", []))
+            findings = novel_engineering(
+                [item for item in findings if item.get("url") not in reported],
+                [
+                    item
+                    for item in list_personal_items(owner, FINDING)
+                    if item.get("url") in reported
+                ],
+                one_per_publisher=True,
+            )
             findings = [
                 item
                 for item in findings

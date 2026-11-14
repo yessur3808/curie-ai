@@ -48,3 +48,11 @@ def test_other_personalities_do_not_inherit_french():
         )
         == ""
     )
+
+
+def test_wit_guidance_has_no_copyable_unrelated_joke():
+    prompt = " ".join(
+        context().build_compact_prompt_directives("I prefer tea to coffee.")
+    )
+    assert "bugs can wait" not in prompt
+    assert "Ground any wit in the current conversation" in prompt
