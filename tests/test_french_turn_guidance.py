@@ -10,9 +10,9 @@ def test_live_and_regular_prompts_offer_contextual_french():
     c = context()
     for build in (c.build_live_prompt_directives, c.build_compact_prompt_directives):
         prompt = " ".join(build("I finally worked out why the coffee tasted bitter."))
-        assert "one fitting French touch" in prompt
-        assert "d'accord" in prompt
-        assert "No redundant translation" in prompt
+        assert "English dominant" in prompt
+        assert "French expression is optional, never a quota" in prompt
+        assert "no redundant translation" in prompt.lower()
 
 
 def test_recent_french_is_not_repeated():
@@ -35,9 +35,10 @@ def test_language_and_task_constraints_win():
         "Use this exact wording", {"mode": "casual"}
     )
     assert "factual details" in c._french_turn_directive("Help", {"mode": "urgent"})
-    assert "factual details" in c._french_turn_directive(
-        "Do it", {"interaction_kind": "command"}
-    )
+    command = c._french_turn_directive("Do it", {"interaction_kind": "command"})
+    assert "verified result first" in command
+    assert "French expression is optional" in command
+    assert "never add a decorative suffix" in command
 
 
 def test_other_personalities_do_not_inherit_french():

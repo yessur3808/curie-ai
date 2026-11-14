@@ -151,8 +151,8 @@ Write a concise, practical day-by-day itinerary in this format:
 EXAMPLE — London, 2 days, moderate
 Day 1: AM: Tower of London → Tower Bridge walk. PM: Thames Southbank. Eve: West End theatre.
 Day 2: AM: British Museum (free). PM: Camden Market. Eve: Traditional pub dinner.
-Food: Fish & chips (~£12), afternoon tea (~£30), pie & mash (~£10).
-Tips: Use Oyster card. Book free museums in advance. Walk between nearby sights.
+Food: Fish & chips (~£12), afternoon tea (~£30).
+Tips: Book ahead; group nearby sights.
 Budget: ~£120/day (accommodation £70, food £30, activities £20).
 
 TRIP — {destination} | {duration} | {budget_tier}

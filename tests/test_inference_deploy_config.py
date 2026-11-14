@@ -6,6 +6,31 @@ import subprocess
 import pytest
 
 
+def test_main_spaces_out_bounded_cold_boot_retries(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required to evaluate the PM2 ecosystem config")
+    source = Path(__file__).parents[1] / "ecosystem.config.js"
+    config = tmp_path / "ecosystem.config.js"
+    shutil.copyfile(source, config)
+    result = subprocess.run(
+        [
+            node,
+            "-e",
+            f"console.log(JSON.stringify(require({json.dumps(str(config))})))",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={},
+    )
+    app = json.loads(result.stdout)["apps"][0]
+    assert app["restart_delay"] == 10000
+    assert app["min_uptime"] == 30000
+    assert app["max_restarts"] == 18
+    assert app["autorestart"] is True
+
+
 def test_inference_worker_receives_npu_configuration(tmp_path):
     node = shutil.which("node")
     if not node:

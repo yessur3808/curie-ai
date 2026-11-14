@@ -5,6 +5,8 @@ from unittest.mock import patch
 import httpx
 import pytest
 
+from agent.persona_contract import active_persona
+from agent.presentation import voice_spec
 from memory import local_store
 from services.x_autopost import (
     HARD_DAILY_CAP,
@@ -80,7 +82,9 @@ def test_autopost_prompt_uses_complete_active_curie_persona():
     )
 
     assert "[ACTIVE PERSONA: Curie]" in prompt
-    assert "complete active personality remains in force" in prompt
+    persona = active_persona()
+    assert persona["system_prompt"] in prompt
+    assert voice_spec(persona) in prompt
     assert "public X post" in prompt
     assert "light French identity" in prompt
     assert "operator-approved topic: science" in prompt

@@ -56,6 +56,11 @@ module.exports = {
             exec_mode: "fork",
             autorestart: true,
             watch: false,
+            // The credential vault may become ready after PM2 at cold boot.
+            // Space out bounded retries instead of burning them in seconds.
+            restart_delay: 10000,
+            min_uptime: 30000,
+            max_restarts: 18,
             max_memory_restart: "12G",
             env: {
                 ...envConfig,
