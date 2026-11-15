@@ -4,7 +4,6 @@ import pytest
 
 from agent.conversation_contract import (
     bare_casual_update,
-    trim_bare_choice,
     trim_idle_question,
 )
 from agent.orchestration.response_policy import ResponsePolicy
@@ -24,6 +23,9 @@ from agent.routing import route_request
         "Thanks a lot, that makes sense.",
         "Cheers, much appreciated.",
         "Thanks. That’s helpful!",
+        "Thanks for the weather update",
+        "Thank you for that explanation.",
+        "Thanks for the engineering brief.",
     ],
 )
 def test_closed_gratitude_uses_consistent_fast_path_without_question(text):
@@ -51,6 +53,8 @@ def test_closed_gratitude_uses_consistent_fast_path_without_question(text):
         "Thank you for nothing.",
         "Thanks, that helped?",
         "Thank you. Please remind me tomorrow.",
+        "Thanks for the weather update. Will it rain tomorrow?",
+        "Thanks for the update, but that was wrong.",
     ],
 )
 def test_gratitude_does_not_swallow_requests_or_negative_feedback(text):
@@ -68,16 +72,16 @@ def test_gratitude_does_not_swallow_requests_or_negative_feedback(text):
         (
             "I prefer tea to coffee.",
             "D'accord. Tea it is. Earl Grey or something herbal?",
-            "D'accord. Tea it is.",
+            "D'accord. Tea it is. Earl Grey or something herbal?",
         ),
         (
             "English only: I found the missing piece.",
             "That is a relief. What was it?",
-            "That is a relief.",
+            "That is a relief. What was it?",
         ),
     ],
 )
-def test_idle_questions_removed_without_extra_inference(text, raw, expected):
+def test_only_generic_idle_questions_are_removed(text, raw, expected):
     assert trim_idle_question(raw, text) == expected
 
 
@@ -110,8 +114,8 @@ def test_update_directive_and_grounding_reach_every_prompt_path():
         context.build_compact_prompt_directives,
     ):
         directives = " ".join(method("I prefer tea to coffee."))
+        assert "optional" in directives
         assert "partial progress is not completion" in directives
-        assert "stop. Do not append a question" in directives
 
 
 def test_other_personas_are_not_given_curie_question_policy():
@@ -127,18 +131,20 @@ def test_other_personas_are_not_given_curie_question_policy():
 
 
 @pytest.mark.parametrize(
-    "raw,expected",
+    "raw",
     [
-        ("Another puzzle. The sofa won’t finish itself.", "Another puzzle."),
-        ("A book. You've earned a rest.", "A book."),
-        ("D’accord. A book. You've earned a rest.", "D’accord. A book."),
-        ("Tea and a book.", "Tea and a book."),
+        "Another puzzle. Try one with fewer pieces this time.",
+        "A book. There are no pieces to lose under the sofa.",
+        "Tea and a book.",
     ],
 )
-def test_bare_choice_has_no_unrequested_coda(raw, expected):
+def test_bare_choice_does_not_strip_a_useful_reason(raw):
+    persona = active_persona()
     assert (
-        trim_bare_choice(raw, "Tea and a book or another puzzle tonight? Pick one.")
-        == expected
+        ResponsePolicy(persona, PersonalityContext(persona)).finalize(
+            raw, "Tea and a book or another puzzle tonight? Pick one."
+        )
+        == raw
     )
 
 
@@ -159,4 +165,8 @@ def test_bare_choice_has_no_unrequested_coda(raw, expected):
     ],
 )
 def test_choice_contract_preserves_explanations_safety_and_payloads(question, reply):
-    assert trim_bare_choice(reply, question) == reply
+    persona = active_persona()
+    assert (
+        ResponsePolicy(persona, PersonalityContext(persona)).finalize(reply, question)
+        == reply
+    )

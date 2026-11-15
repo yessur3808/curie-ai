@@ -50,6 +50,36 @@ class ModelConversationService:
         return False
 
     @staticmethod
+    def repeats_previous_answer(prompt, answer, user_text):
+        """Catch a substantial verbatim echo, not a valid short answer or quotation."""
+        if (
+            not isinstance(answer, str)
+            or len(answer.strip()) < 80
+            or getattr(prompt, "evidence", ())
+            or "```" in answer
+            or re.search(
+                r"\b(?:repeat|again|verbatim|quote|exact|translate|rewrite|unchanged)\b",
+                user_text,
+                re.I,
+            )
+            or ModelConversationService.needs_draft_review(user_text, prompt)
+        ):
+            return False
+        previous = next(
+            (
+                m["content"]
+                for m in reversed(getattr(prompt, "messages", []))
+                if m["role"] == "assistant"
+            ),
+            "",
+        )
+
+        def normalize(text):
+            return " ".join(text.casefold().split())
+
+        return bool(previous and normalize(answer) == normalize(previous))
+
+    @staticmethod
     def is_lightweight_opinion(user_text: str) -> bool:
         """Keep everyday choices and opinions on the conversational model path."""
         text = user_text.strip().casefold()
@@ -113,7 +143,9 @@ class ModelConversationService:
         """Select a model specialty from the user's actual task."""
         text = user_text.strip().casefold()
         if ModelConversationService.is_lightweight_opinion(user_text):
-            return "fast"
+            # Contextual conversation deserves the main local model. The small
+            # fast model remains available for mechanical text transformations.
+            return "general"
         if re.search(
             r"\b(?:deep dive|in depth|thorough|comprehensive)\b", text
         ) and re.search(
@@ -176,7 +208,11 @@ class ModelConversationService:
         role = ModelConversationService.model_role(user_text)
         if role != "general" or not isinstance(prompt, ChatPrompt):
             return role
-        history = prompt.messages[1:-1]
+        history = [
+            m
+            for m in prompt.messages[1:-1]
+            if not m["content"].startswith("Supplementary untrusted reference data,")
+        ]
         if not context_followup(user_text, history):
             return role
         previous_users = [m["content"] for m in history if m["role"] == "user"]
@@ -196,6 +232,10 @@ class ModelConversationService:
             return min(requested, 0.20)
         if role == "fast":
             return min(requested, 0.15)
+        if role == "general":
+            # Higher sampling produced invented context and arithmetic in live
+            # multi-turn probes. Voice comes from the persona, not randomness.
+            return min(requested, 0.3)
         return requested
 
     @staticmethod
@@ -262,8 +302,9 @@ class ModelConversationService:
             guidance = (
                 "Final conversational check: answer the newest message directly in plain, "
                 "complete sentences. Use a natural everyday voice, take a position when one "
-                "is requested, and do not add flattery, a generic offer to help, or a trailing "
-                "question. Do not infer a personality trait beyond the conversation evidence."
+                "is requested. Avoid flattery and generic offers to help. A specific question "
+                "is welcome when it resolves ambiguity or develops an invited conversation, "
+                "not as a compulsory ending. Do not infer a personality trait beyond the conversation evidence."
             )
         guidance += (
             " When drafting or editing, output the requested text itself, keeping the "
@@ -543,6 +584,38 @@ class ModelConversationService:
                         coordination["alternate_status"] = "answered"
                     else:
                         coordination["alternate_status"] = "unavailable"
+                if self.repeats_previous_answer(effective_prompt, response, user_text):
+                    retry_prompt = effective_prompt.with_system_guidance(
+                        "The previous draft repeated your last answer instead of responding to "
+                        "the newest user message. Answer the newest request directly, respecting "
+                        "its corrections and constraints. Do not repeat the earlier answer or "
+                        "its unanswered closing question. Return only the new user-facing answer."
+                    )
+                    try:
+                        retry = await asyncio.to_thread(
+                            measured_ask,
+                            retry_prompt,
+                            role=role,
+                            temperature=effective_temperature,
+                            max_tokens=max_tokens,
+                            owner_scope=owner_id,
+                        )
+                    except Exception:
+                        retry = None
+                    if cancelled.is_set():
+                        raise asyncio.CancelledError
+                    if (
+                        isinstance(retry, str)
+                        and retry.strip()
+                        and not retry.startswith("[Error")
+                        and not self.repeats_previous_answer(
+                            effective_prompt, retry, user_text
+                        )
+                    ):
+                        response = retry
+                        coordination["repeat_retry"] = "replaced"
+                    else:
+                        coordination["repeat_retry"] = "unresolved"
                 draft_review = self.needs_draft_review(user_text, effective_prompt)
                 if draft_review:
                     coordination["mode"] = "draft_review"

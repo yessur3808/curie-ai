@@ -1,6 +1,6 @@
 import re
 from typing import Dict, List, Optional
-from agent.conversation_contract import ACKNOWLEDGEMENT
+from agent.conversation_contract import ACKNOWLEDGEMENT, repetition_feedback
 
 
 class PersonalityAdapter:
@@ -36,7 +36,7 @@ class PersonalityAdapter:
     _SOCIAL_ACKNOWLEDGEMENT_PATTERNS = ACKNOWLEDGEMENT
     _CORRECTION_PATTERNS = re.compile(
         r"^(?:no[,!. ]+)?(?:there (?:is|are) (?:no|none)\b|there(?:'s| is) none\b|"
-        r"that(?:['’]s| is) not\b|i (?:do not|don['’]t) (?:have|need|want)\b|"
+        r"that(?:['’]s| is| was) not\b|i (?:do not|don['’]t) (?:have|need|want)\b|"
         r"i(?:['’]m| am) not\b|i(?:['’]m| am) working\b.{0,120}\b"
         r"(?:do not|don['’]t) need\b)",
         re.IGNORECASE,
@@ -97,7 +97,7 @@ class PersonalityAdapter:
             text
         ) or self._SOCIAL_ACKNOWLEDGEMENT_PATTERNS.fullmatch(text):
             interaction_kind = "social"
-        elif self._CORRECTION_PATTERNS.search(text):
+        elif self._CORRECTION_PATTERNS.search(text) or repetition_feedback(text):
             interaction_kind = "correction"
         elif self._COMMAND_PATTERNS.search(text):
             interaction_kind = "command"

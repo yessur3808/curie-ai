@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from agent.kernel.contracts import ResponseMode
-from agent.conversation_contract import ACKNOWLEDGEMENT
+from agent.conversation_contract import ACKNOWLEDGEMENT, repetition_feedback
 
 _SIGNALS = {
     "urgency": re.compile(r"\b(?:urgent|emergency|asap|right now|immediately)\b", re.I),
@@ -32,14 +32,14 @@ _SOCIAL = re.compile(
     re.I,
 )
 _CASUAL_QUIP = re.compile(
-    r"^(?:that was|well,?\s+that was|not bad|nice one|well played|look at you)"
-    r"\b.{0,100}[.!?]*$",
-    re.I | re.S,
+    r"^(?:not bad|nice one|well played|(?:well,?\s+)?that was "
+    r"(?:almost )?suspiciously efficient)[.! ]*$",
+    re.I,
 )
 _SOCIAL_ACKNOWLEDGEMENT = ACKNOWLEDGEMENT
 _CORRECTION = re.compile(
     r"^(?:no[,!. ]+)?(?:there (?:is|are) (?:no|none)\b|there(?:'s| is) none\b|"
-    r"that(?:['’]s| is) not\b|i (?:do not|don['’]t) (?:have|need|want)\b|"
+    r"that(?:['’]s| is| was) not\b|i (?:do not|don['’]t) (?:have|need|want)\b|"
     r"i(?:['’]m| am) not\b|i(?:['’]m| am) working\b.{0,120}\b"
     r"(?:do not|don['’]t) need\b)",
     re.I,
@@ -93,7 +93,7 @@ def _interaction_kind(text: str) -> str:
         or _SOCIAL_ACKNOWLEDGEMENT.fullmatch(clean)
     ):
         return "social"
-    if _CORRECTION.search(clean):
+    if _CORRECTION.search(clean) or repetition_feedback(clean):
         return "correction"
     if _COMMAND.search(clean):
         return "command"

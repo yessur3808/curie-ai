@@ -9,7 +9,8 @@ import re
 ACKNOWLEDGEMENT = re.compile(
     r"^(?:(?:thanks(?: a lot)?|thank you|cheers)"
     r"(?:[,!. ]+(?:that (?:helped|helps|worked)|that(?:['’]s| is) helpful|"
-    r"(?:that )?makes sense|much appreciated))?|"
+    r"(?:that )?makes sense|much appreciated|for (?:the|that) "
+    r"(?:(?:weather|news|engineering) )?(?:update|brief|explanation|help)))?|"
     r"got it|okay|ok|cool|perfect|sounds good|all right|alright)[.! ]*$",
     re.I,
 )
@@ -33,6 +34,42 @@ _GENERIC_NEXT = re.compile(
     r"what else(?: is on your mind)?|anything else(?: on your mind)?)\?",
     re.I,
 )
+_REPETITION_FEEDBACK = re.compile(
+    r"\byou(?:['’]ve| have)? (?:already|just) (?:shared|sent|told|posted|mentioned)\b|"
+    r"\b(?:stop|keep) repeating\b|"
+    r"\b(?:brief|briefing|update|reply|answer|news)\b[^.!?]{0,40}\b(?:repetitive|repeated|same again)\b",
+    re.I,
+)
+
+
+def repetition_feedback(text: str) -> bool:
+    """Identify explicit feedback about repetition, not a request for another brief."""
+    return bool(_REPETITION_FEEDBACK.search(text))
+
+
+def closed_repetition_feedback(text: str) -> bool:
+    """A standalone repetition complaint can be acknowledged without inventing news.
+
+    Never consume a question, request for explanation, or an additional action.
+    Open-ended feedback still needs the model and conversation context.
+    """
+    if "?" in text or re.search(
+        r"\b(?:but|why|what|how|when|where|which|please|can|could|would|want|need|"
+        r"remind|schedule|send|check|show|tell|find|explain|give|fetch|instead|"
+        r"and|then|so|stop|never|avoid|turn|switch|run|delete|open|close|make)\b",
+        text,
+        re.I,
+    ):
+        return False
+    return bool(
+        re.fullmatch(
+            r"\s*(?:(?:hey|hi)[, ]+(?:curie[, ]+)?)?"
+            r"you(?:['’]ve| have)? already (?:shared|sent|posted|mentioned|told me about)\s+"
+            r"[^.!?;\n]{1,120}[.! ]*",
+            text,
+            re.I,
+        )
+    )
 
 
 def bare_casual_update(text: str) -> bool:
@@ -53,48 +90,6 @@ def trim_idle_question(response: str, user_text: str) -> str:
     if not match:
         return response
     question = match.group(1).strip()
-    if bare_casual_update(user_text) or (
-        ACKNOWLEDGEMENT.fullmatch(user_text.strip())
-        and _GENERIC_NEXT.fullmatch(question)
-    ):
+    if _GENERIC_NEXT.fullmatch(question):
         return response[: match.start()].rstrip()
     return response
-
-
-def trim_bare_choice(response: str, user_text: str) -> str:
-    """Cap a brief everyday 'pick one' answer, without claiming to fact-check it.
-
-    Leave requested reasons, consequential decisions and payloads alone.
-    """
-    if (
-        len(user_text.split()) > 32
-        or not re.search(r"\bpick one[.! ]*$", user_text, re.I)
-        or not re.search(
-            r"\b(?:tea|coffee|book|puzzle|movie|film|music|board game)\b",
-            user_text,
-            re.I,
-        )
-        or re.search(
-            r"\b(?:why|explain|reason|because|compare|risk|medicine|medical|"
-            r"health|legal|financial|investment|security|delete|remove|send|"
-            r"deploy|code|api|database|emergency|danger|unsafe)\b",
-            user_text,
-            re.I,
-        )
-        or any(mark in response for mark in ("\n", "`", '"', "“", "”", "?"))
-        or re.search(
-            r"\b(?:cannot|can['’]t|unsafe|need more|must first|avoid|unless|"
-            r"caution|allerg\w*|doctor|safe\w*|warning|risk\w*)\b",
-            response,
-            re.I,
-        )
-    ):
-        return response
-    sentences = re.split(r"(?<=[.!])\s+", response.strip())
-    if len(sentences) < 2:
-        return response
-    # A standalone acknowledgement is not itself the requested choice.
-    acknowledgement = re.fullmatch(
-        r"(?:d['’]accord|voilà|bien sûr|okay|ok|all right|sure)[.!]", sentences[0], re.I
-    )
-    return " ".join(sentences[: 2 if acknowledgement else 1])

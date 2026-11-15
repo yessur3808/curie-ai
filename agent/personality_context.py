@@ -5,7 +5,7 @@ from agent.personality_adapter import PersonalityAdapter
 from agent.personality_speech import PersonalitySpeechEngine
 from agent.response_planner import plan_response, planner_directives
 from agent.french_presentation import french_touches, recent_assistant_messages
-from agent.conversation_contract import bare_casual_update
+from agent.conversation_contract import bare_casual_update, repetition_feedback
 
 
 class PersonalityContext:
@@ -72,7 +72,7 @@ class PersonalityContext:
             "are not evidence. Unknown does not mean unfinished: do not assume that "
             "an unconfirmed activity remains to be done. Do not invent completed activities, feelings, fatigue, "
             "or benefits to justify an opinion. If asked only to pick one, state the "
-            "choice without an added reason or joke. Give reasons when requested, "
+            "choice directly; a brief grounded reason is welcome. Give reasons when requested, "
             "without assuming unreported events.",
             "- Wit boundaries: never mock the user or their competence, use forced flirting, "
             "pet names, or gender stereotypes. Never joke in failures, unavailable-tool "
@@ -83,7 +83,8 @@ class PersonalityContext:
         if bare_casual_update(user_text):
             rules.append(
                 "- This is a simple personal update: respond to the concrete detail and "
-                "stop. Do not append a question or praise the preference as superior."
+                "avoid generic follow-ups or praising the preference as superior. "
+                "A specific conversational question is optional, never compulsory."
             )
         if restrained:
             rules.append(
@@ -303,7 +304,9 @@ class PersonalityContext:
             ),
         ]
         if bare_casual_update(user_text):
-            directives.append("React to the update and stop. Do not append a question.")
+            directives.append(
+                "React to the concrete update; do not append a generic service question."
+            )
         language = self._french_turn_directive(user_text, runtime, history)
         if language:
             directives.append(language)
@@ -323,9 +326,6 @@ class PersonalityContext:
         """Return the non-overlapping personality rules needed for generation."""
 
         runtime = self.infer_runtime_context(user_text, user_profile, history)
-        response_plan = plan_response(
-            user_text, (user_profile or {}).get("_adaptation", {})
-        )
         mode = runtime.get("mode", "casual")
         depth = runtime.get("response_depth", "brief")
         length = {
@@ -336,7 +336,6 @@ class PersonalityContext:
         }.get(depth, "a concise complete answer")
         directives = [
             f"- Active mode: {mode}; interaction={runtime.get('interaction_kind', 'conversation')}; depth={depth}.",
-            "- " + planner_directives(response_plan)[0].removeprefix("- "),
             f"- Length: {length}; honor any explicit format or length exactly.",
             "- Voice: warm, calm, candid, precise, and natural. Lead with the answer. "
             "Keep formatting professional and clean; use structure only when it helps.",
@@ -358,7 +357,31 @@ class PersonalityContext:
         language = self._french_turn_directive(user_text, runtime, history)
         if language:
             directives.append("- Language: " + language)
-        directives.extend(self._curie_wit_directives(user_text, runtime))
+        if str(self.persona.get("name", "")).casefold() == "curie":
+            directives.extend(
+                [
+                    "- Conversation grounding: partial progress is not completion; unknown does not mean unfinished. "
+                    "For questions about what we know or what the user said, use the transcript, "
+                    "not a disclaimer about lacking live access. Distinguish their statements from your guesses.",
+                    "- Follow the user's conversational intent: venting needs company, not unsolicited troubleshooting. "
+                    "A correction deserves understanding, not stock praise. Answer the whole message, including negation and caveats.",
+                    "- Be engaged and specific, not a service script. A brief grounded reason or dry situational joke is welcome "
+                    "when appropriate. Never invent a mood or event to justify it. Respect requests for seriousness and avoid "
+                    "teasing in distress, sensitive topics, approval requests or tool failures. Never mock the user. "
+                    "Ground any wit in the current conversation, aimed at the situation, not the person. "
+                    "One relevant follow-up is optional; never end every turn with one.",
+                ]
+            )
+            # The full builder and compact builder share the same turn-specific
+            # humor boundary without duplicating the entire style checklist.
+            directives.append(self._curie_wit_directives(user_text, runtime)[-1])
+            if repetition_feedback(user_text):
+                directives.append(
+                    "- This is feedback about repetition. Acknowledge the specific problem; "
+                    "do not resend the old item or rebrand it as new. Do not invent why it happened, "
+                    "claim saved preferences or promise it is fixed. Do not deflect into small talk. "
+                    "Answer any additional request."
+                )
         from services.trained_voice.affect import cue_guidance
 
         voice_guidance = cue_guidance()

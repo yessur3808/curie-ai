@@ -83,6 +83,16 @@ def constrain_french_opening(
             re.I,
         )
     )
+    if not explicit_french and re.fullmatch(
+        r"\s*(?:(?:thanks|thank you|merci)[,.! ]+)?(?:good\s*night|night)[.! ]*",
+        user_text,
+        re.I,
+    ):
+        # Do not turn a farewell into "Hello. Sleep well." when suppressing
+        # repeated French. Keep the actual farewell and its personal callback.
+        response = re.sub(
+            r"^(?:bonjour|bonsoir|salut)[.!]\s+(?=\S)", "", response, flags=re.I
+        )
     from agent.personality_adapter import PersonalityAdapter
 
     context = PersonalityAdapter().infer_context(user_text)
@@ -95,7 +105,8 @@ def constrain_french_opening(
     ):
         return response
     openings = (
-        (r"bonjour|bonsoir|salut", "Hello"),
+        (r"bonjour|salut", "Hello"),
+        (r"bonsoir", "Good evening"),
         (r"d['’]accord", "All right"),
         (r"avec plaisir", "My pleasure"),
         (r"merci", "Thanks"),
@@ -109,7 +120,7 @@ def constrain_french_opening(
         if match:
             if (
                 restrained
-                and source == r"bonjour|bonsoir|salut"
+                and source in {r"bonjour|salut", r"bonsoir"}
                 and response[match.end() :].strip()
             ):
                 return response[match.end() :].lstrip()

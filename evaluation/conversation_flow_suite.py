@@ -203,7 +203,7 @@ def run() -> dict:
             )
         ),
         "redundant_situation_recap_is_removed": nonredundant
-        == "The meeting comes first. I can check the flight details next.",
+        == "The meeting comes first.",
         "specific_proactive_solution_survives": "check the delayed flight"
         in proactive.lower(),
         "prompt_requires_answer_first_no_parroting": all(

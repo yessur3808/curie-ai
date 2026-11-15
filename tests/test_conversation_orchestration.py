@@ -146,7 +146,7 @@ def test_brief_follow_up_cleanup_does_not_truncate_here_are_answer():
     )
 
 
-def test_response_policy_removes_forced_italicized_french_aside():
+def test_response_policy_preserves_mixed_language_italic_content():
     class Personality:
         def apply_response_style(
             self, response, user_text, user_profile=None, history=None
@@ -155,13 +155,9 @@ def test_response_policy_removes_forced_italicized_french_aside():
 
     policy = ResponsePolicy({"name": "Curie"}, Personality())
 
-    assert (
-        policy.finalize(
-            "You asked how I was doing, keeping it casual and short. *Oui, that is the spirit.*",
-            "What did I just ask?",
-        )
-        == "You asked how I was doing, keeping it casual and short."
-    )
+    # A French word is not grounds to delete the rest of an italic sentence.
+    response = "You asked how I was doing. *Oui, the budget remains $12.50.*"
+    assert policy.finalize(response, "What did I just ask?") == response
 
 
 def test_model_service_uses_local_fallback(monkeypatch):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from agent.orchestration.contracts import ResponseCandidate
-from agent.conversation_contract import ACKNOWLEDGEMENT
+from agent.conversation_contract import ACKNOWLEDGEMENT, closed_repetition_feedback
 
 
 class SocialConversationService:
@@ -23,34 +23,7 @@ class SocialConversationService:
         r"(?:are\s+)?you\s+(?:alive|awake|there)(?:\s+in\s+there)?[?!. ]*$",
         re.I,
     )
-    _TECHNICAL_WIN = re.compile(
-        r"\b(?:finally\s+)?(?:fixed|solved|resolved|squashed)\b.{0,60}"
-        r"\b(?:bug|issue|error)\b|"
-        r"\b(?:bug|issue|error)\b.{0,60}\b(?:fixed|solved|resolved|squashed)\b",
-        re.I | re.S,
-    )
-    _DEEP_FOLLOWUP = re.compile(
-        r"\b(?:why|how|explain|analy[sz]e|root cause|deep dive)\b", re.I
-    )
-    _NEXT_STEP_REQUEST = re.compile(
-        r"\b(?:(?:one|a) next step|what (?:should i do|comes) next)\b", re.I
-    )
-    _CASUAL_QUIP = re.compile(
-        r"^(?:that was|well,?\s+that was|not bad|nice one|well played|look at you)"
-        r"\b.{0,100}[.!?]*$",
-        re.I | re.S,
-    )
     _ACKNOWLEDGEMENT = ACKNOWLEDGEMENT
-    _FACT_CORRECTION = re.compile(
-        r"^(?:no[,!. ]+)?(?:there (?:is|are) no(?: such)?\s+.+|"
-        r"there(?:['’]s| is) none)[.! ]*$",
-        re.I,
-    )
-    _DAYTIME_LIGHT_PREFERENCE = re.compile(
-        r"^.{0,120}\b(?:do not|don['’]t) need (?:the )?lights? "
-        r"(?:switched |turned )?on during the day[.! ]*$",
-        re.I,
-    )
     _NO_TOOL_NEEDED = re.compile(
         r"^\s*no\s+need\s+to\s+(?:use|run|do|make)\s+(?:a|any|the)?\s*"
         r"(?:query|search|lookup|tool)(?:\s+for\s+that)?[.! ]*$",
@@ -73,6 +46,13 @@ class SocialConversationService:
     )
 
     def handle(self, text: str) -> ResponseCandidate | None:
+        if closed_repetition_feedback(text):
+            # This is an acknowledgement, not a regenerated brief or a claim
+            # that a preference was saved or a scheduling defect repaired.
+            return ResponseCandidate(
+                "You’re right—that was a repeat, not a useful update.",
+                "social:repetition_feedback",
+            )
         if self._PRESENCE_CHECK.fullmatch(text.strip()):
             return ResponseCandidate(
                 "Bonjour. Awake and ready.", "social:presence_check"
@@ -103,32 +83,9 @@ class SocialConversationService:
                 "Anytime." if normalized.startswith(("thank", "cheers")) else "Good."
             )
             return ResponseCandidate(reply, "social:acknowledgement")
-        if self._DAYTIME_LIGHT_PREFERENCE.fullmatch(text.strip()):
-            return ResponseCandidate(
-                "Got it. They can stay off.", "social:preference_acknowledgement"
-            )
-        if self._FACT_CORRECTION.fullmatch(text.strip()):
-            if re.search(r"\bprojects?\b", text, re.I):
-                reply = "You're right. I made an assumption there."
-            else:
-                reply = "Understood."
-            return ResponseCandidate(reply, "social:correction")
-        if self._TECHNICAL_WIN.search(text) and not self._DEEP_FOLLOWUP.search(text):
-            reply = "Nicely done. That bug was getting far too comfortable."
-            if self._NEXT_STEP_REQUEST.search(text):
-                reply += (
-                    " Run the closest regression test, then commit the fix while the cause "
-                    "is still fresh."
-                )
-            return ResponseCandidate(reply, "social:technical_win")
-        if self._CASUAL_QUIP.fullmatch(text.strip()):
-            if re.search(r"\bsuspiciously\s+efficient\b", text, re.I):
-                reply = "I prefer ‘efficient enough to raise questions.’"
-            elif re.match(r"^\s*(?:not bad|nice one)\b", text, re.I):
-                reply = "I will accept that as high praise."
-            else:
-                reply = "A tidy result. I do enjoy those."
-            return ResponseCandidate(reply, "social:casual_quip")
+        # Outcomes, corrections and banter need conversation context. Keyword
+        # shortcuts mistook "haven't fixed" for success and "that was not what
+        # I asked" for praise. Let the conversational model interpret them.
         if not self._GREETING.fullmatch(text):
             return None
         if re.search(r"\b(?:how are you|how(?:'s| is) it going)\b", text, re.I):

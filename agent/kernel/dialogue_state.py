@@ -361,7 +361,9 @@ def classify_transition(
         return DialogueTransition(
             TransitionClass.CONNECTOR_COMMAND, "explicit connector command"
         )
-    if _CORRECTION.search(clean):
+    from agent.conversation_contract import repetition_feedback
+
+    if _CORRECTION.search(clean) or repetition_feedback(clean):
         return DialogueTransition(
             TransitionClass.CORRECTION,
             "explicit correction outranks stored dialogue and memory",

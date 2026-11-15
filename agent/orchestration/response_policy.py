@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import json
-from agent.conversation_contract import trim_bare_choice, trim_idle_question
+from agent.conversation_contract import trim_idle_question
 
 from agent.french_presentation import (
     constrain_french_opening,
@@ -29,7 +29,8 @@ CANNED_FRENCH_SUFFIX_PATTERN = re.compile(
     re.I,
 )
 CANNED_FRENCH_ASIDE_PATTERN = re.compile(
-    r"\s*\*(?:oui|non|bonjour|merci|voilà|d['’]accord|bien\s+sûr|avec\s+plaisir)\b[^*\n]{0,80}\*\s*$",
+    r"(?<=\S)\s+\*(?:oui|non|bonjour|merci|voilà|d['’]accord|bien\s+sûr|avec\s+plaisir)"
+    r"(?:[,!. ]+(?:oui|non))?[.!?]*\*\s*$",
     re.I,
 )
 CANNED_ADDRESS_SUFFIX_PATTERN = re.compile(
@@ -88,23 +89,6 @@ DEPENDENCY_PATTERN = re.compile(
     r"don't leave me|never leave me|I get jealous|choose me over)\b",
     re.I,
 )
-NEUTRAL_PERSONAL_PLAN_PATTERN = re.compile(
-    r"^\s*(?:i\s+(?:might|may|plan\s+to|intend\s+to|am\s+thinking\s+(?:of|about))|"
-    r"i['’]m\s+(?:thinking\s+(?:of|about)|planning\s+to|going\s+to)|"
-    r"maybe\s+i['’]ll)\b",
-    re.I,
-)
-GENERIC_PLAN_PRAISE_PATTERN = re.compile(
-    r"^\s*(?:that|it)\s+sounds\s+like\s+(?:a\s+)?"
-    r"(?:good|great|nice|smart|healthy|excellent)\s+(?:idea|plan)[.!]?\s*",
-    re.I,
-)
-UNSUPPORTED_WELLNESS_SENTENCE_PATTERN = re.compile(
-    r"(?:^|(?<=[.!?])\s+)[^.!?\n]{0,100}\b(?:clear\s+your\s+head|"
-    r"help\s+you\s+(?:reset|unwind|recharge|relax)|do\s+you\s+good|"
-    r"good\s+for\s+your\s+(?:mental\s+)?health)\b[^.!?\n]*[.!?]?",
-    re.I,
-)
 FRENCH_MANNERISM_PATTERN = re.compile(
     r"\b(?:c['’]est|très|ça|voilà|merci|d['’]accord|bien\s+sûr|bon\s+courage|"
     r"bon\s+repos|bon\s+appétit|en\s+effet|mon\s+dieu|quelle|magnifique|charmant|"
@@ -130,12 +114,6 @@ LIGHTWEIGHT_OPINION_PATTERN = re.compile(
     r"be honest)\b",
     re.I,
 )
-COMPLEX_DOMAIN_PATTERN = re.compile(
-    r"\b(?:code|api|database|algorithm|architecture|security|network|model|"
-    r"medical|medicine|legal|contract|financial|investment|trading|physics|"
-    r"engineering|statistics|research|diagnos(?:e|is)|risk analysis)\b",
-    re.I,
-)
 EXACT_BULLET_PATTERN = re.compile(
     r"\b(?:exactly\s+)?(?P<count>one|two|three|four|five|[1-5])\s+"
     r"(?:short\s+)?(?P<kind>bullets?|moves?|examples?|points?)\b",
@@ -147,11 +125,6 @@ NO_CONGRATULATIONS_PATTERN = re.compile(
 )
 CONGRATULATIONS_PATTERN = re.compile(
     r"(?:^|(?<=[.!?])\s+)(?:congratulations|congrats|well done|nice work)\b[^.!?\n]*[.!?]?",
-    re.I,
-)
-PRIORITY_REQUEST_PATTERN = re.compile(
-    r"\b(?:what|which)\b.{0,35}\b(?:first|priority|attention)\b|"
-    r"\bwhat matters first\b",
     re.I,
 )
 EXPLICIT_FRENCH_REQUEST_PATTERN = re.compile(
@@ -317,77 +290,34 @@ def enforce_line_and_tone_constraints(response: str, user_text: str) -> str:
     if ONE_LINE_PATTERN.search(user):
         clean = re.sub(r"\s*\n+\s*", " ", clean)
         clean = re.sub(r"\s{2,}", " ", clean).strip()
-    structured_list = len(re.findall(r"(?:^|\s)(?:[-*•]|\d{1,2}[.)])\s+", clean)) >= 2
-    if EXPLICIT_BRIEF_PATTERN.search(user) and not structured_list:
-        sentences = [
-            part.strip() for part in re.split(r"(?<=[.!?])\s+", clean) if part.strip()
-        ]
-        if len(sentences) > 2:
-            clean = " ".join(sentences[:2])
-        words = clean.split()
-        if len(words) > 45:
-            clean = " ".join(words[:45]).rstrip(" ,;:") + "…"
-    lightweight_opinion = (
-        len(user.split()) <= 32
-        and LIGHTWEIGHT_OPINION_PATTERN.search(user)
-        and not COMPLEX_DOMAIN_PATTERN.search(user)
-    )
-    if lightweight_opinion and re.search(r"\bpick one\b", user, re.I):
-        clean = re.sub(
-            r",?\s+but if\b[^.!?\n]*[.!?]?",
-            ".",
-            clean,
-            count=1,
-            flags=re.I,
-        ).strip()
-    if lightweight_opinion and not structured_list and "```" not in clean:
-        sentences = [
-            part.strip() for part in re.split(r"(?<=[.!?])\s+", clean) if part.strip()
-        ]
-        selected: list[str] = []
-        for sentence in sentences[:2]:
-            if len(" ".join(selected + [sentence]).split()) > 55:
-                break
-            selected.append(sentence)
-        if selected:
-            clean = " ".join(selected)
+    # Brevity belongs to generation. Blind sentence/word caps removed reasons,
+    # caveats and later requested items, even when the opening was only filler.
     return clean
 
 
-def condense_priority_answer(response: str, user_text: str) -> str:
-    """Keep prioritization decisive and add one concrete next action when available."""
+def _normalize_short_french_asides(text: str) -> str:
+    # Normalize only recognized standalone speech acts. Deleting an italic
+    # phrase left dangling commas/periods, and a phrase containing French can
+    # also contain facts that must never be erased.
+    equivalents = {
+        "bonjour": "Hello",
+        "bonsoir": "Good evening",
+        "merci": "Thanks",
+        "voilà": "There we go",
+        "d'accord": "All right",
+        "bien sûr": "Of course",
+        "avec plaisir": "My pleasure",
+        "je comprends": "I understand",
+        "c'est intéressant": "That's interesting",
+    }
 
-    if not PRIORITY_REQUEST_PATTERN.search(str(user_text or "")):
-        return response.strip()
-    sentences = [
-        part.strip()
-        for part in re.split(r"(?<=[.!?])\s+", response.strip())
-        if part.strip()
-    ]
-    if not sentences:
-        return response.strip()
-    direct = sentences[0]
-    proactive = next(
-        (
-            sentence
-            for sentence in sentences[1:]
-            if re.search(
-                r"\bI can (?:check|track|review|show|prepare|schedule)\b",
-                sentence,
-                re.I,
-            )
-        ),
-        "",
-    )
-    if not proactive and re.search(r"\bflight\b", str(user_text or ""), re.I):
-        proactive = "I can check the flight details next."
-    return " ".join(part for part in (direct, proactive) if part)
-
-
-def _remove_short_french_asides(text: str) -> str:
     def replace(match: re.Match) -> str:
-        return "" if FRENCH_MANNERISM_PATTERN.search(match.group(1)) else match.group(0)
+        phrase = match.group(1).strip().casefold().replace("’", "'")
+        return equivalents.get(phrase, match.group(0))
 
+    # A complete, redundant well-wish can be removed without eating the next
+    # sentence. Never match arbitrary content inside an italic span.
+    text = re.sub(r"^\*(?:bon courage|bon repos)[.!]\*\s+(?=\S)", "", text, flags=re.I)
     cleaned = ITALIC_ASIDE_PATTERN.sub(replace, text)
     cleaned = re.sub(r"\s+([,.!?])", r"\1", cleaned)
     cleaned = re.sub(r"^[,;:]\s*", "", cleaned)
@@ -487,7 +417,6 @@ class ResponsePolicy:
         )
         if str(self.persona.get("name", "")).casefold() == "curie":
             sanitized = trim_idle_question(sanitized, str(user_text or ""))
-            sanitized = trim_bare_choice(sanitized, str(user_text or ""))
         styled = self.personality_context.apply_response_style(
             sanitized, user_text, user_profile=profile, history=history
         )
@@ -508,7 +437,7 @@ class ResponsePolicy:
                 str(user_text or ""),
                 re.I,
             ):
-                cleaned = _remove_short_french_asides(styled)
+                cleaned = _normalize_short_french_asides(styled)
                 if cleaned:
                     styled = cleaned
         if (
@@ -522,7 +451,7 @@ class ResponsePolicy:
                 cleaned = (
                     styled
                     if allow_contextual_french
-                    else _remove_short_french_asides(styled)
+                    else _normalize_short_french_asides(styled)
                 )
                 cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,")
                 if not re.search(r"\w", cleaned):
@@ -530,16 +459,6 @@ class ResponsePolicy:
                 styled = cleaned or _plain_personal_acknowledgement(
                     str(user_text or "")
                 )
-        if (
-            (self.persona.get("name") or "").strip().casefold() == "curie"
-            and "?" not in str(user_text or "")
-            and NEUTRAL_PERSONAL_PLAN_PATTERN.search(str(user_text or ""))
-        ):
-            styled = UNSUPPORTED_WELLNESS_SENTENCE_PATTERN.sub("", styled).strip()
-            styled = GENERIC_PLAN_PRAISE_PATTERN.sub("Fair enough. ", styled).strip()
-            styled = re.sub(r"\s+", " ", styled).strip()
-            if not styled:
-                styled = "Fair enough."
         if EXPLICIT_BRIEF_PATTERN.search(str(user_text or "")):
             # Remove only an appended question sentence.  The earlier pattern
             # could begin at any matching auxiliary verb, so a response such
@@ -589,5 +508,4 @@ class ResponsePolicy:
         styled = remove_trailing_fragment(styled)
         styled = normalize_explicit_bullets(styled, str(user_text or ""))
         styled = enforce_line_and_tone_constraints(styled, str(user_text or ""))
-        styled = condense_priority_answer(styled, str(user_text or ""))
         return contextual_touch(styled, str(user_text or ""), self.persona, history)

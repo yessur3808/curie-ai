@@ -27,8 +27,8 @@ def test_normal_turns_use_a_balanced_generation_budget():
 
 def test_lightweight_opinions_use_the_conversational_model_and_small_budget():
     prompt = "Carbonara or arrabbiata? Pick one and tell me why."
-    assert ModelConversationService.model_role(prompt) == "fast"
-    assert ModelConversationService.token_budget(prompt) == 192
+    assert ModelConversationService.model_role(prompt) == "general"
+    assert ModelConversationService.token_budget(prompt) == 224
     assert (
         ModelConversationService.model_role(
             "Pick one database architecture and tell me why"
@@ -54,20 +54,21 @@ def test_task_content_selects_specialized_model_roles():
     assert (
         ModelConversationService.model_role("Recommend the best option") == "reasoning"
     )
-    assert ModelConversationService.model_role("Pick one and tell me why") == "fast"
+    assert ModelConversationService.model_role("Pick one and tell me why") == "general"
     assert (
         ModelConversationService.model_role("Push back if you disagree") == "reasoning"
     )
     assert (
         ModelConversationService.model_role("Give me one opinion you can defend")
-        == "fast"
+        == "general"
     )
 
 
 def test_complex_work_is_stable_and_gets_an_internal_quality_check():
     assert ModelConversationService.reasoning_temperature("reasoning", 0.8) == 0.25
     assert ModelConversationService.reasoning_temperature("coding", 0.8) == 0.20
-    assert ModelConversationService.reasoning_temperature("general", 0.8) == 0.8
+    assert ModelConversationService.reasoning_temperature("general", 0.8) == 0.3
+    assert ModelConversationService.reasoning_temperature("general", 0.1) == 0.1
     prompt = ModelConversationService.quality_prompt(
         "User: compare these\nAssistant:", "reasoning"
     )
@@ -83,7 +84,8 @@ def test_general_chat_gets_a_final_naturalness_check():
     )
 
     assert "plain, complete sentences" in prompt
-    assert "generic offer to help" in prompt
+    assert "generic offers to help" in prompt
+    assert "A specific question is welcome" in prompt
     assert prompt.endswith("Assistant:")
 
 

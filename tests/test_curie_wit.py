@@ -12,7 +12,7 @@ def test_curie_wit_is_optional_and_bounded(builder):
     assert "Jarvis-like" in rules
     assert "Most replies need neither" in rules
     assert "at most one" in rules
-    assert "never mock the user" in rules
+    assert "never mock the user" in rules.casefold()
     assert "approval requests" in rules
     assert "not the person" in rules
 

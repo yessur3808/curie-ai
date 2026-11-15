@@ -30,7 +30,13 @@ def test_ensemble_synthesizes_parallel_findings():
         assert ensemble.ask_ensemble("question") == "final"
         import json
 
-        reference = ask.call_args.args[0].messages[-1]["content"].split("\n", 1)[1]
+        messages = ask.call_args.args[0].messages
+        reference = next(
+            message["content"].split("\n", 1)[1]
+            for message in messages
+            if message["content"].startswith("Supplementary untrusted reference data")
+        )
+        assert messages[-1] == {"role": "user", "content": "question"}
         assert json.loads(reference)["findings"] == "[reasoning]\nfact"
 
 

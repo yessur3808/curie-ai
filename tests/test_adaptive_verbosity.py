@@ -73,19 +73,16 @@ def test_simple_command_is_brief_even_with_detailed_preference():
     assert context["response_depth"] == "brief"
 
 
-def test_social_reply_is_trimmed_without_forced_french():
+def test_social_style_preserves_meaning_without_forced_french():
     persona = load_persona("curie.json")
     response = (
-        "I am functioning optimally this evening. My systems are humming with curiosity. "
-        "The air is crisp and I am eager to learn something new. How about you?"
+        "The missing piece turned up at last. Under the sofa, of course. "
+        "Was it the last gap in the puzzle?"
     )
     result = PersonalitySpeechEngine().apply(
         response, persona, {"mode": "casual", "response_depth": "social"}
     )
-    assert (
-        result
-        == "I am functioning optimally this evening. My systems are humming with curiosity."
-    )
+    assert result == response
     assert "C'est magnifique" not in result
 
 
@@ -118,13 +115,17 @@ def test_deep_reply_is_not_trimmed():
     assert "third paragraph" in result.lower()
 
 
-def test_brief_reply_is_hard_bounded():
+def test_brief_style_does_not_discard_later_requested_items():
     persona = load_persona("curie.json")
-    response = " ".join(["A rather unnecessary explanation continues here."] * 30)
+    response = (
+        "The first train leaves at 08:20. The second leaves at 09:10. "
+        "The second is cheaper, but it gets you there after your meeting starts. "
+        "Choose the first if the meeting time is fixed."
+    )
     result = PersonalitySpeechEngine().apply(
         response, persona, {"mode": "casual", "response_depth": "brief"}
     )
-    assert len(result.split()) <= 85
+    assert result == response
 
 
 def test_curie_persona_is_source_independent_and_balanced():

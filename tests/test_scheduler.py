@@ -50,6 +50,36 @@ class TestIsReminderQuery:
     def test_generic_chat(self):
         assert not is_reminder_query("how are you doing?")
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Switching topics: tomorrow I want a quiet morning. Suggest one simple thing, no schedule.",
+            "My schedule tomorrow looks quiet.",
+            "There was an alert about the weather tomorrow.",
+            "Don't schedule anything tomorrow.",
+            "Explain what 'remind me tomorrow' means.",
+        ],
+    )
+    def test_mentions_and_prohibitions_are_not_scheduling_requests(self, text):
+        from agent.skills.scheduler import parse_reminder_request
+
+        assert not is_reminder_query(text)
+        assert parse_reminder_request(text) is None
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Could you please remind me tomorrow to call Alex?",
+            "Hey Curie, remind me in 30 minutes to take a break.",
+            "I need a reminder tomorrow to buy tea.",
+            "Remind me tomorrow to have a day with no schedule.",
+        ],
+    )
+    def test_explicit_requests_still_create_reminder_intents(self, text):
+        from agent.skills.scheduler import parse_reminder_request
+
+        assert parse_reminder_request(text)["action"] == "reminder_create"
+
 
 # ------------------------------------------------------------------
 # _parse_due_time

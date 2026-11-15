@@ -84,7 +84,8 @@ def test_solver_and_verifier_receive_same_roles_evidence_and_owner():
     for prompt, kwargs in calls:
         assert kwargs["owner_scope"] == "owner-a"
         assert prompt.evidence == base.evidence
-    assert calls[0][0].messages[1:4] == base.messages[1:4]
+    assert calls[0][0].messages[1:3] == base.messages[1:3]
+    assert calls[0][0].messages[-1] == base.messages[-1]
     assert calls[1][0].messages[0]["role"] == "system"
     reviewer_payload = json.loads(calls[1][0].messages[1]["content"])
     assert reviewer_payload["newest_request"] == "Why did you turn it off?"

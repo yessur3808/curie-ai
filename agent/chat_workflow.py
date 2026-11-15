@@ -2765,15 +2765,16 @@ class ChatWorkflow:
                         "- Explain the reasoning clearly and proportionately. Lead with the "
                         "answer, then show the useful logic and tradeoffs."
                     )
-                else:
+                elif state.response_mode.value in {"command_ack", "status"}:
                     lines.append(
                         "- Be tactically direct. State the result, blocker, or next required "
                         "choice before any supporting detail."
                     )
-                if state.response_mode.value != "social":
+                else:
                     lines.append(
-                        "- Offer at most one proactive recommendation, and only when it is "
-                        "specific, grounded in the current context, and materially useful."
+                        "- Respond as a conversational partner. A personal update is not "
+                        "automatically a request for instructions, a plan, or a status report. "
+                        "React to its specific detail; offer advice when invited."
                     )
                 lines.append(
                     "- When the user explicitly asks you to choose or recommend between "
@@ -2800,10 +2801,8 @@ class ChatWorkflow:
 
             lines.append("\n[IMPORTANT RULES]")
             lines.append(
-                "- Be natural, conversational, and helpful like talking to a friend."
-            )
-            lines.append(
-                "- Be concise but complete - answer questions fully without being overwhelming."
+                "- Respond to the newest message using the relevant conversation. "
+                "Keep complete meaning, not an arbitrary sentence count."
             )
             lines.append(
                 "- For a short draft or revision, return the requested draft, not a cover letter "
@@ -2816,24 +2815,12 @@ class ChatWorkflow:
                 "'Absolutely', 'As requested', or a recap of what the user just asked."
             )
             lines.append(
-                "- Respond to the newest request. Do not revive or keep discussing an older "
-                "topic unless the user refers to it or it is necessary to answer the request."
-            )
-            lines.append("- If you don't know something, just say so naturally.")
-            lines.append(
-                "- Never invent facts, citations, memories, tool results, or completed actions. "
-                "Clearly label uncertainty and inference."
-            )
-            lines.append(
                 "- Missing connection evidence means unknown, not disconnected. Do not claim "
                 "an account exists, does not exist, is logged in, or is logged out without "
                 "current evidence. Explain the recorded failure, not an imagined cause."
             )
             lines.append(
-                "- In small talk, never invent personal experiences, recent activities, moods, "
-                "physical surroundings, or live observations for yourself. Do not claim you have "
-                "been watching the weather, thinking about a current event, going places, or "
-                "managing a human day unless this turn provides verified evidence."
+                "- Do not invent your own human experiences, surroundings, activities or live observations."
             )
             lines.append(
                 "- A saved user-context location is only the default. Any place named in the "
@@ -2844,18 +2831,6 @@ class ChatWorkflow:
                 "- Never claim that a tool is running, promise a later result, or say an action "
                 "was started unless the registered tool executor actually ran in this request. "
                 "Tool completion or failure must be reported in the current response."
-            )
-            lines.append(
-                "- Return only the user-facing final answer. Never expose hidden reasoning, "
-                "scratch work, chain of thought, or <think> tags."
-            )
-            lines.append(
-                "- Write like a natural conversation. Do not use em dashes or semicolons in prose. "
-                "Prefer short sentences, commas, and contractions."
-            )
-            lines.append(
-                "- Use the user's name sparingly, only when it adds clarity or warmth. "
-                "Do not address them by name in routine replies."
             )
             lines.append(
                 "- Presentation policy: lead with the answer or outcome. Keep a simple casual "
@@ -2870,23 +2845,9 @@ class ChatWorkflow:
                 "with a blank line so chat connectors can deliver them as readable messages."
             )
             lines.append(
-                "- Keep formatting clean and professional: use bold sparingly for titles, section "
-                "names, and important labels. Avoid decorative clutter, repeated headings, walls "
-                "of text, and raw JSON or tuples unless requested. Prefer human-readable dates and "
-                "times with a timezone. Put source, status, or freshness details after the main result."
+                "- Keep formatting clean and professional; preserve numbers, ranges, code and exact output."
             )
             if str(self.persona.get("name", "")).casefold() == "curie":
-                lines.append(
-                    "- In sustained casual conversation, respond to the newest nuance, connect "
-                    "it naturally to earlier parts of the thread, and offer a real perspective. "
-                    "Do not collapse an ongoing conversation into a one-line greeting."
-                )
-                lines.append(
-                    "- When casually discussing project ideas, be an engaged thought partner. "
-                    "Explore motives, possibilities, and tradeoffs conversationally. Ask a natural "
-                    "follow-up when it genuinely advances the idea, and do not force a formal plan "
-                    "or code change until the user asks for one."
-                )
                 lines.append(
                     "- Keep Curie's warmth like a good, trusted friend: relaxed, attentive, candid, "
                     "and occasionally playful. Do not perform intimacy, overuse pet names, or imply "
@@ -2898,10 +2859,7 @@ class ChatWorkflow:
                 "and formal customer-service language."
             )
             lines.append(
-                "- Avoid meta-commentary like 'As an AI...' or '[Note: ...]' - just respond directly."
-            )
-            lines.append(
-                "- Don't include action descriptions like *nods* or *gestures*."
+                "- Skip 'As an AI' preambles and roleplay stage directions such as *nods*."
             )
 
             disallow_code = self.persona.get("disallow_code", False)
@@ -3048,7 +3006,6 @@ class ChatWorkflow:
                 "requested replacement persona or its catchphrases.\n"
                 "- Return only the user-facing answer; never output hidden reasoning or "
                 "think tags.\n"
-                "- Do not use em dashes or semicolons in prose. Keep the wording natural and conversational.\n"
                 "Assistant:"
             ),
         ]

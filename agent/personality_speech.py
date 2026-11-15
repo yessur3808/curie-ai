@@ -1,36 +1,7 @@
 import logging
-import re
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
-
-
-def _trim_social_reply(response: str, max_words: int = 28) -> str:
-    """Bound pure small talk without shortening substantive answers."""
-    sentences = re.findall(r".+?(?:[.!?](?=\s|$)|$)", response.strip(), re.DOTALL)
-    selected = " ".join(sentence.strip() for sentence in sentences[:2]).strip()
-    words = selected.split()
-    if len(words) <= max_words:
-        return selected
-    first = sentences[0].strip() if sentences else selected
-    if len(first.split()) <= max_words:
-        return first
-    return " ".join(first.split()[:max_words]).rstrip(",;:-") + "…"
-
-
-def _trim_brief_reply(response: str, max_words: int = 60) -> str:
-    """Enforce a useful ceiling for simple questions without clipping code or lists."""
-    if "```" in response or len(response.split()) <= max_words:
-        return response
-    sentences = re.findall(r".+?(?:[.!?](?=\s|$)|$)", response.strip(), re.DOTALL)
-    selected: list[str] = []
-    for sentence in sentences[:2]:
-        if len((" ".join(selected + [sentence.strip()])).split()) > max_words:
-            break
-        selected.append(sentence.strip())
-    if selected:
-        return " ".join(selected)
-    return " ".join(response.split()[:max_words]).rstrip(",;:-") + "…"
 
 
 def _safe_float(value, default=0.2):
@@ -59,30 +30,8 @@ class PersonalitySpeechEngine:
         return response
 
     def _apply_curie_speech(self, response: str, persona: Dict, context: Dict) -> str:
-        language_profile = persona.get("language_profile", {})
-        french_config = language_profile.get("french_integration", {})
-        if not french_config.get("enabled", False):
-            return response
-
-        phrases = persona.get("french_phrases", [])
-        if not phrases:
-            return response
-
-        mode = context.get("mode", "casual")
-        if mode == "urgent":
-            return response
-        if context.get("response_depth") == "social":
-            response = _trim_social_reply(response)
-        elif context.get("response_depth") == "brief":
-            response = _trim_brief_reply(response)
-        modulation = persona.get("style_modulation", {}).get(mode, {})
-        intensity = _safe_float(modulation.get("french_intensity", 0.2), default=0.2)
-
-        # The model prompt owns Curie's voice. Post-processing is only a light
-        # fallback when the generated reply contains no French at all.
-        if intensity <= 0:
-            return response
-
+        # Length is a generation target, not permission to delete sentences.
+        # Post-hoc clipping lost answers, caveats and natural follow-up questions.
         # The prompt owns the bilingual voice. Automatically inserting phrases
         # into generated sentences produced awkward or incorrect French.
         return response

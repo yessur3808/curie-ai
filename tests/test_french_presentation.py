@@ -11,6 +11,25 @@ def policy():
     return ResponsePolicy(persona, PersonalityContext(persona))
 
 
+@pytest.mark.parametrize("history", [[], [("assistant", "D’accord. Tea it is.")]])
+def test_goodnight_does_not_become_a_greeting(history):
+    assert (
+        policy().finalize(
+            "Bonsoir. Sleep well; Pip can guard the bottle caps.",
+            "Thanks. Goodnight.",
+            history=history,
+        )
+        == "Sleep well; Pip can guard the bottle caps."
+    )
+
+
+def test_evening_greeting_keeps_its_meaning_when_translated():
+    assert (
+        policy().finalize("Bonsoir. Good to see you.", "Reply in English only, please.")
+        == "Good evening. Good to see you."
+    )
+
+
 @pytest.mark.parametrize(
     "question,raw,expected",
     [

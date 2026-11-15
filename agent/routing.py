@@ -131,6 +131,13 @@ def _from_tool_request(request: ToolRequest) -> RoutingDecision:
 
 def _specialist(text: str) -> str | None:
     selected = get_runtime_registry().select(text)
+    if selected and selected.name == "scheduler_skill":
+        from agent.skills.scheduler import parse_reminder_request
+
+        # Legacy specialist hints must not bypass the typed request parser.
+        # Mentioning a schedule (including "no schedule") is not an action.
+        if parse_reminder_request(text) is None:
+            return None
     return selected.name if selected else None
 
 

@@ -120,7 +120,7 @@ def test_simple_thanks_uses_bounded_social_route():
     assert decision.intent == "social"
 
 
-def test_correction_with_tool_noun_uses_safe_social_route(monkeypatch):
+def test_correction_with_tool_noun_uses_contextual_conversation_not_a_tool(monkeypatch):
     async def fake_model(*args, **kwargs):
         return (
             '{"action":"inspect_project","params":{},"confidence":0.5,'
@@ -129,12 +129,20 @@ def test_correction_with_tool_noun_uses_safe_social_route(monkeypatch):
 
     monkeypatch.setattr("agent.intent_router._ask_intent_model", fake_model)
     decision = _route("There is no project")
-    assert decision.intent == "social"
+    assert decision.intent == "conversation"
     assert decision.selected_capability is None
 
 
 def test_unrelated_specialist_cannot_intercept_conversation():
     decision = _route("My trip to Paris was fun, and the weather metaphor was clever")
+    assert decision.intent == "conversation"
+    assert decision.selected_capability is None
+
+
+def test_suggesting_a_quiet_morning_does_not_schedule_a_reminder():
+    decision = _route(
+        "Switching topics: tomorrow I want a quiet morning. Suggest one simple thing, no schedule."
+    )
     assert decision.intent == "conversation"
     assert decision.selected_capability is None
 

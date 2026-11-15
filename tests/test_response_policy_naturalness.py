@@ -8,6 +8,25 @@ class _IdentityStyle:
         return response
 
 
+def test_repeated_french_aside_does_not_leave_dangling_punctuation():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    result = policy.finalize(
+        "$12.50 per person. *D'accord*, the total stays $75.",
+        "What is the budget per person now?",
+        history=[("assistant", "D’accord. Five people.")],
+    )
+    assert result == "$12.50 per person. All right, the total stays $75."
+
+
+def test_french_inside_an_italic_fact_is_not_deleted():
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    text = "*Voilà, 3 items remain at $12.50 each.*"
+    assert (
+        policy.finalize(text, "How many remain?", history=[("assistant", "Voilà.")])
+        == text
+    )
+
+
 @pytest.mark.parametrize(
     "response,user_text",
     [
@@ -43,13 +62,13 @@ def test_cleanup_preserves_meaningful_questions_and_punctuation(response, user_t
     assert policy.finalize(response, user_text) == response
 
 
-def test_neutral_personal_plan_drops_generic_praise_and_invented_wellness():
+def test_neutral_personal_plan_preserves_a_specific_conversational_reply():
     policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
     result = policy.finalize(
-        "That sounds like a good idea. It might help to clear your head.",
+        "Coffee later, then. Is there a café you have in mind?",
         "I might grab coffee later.",
     )
-    assert result == "Fair enough."
+    assert result == "Coffee later, then. Is there a café you have in mind?"
 
 
 def test_neutral_plan_guard_does_not_rewrite_questions_or_other_personas():
@@ -69,7 +88,7 @@ def test_detailed_user_situation_is_not_repeated_before_the_answer():
         "twenty minutes. What gets my attention first?",
     )
 
-    assert result == "The meeting comes first. I can check the flight details next."
+    assert result == "The meeting comes first."
 
 
 def test_generic_offer_is_removed_but_specific_proactive_solution_survives():
@@ -110,7 +129,7 @@ def test_casual_reply_drops_stiff_opening_and_generic_flattery():
     assert result == "You speak clearly and directly."
 
 
-def test_lightweight_opinion_is_bounded_without_clipping_complex_topics():
+def test_lightweight_opinion_preserves_the_reason_instead_of_clipping_sentences():
     policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
     result = policy.finalize(
         "Arrabbiata. It is punchy, simple, and much harder to fuss over than a sauce "
@@ -121,7 +140,8 @@ def test_lightweight_opinion_is_bounded_without_clipping_complex_topics():
 
     assert result == (
         "Arrabbiata. It is punchy, simple, and much harder to fuss over than a sauce "
-        "built around eggs and cheese."
+        "built around eggs and cheese. You also get plenty of garlic and chili without "
+        "having to babysit the pan. Keep it simple and finish it with parsley."
     )
 
 
@@ -135,15 +155,15 @@ def test_lightweight_opinion_does_not_invent_a_physical_plan_for_curie():
     assert result == "Tea and a book sounds cozy."
 
 
-def test_pick_one_reply_stays_decisive_and_drops_the_choice_handoff():
+def test_pick_one_reply_preserves_a_condition_but_drops_the_choice_handoff():
     policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
     result = policy.finalize(
-        "Tea and a book sounds pleasant, but if debugging is needed, I’m here. "
+        "Tea and a book, but if the tea keeps you awake, make it decaf. "
         "Let me know which you prefer.",
         "Long day. Tea and a book or more debugging? Pick one, keep it casual.",
     )
 
-    assert result == "Tea and a book sounds pleasant."
+    assert result == "Tea and a book, but if the tea keeps you awake, make it decaf."
 
 
 def test_generic_reassurance_and_truncated_tail_are_removed():
@@ -232,14 +252,17 @@ def test_generic_anything_else_offer_is_removed():
     )
 
 
-def test_priority_answer_is_decisive_and_proactively_offers_one_real_next_step():
+def test_priority_answer_does_not_invent_an_offer_or_delete_explanation():
     policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
     result = policy.finalize(
         "The meeting comes first. The flight and lights are secondary concerns.",
         "The lights are on, my flight is delayed, and a meeting starts soon. What gets my attention first?",
     )
 
-    assert result == "The meeting comes first. I can check the flight details next."
+    assert (
+        result
+        == "The meeting comes first. The flight and lights are secondary concerns."
+    )
 
 
 def test_invented_experience_and_empty_closing_offer_are_removed():

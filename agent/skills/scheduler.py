@@ -58,8 +58,12 @@ def _get_reminders_collection():
 # ---------------------------------------------------------------------------
 
 _REMINDER_KEYWORDS = re.compile(
-    r"\b(remind|reminder|reminders|alert|notify|don[\'']?t forget|schedule|set an alarm"
-    r"|set a reminder|add a reminder|create a reminder|new reminder)\b",
+    r"^\s*(?:(?:back|returning) to [^,!?;.]{1,80},\s*)?"
+    r"(?:(?:hey|hi)[, ]+(?:curie[, ]+)?)?"
+    r"(?:(?:please|(?:can|could|would|will) you(?: please)?)\s+)?"
+    r"(?:remind me\b|alert me\b|notify me\b|don['’]?t forget\b|schedule\s+|"
+    r"(?:set|add|create)\s+(?:an?\s+)?(?:alarm|reminder)\b|"
+    r"(?:new\s+)?reminder\s*:|i (?:need|want|would like)\s+(?:an?\s+)?reminder\b)",
     re.IGNORECASE,
 )
 
@@ -103,7 +107,7 @@ _TIME_PATTERNS = [
 
 
 def is_reminder_query(text: str) -> bool:
-    """Return True if the text looks like a reminder/scheduling intent."""
+    """Require a scheduling request, not incidental words such as 'no schedule'."""
     return bool(
         _REMINDER_KEYWORDS.search(text)
         and not _NON_REQUEST_REMINDER_CONTEXT.search(text)
