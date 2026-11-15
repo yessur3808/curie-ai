@@ -36,10 +36,7 @@ from llm import manager as llm_manager
 from agent.personality_context import PersonalityContext
 from agent.persona_contract import build_persona_contract
 from agent.provenance import response_provenance
-from agent.orchestration.response_policy import (  # noqa: F401
-    ResponsePolicy,
-    naturalize_prose_punctuation as _naturalize_prose_punctuation,
-)
+from agent.orchestration.response_policy import ResponsePolicy
 from agent.orchestration.model_service import ModelConversationService
 from agent.orchestration.learning_service import ConversationLearningService
 from agent.observability import (

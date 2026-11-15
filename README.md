@@ -215,18 +215,29 @@ Telegram uses `/` prefix; Discord uses the `!` prefix (e.g. `!start`, `!help`).
 
 **Telegram (`/`)**
 
+The command picker contains 12 everyday shortcuts. `/help` lists the full command
+set by purpose, including setup, privacy, recovery, and advanced voice controls.
+Commands hidden from the picker still work; permission and consent checks are
+unchanged. `/voice help` and `/help voice` open the same guide as `/voice_help`.
+
 | Command | Description |
 |---|---|
+| `/help` | Show everyday shortcuts and grouped advanced controls |
 | `/start` | Display the assistant's greeting |
+| `/agenda` | Show your upcoming agenda |
+| `/task` | List or manage durable multi-step tasks |
+| `/sources` | Retrieve sources for a recent update |
+| `/proactive` | Manage proactive suggestions and quiet time |
+| `/health` | Check independent capability readiness |
 | `/busy` | Pause proactive messages while you focus |
 | `/resume` | Resume normal proactive messaging |
 | `/remember <key> <value>` | Save a personal fact (e.g. `/remember city Paris`) |
 | `/identify <secret_username>` | Link your platform account to an existing profile |
 | `/reset` | Clear your conversation history |
-| `/history` | Show recent conversation history |
+| `/history` | Show conversation history statistics |
 | `/reminders` | List your upcoming reminders |
-| `/clear_memory` | Wipe all stored conversation context (admin) |
-| `/voice on\|off\|status` | Enable, disable, or inspect Telegram voice replies |
+| `/clear_memory [all]` | Clear the owner's conversation history across channels; `all` clears all users' sessions (owner-only, not complete personal-data erasure) |
+| `/voice on\|off\|status\|help` | Enable, disable, inspect, or get help with Telegram voice replies |
 | `/voice_profile clear\|soft\|expressive\|french\|custom` | Select a voice preset |
 | `/voice_accent neutral\|subtle\|strong` | Control English/French pronunciation routing |
 | `/voice_speed slow\|normal\|fast` | Adjust speech speed |

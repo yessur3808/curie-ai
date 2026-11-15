@@ -65,7 +65,7 @@ def test_response_policy_is_single_sanitize_and_personality_boundary():
     )
     assert "secret" not in result
     assert "Assistant:" not in result
-    assert "—" not in result
+    assert "I can help — oui." in result
     assert result.endswith("styled")
 
 

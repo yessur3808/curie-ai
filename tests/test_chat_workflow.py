@@ -16,7 +16,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from agent.chat_workflow import ChatWorkflow  # noqa: E402
 from agent.chat_workflow import (
     _is_predominantly_french,
-    _naturalize_prose_punctuation,
     _select_relevant_facts,
 )  # noqa: E402
 from agent.kernel.understanding import analyze_turn  # noqa: E402
@@ -409,20 +408,15 @@ You can use `api.call()` to fetch data *gestures at screen*."""
         assert "    " not in sanitized_aggressive
         assert "This has too many spaces" in sanitized_aggressive
 
-    def test_natural_punctuation_removes_em_dash_and_semicolon(self):
-        result = _naturalize_prose_punctuation(
-            "I can help — let's begin; We have plenty of time."
-        )
-        assert "—" not in result
-        assert ";" not in result
-        assert "let's begin. We" in result
+    def test_sanitization_preserves_prose_punctuation(self):
+        self.workflow_minimal.persona["name"] = "Curie"
+        source = "I can help — let's begin; we have plenty of time."
+        assert self.workflow_minimal._sanitize_output(source) == source
 
-    def test_natural_punctuation_preserves_code(self):
+    def test_sanitization_preserves_code_punctuation(self):
+        self.workflow_minimal.persona["name"] = "Curie"
         source = "Use this code — it works:\n```js\nconst x = 1;\n``` and `x++;`"
-        result = _naturalize_prose_punctuation(source)
-        assert "code, it works" in result
-        assert "const x = 1;" in result
-        assert "`x++;`" in result
+        assert self.workflow_minimal._sanitize_output(source) == source
 
     def test_sanitize_removes_canned_french_suffix(self):
         self.workflow_minimal.persona["name"] = "Curie"

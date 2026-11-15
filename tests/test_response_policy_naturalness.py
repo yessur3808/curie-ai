@@ -1,9 +1,46 @@
+import pytest
+
 from agent.orchestration.response_policy import ResponsePolicy
 
 
 class _IdentityStyle:
     def apply_response_style(self, response, *_args, **_kwargs):
         return response
+
+
+@pytest.mark.parametrize(
+    "response,user_text",
+    [
+        (
+            "Would you like me to turn off the desk lamp or the hallway lamp?",
+            "Turn off a lamp.",
+        ),
+        (
+            "There are two lamps. Would you like me to turn off the desk lamp or the hallway lamp?",
+            "Turn off a lamp.",
+        ),
+        (
+            "The draft is ready. Would you like me to send it?",
+            "Prepare a reply to Alex.",
+        ),
+        (
+            "Let me know which date you prefer: Monday or Tuesday.",
+            "Find a time next week.",
+        ),
+        ("What would you like me to change in the draft?", "Change the draft."),
+        (
+            "Monday and Tuesday are available. Let me know which you prefer.",
+            "Find a time next week.",
+        ),
+        ("Would you like help with anything else?", "What can you help with?"),
+        ("Today's forecast: 19.2–26.7°C; 4% rain chance.", "What's the forecast?"),
+        ("Window: 06:00–08:00; days 2–3 are warmer.", "Compare the forecast windows."),
+        ("See https://example.org/a;b?q=2–3 for the range.", "Show the source."),
+    ],
+)
+def test_cleanup_preserves_meaningful_questions_and_punctuation(response, user_text):
+    policy = ResponsePolicy({"name": "Curie"}, _IdentityStyle())
+    assert policy.finalize(response, user_text) == response
 
 
 def test_neutral_personal_plan_drops_generic_praise_and_invented_wellness():

@@ -58,7 +58,6 @@ class TelegramRuntime:
 
 
 _runtime = TelegramRuntime()
-user_persona_map = {}
 user_session_map = {}
 
 
@@ -113,6 +112,123 @@ WORKFLOW_COMMANDS = (
     "stop",
     "restart",
 )
+
+# Keep the picker focused on everyday actions. Advanced commands remain registered
+# and discoverable in /help; hiding them must never disable recovery or privacy.
+COMMAND_MENU = (
+    ("help", "Show everyday commands and advanced controls"),
+    ("agenda", "Show your upcoming agenda"),
+    ("reminders", "List upcoming reminders"),
+    ("task", "List or manage multi-step tasks"),
+    ("sources", "Show sources for a recent update"),
+    ("remember", "Save a preference or fact"),
+    ("voice", "Voice replies: on, off, status, or help"),
+    ("proactive", "Manage proactive updates and quiet time"),
+    ("busy", "Pause proactive messages temporarily"),
+    ("resume", "Resume proactive messages"),
+    ("health", "Check capability readiness"),
+    ("reset", "Start a fresh conversation"),
+)
+
+COMMAND_HELP_GROUPS = (
+    ("Everyday", tuple(command for command, _ in COMMAND_MENU)),
+    (
+        "Voice tuning (details: /voice help)",
+        (
+            "voice_profile",
+            "voice_accent",
+            "voice_speed",
+            "voice_warmth",
+            "voice_expression",
+            "voice_sample",
+            "voice_custom",
+            "voice_help",
+        ),
+    ),
+    (
+        "Preferences and privacy",
+        (
+            "adaptation",
+            "memory",
+            "reset_preferences",
+            "privacy",
+            "audit",
+            "security",
+            "clear_memory",
+        ),
+    ),
+    (
+        "Connections and extras",
+        (
+            "birthday",
+            "poll",
+            "home",
+            "gmail",
+            "x",
+            "twitter",
+            "browser",
+            "skill",
+        ),
+    ),
+    (
+        "Approvals and recovery (existing permission checks still apply)",
+        (
+            "approve",
+            "reject",
+            "diagnostics",
+            "selfheal",
+            "recovery",
+            "readiness",
+            "capabilities",
+            "status",
+            "metrics",
+            "tasks",
+            "doctor",
+            "logs",
+            "stop",
+            "restart",
+        ),
+    ),
+    ("Setup and session details", ("start", "whoami", "identify", "history")),
+)
+
+
+async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Static, token-free help also works when the conversational engine is down."""
+    if not update.message:
+        return
+    if " ".join(getattr(context, "args", []) or []).strip().casefold() == "voice":
+        await handle_voice_help(update, context)
+        return
+    sections = [
+        "You can talk to me normally. Commands are shortcuts when you need them."
+    ]
+    for title, commands in COMMAND_HELP_GROUPS:
+        if title == "Everyday":
+            body = "\n".join(
+                f"/{name} — {description}" for name, description in COMMAND_MENU
+            )
+        else:
+            body = " · ".join(f"/{name}" for name in commands)
+        sections.append(f"{title}\n{body}")
+    sections.append(
+        "/reset clears this chat's history; it does not erase saved preferences. "
+        "/clear_memory is an owner-only conversation-history control, "
+        "not a complete personal-data erasure."
+    )
+    await update.message.reply_text("\n\n".join(sections))
+
+
+async def handle_unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message:
+        command = (getattr(update.message, "text", None) or "").split(maxsplit=1)
+        if command and "@" in command[0]:
+            recipient = command[0].split("@", 1)[1].casefold()
+            if recipient != str(context.bot.username or "").casefold():
+                return  # A group command addressed to a different bot.
+        await update.message.reply_text(
+            "I don’t recognize that command. Use /help to see the available shortcuts."
+        )
 
 
 def set_workflow(workflow: ChatWorkflow):
@@ -369,46 +485,7 @@ async def notify_master_awake(application) -> None:
     set_commands = getattr(application.bot, "set_my_commands", None)
     if set_commands:
         await set_commands(
-            [
-                BotCommand("start", "Start Curie and show the welcome message"),
-                BotCommand("whoami", "Show your linked Curie identity"),
-                BotCommand(
-                    "identify", "Link this Telegram chat to your Curie identity"
-                ),
-                BotCommand("remember", "Save an explicit personal preference or fact"),
-                BotCommand("reset", "Reset this conversation"),
-                BotCommand("history", "Show conversation history statistics"),
-                BotCommand("reminders", "List upcoming reminders"),
-                BotCommand("poll", "Create a poll: question | option | option"),
-                BotCommand("busy", "Pause proactive messages temporarily"),
-                BotCommand("resume", "Resume proactive messages"),
-                BotCommand("voice", "Voice replies: on, off, or status"),
-                BotCommand(
-                    "voice_profile", "Choose clear, soft, expressive, French, or custom"
-                ),
-                BotCommand("voice_accent", "Choose neutral, subtle, or strong accent"),
-                BotCommand("voice_speed", "Choose slow, normal, or fast speech"),
-                BotCommand("voice_warmth", "Choose neutral, gentle, or warm delivery"),
-                BotCommand(
-                    "voice_expression", "Choose calm, balanced, or expressive delivery"
-                ),
-                BotCommand("voice_sample", "Hear a sample of the current voice"),
-                BotCommand(
-                    "voice_custom", "Custom voice consent, enrollment, and status"
-                ),
-                BotCommand("voice_help", "Show all voice controls"),
-                BotCommand("agenda", "Show your upcoming personal agenda"),
-                BotCommand("birthday", "Add an explicitly supplied birthday"),
-                BotCommand("task", "List or manage durable multi-step tasks"),
-                BotCommand("audit", "Inspect or export your private action audit"),
-                BotCommand("privacy", "View retention or purge expired records"),
-                BotCommand("security", "Show Curie’s active security controls"),
-                BotCommand("health", "Show independent capability readiness"),
-                BotCommand("capabilities", "Show Curie’s healthy capabilities"),
-                BotCommand("proactive", "Control proactive suggestions and quiet time"),
-                BotCommand("adaptation", "Inspect or tune Curie’s learned preferences"),
-                BotCommand("clear_memory", "Erase Curie’s saved memory for you"),
-            ]
+            [BotCommand(name, description) for name, description in COMMAND_MENU]
         )
     if os.getenv("NOTIFY_MASTER_ON_STARTUP", "true").lower() not in {
         "1",
@@ -573,9 +650,12 @@ async def handle_voice_command(update: Update, context: ContextTypes.DEFAULT_TYP
     """Route /voice through the shared preference service and always answer in text."""
     if not update.message or not update.effective_user:
         return
+    argument = " ".join(getattr(context, "args", []) or []).strip()
+    if argument.casefold() == "help":
+        await handle_voice_help(update, context)
+        return
     user = update.effective_user
     internal_id = get_internal_id(user.id, user.username or f"telegram_{user.id}")
-    argument = " ".join(getattr(context, "args", []) or []).strip()
     command = f"/voice {argument}".strip()
     from memory.adaptation import handle_adaptation_command
     from services.voice_commands import voice_status
@@ -586,7 +666,7 @@ async def handle_voice_command(update: Update, context: ContextTypes.DEFAULT_TYP
         else handle_adaptation_command(internal_id, command, "telegram")
     )
     await update.message.reply_text(
-        response or "Use /voice on, /voice off, or /voice status."
+        response or "Use /voice on, /voice off, /voice status, or /voice help."
     )
 
 
@@ -1246,6 +1326,32 @@ async def close_voice_workers(application):
     await close_recognition_workers()
 
 
+def command_handlers() -> dict:
+    """One registration table for visible commands and backwards-compatible controls."""
+    handlers = {
+        "start": handle_start,
+        "help": handle_help,
+        "whoami": handle_whoami,
+        "identify": handle_identify,
+        "busy": handle_busy,
+        "resume": handle_resume,
+        "voice": handle_voice_command,
+        "voice_sample": handle_voice_sample,
+        "voice_custom": handle_voice_custom,
+        "voice_help": handle_voice_help,
+        "remember": handle_remember,
+        "reset": handle_reset,
+        "history": handle_history,
+        "reminders": handle_reminders,
+        "poll": handle_poll,
+        "clear_memory": handle_clear_memory,
+    }
+    for setting in ("profile", "accent", "speed", "warmth", "expression"):
+        handlers[f"voice_{setting}"] = handle_voice_setting_command
+    handlers.update(dict.fromkeys(WORKFLOW_COMMANDS, handle_workflow_command))
+    return handlers
+
+
 def start_telegram_bot(workflow: ChatWorkflow):
     """Start Telegram bot with shared ChatWorkflow."""
     _runtime.workflow = workflow
@@ -1266,31 +1372,9 @@ def start_telegram_bot(workflow: ChatWorkflow):
     # Store the application so send_message() can use it for proactive delivery
     _runtime.application = app
 
-    app.add_handler(CommandHandler("start", handle_start))
-    app.add_handler(CommandHandler("whoami", handle_whoami))
-    app.add_handler(CommandHandler("identify", handle_identify))
-    app.add_handler(CommandHandler("busy", handle_busy))
-    app.add_handler(CommandHandler("resume", handle_resume))
-    app.add_handler(CommandHandler("voice", handle_voice_command))
-    for voice_setting in (
-        "voice_profile",
-        "voice_accent",
-        "voice_speed",
-        "voice_warmth",
-        "voice_expression",
-    ):
-        app.add_handler(CommandHandler(voice_setting, handle_voice_setting_command))
-    app.add_handler(CommandHandler("voice_sample", handle_voice_sample))
-    app.add_handler(CommandHandler("voice_custom", handle_voice_custom))
-    app.add_handler(CommandHandler("voice_help", handle_voice_help))
-    app.add_handler(CommandHandler("remember", handle_remember))
-    app.add_handler(CommandHandler("reset", handle_reset))
-    app.add_handler(CommandHandler("history", handle_history))
-    app.add_handler(CommandHandler("reminders", handle_reminders))
-    app.add_handler(CommandHandler("poll", handle_poll))
-    app.add_handler(CommandHandler("clear_memory", handle_clear_memory))
-    for workflow_command in WORKFLOW_COMMANDS:
-        app.add_handler(CommandHandler(workflow_command, handle_workflow_command))
+    for name, callback in command_handlers().items():
+        app.add_handler(CommandHandler(name, callback))
+    app.add_handler(MessageHandler(filters.COMMAND, handle_unknown_command))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_message))

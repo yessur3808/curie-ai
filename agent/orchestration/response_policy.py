@@ -51,11 +51,13 @@ GENERIC_FLATTERY_SENTENCE_PATTERN = re.compile(
     re.I,
 )
 GENERIC_FOLLOWUP_PATTERN = re.compile(
-    r"(?:\s+|^)(?:would you like (?:me to )?.+|what would you like me to .+|"
-    r"how can i (?:help|assist).+|let me know if (?:you need|i can|there(?:'s| is)) .+|"
-    r"let me know (?:which|what) you prefer.+|"
-    r"let me know (?:whether )?there(?:'s| is) anything else.+|"
-    r"i['’]m here if you need anything.+)\?*\s*$",
+    # Only an empty closing offer after a complete answer. Broad 'would you like'
+    # removal erased meaningful clarifications, consent requests, and whole replies.
+    r"(?<=[.!?])\s+(?:would you like (?:help with )?anything else|"
+    r"let me know if (?:you need|there['’]s|there is) anything else"
+    r"(?: i can (?:help|assist) (?:with|you with))?|"
+    r"i['’]m here if you need anything(?: else)?)"
+    r"[.!?]?\s*$",
     re.I,
 )
 GENERIC_REASSURANCE_SENTENCE_PATTERN = re.compile(
@@ -191,24 +193,6 @@ def _remove_suffix_preserving_punctuation(text: str, pattern: re.Pattern) -> str
     if punctuation and stem and stem[-1] not in ".!?":
         stem += punctuation
     return stem
-
-
-def naturalize_prose_punctuation(text: str) -> str:
-    protected = re.compile(r"```[\s\S]*?```|`[^`\n]+`")
-    parts: list[str] = []
-    cursor = 0
-    for match in protected.finditer(text):
-        parts.append(_rewrite_punctuation(text[cursor : match.start()]))
-        parts.append(match.group(0))
-        cursor = match.end()
-    parts.append(_rewrite_punctuation(text[cursor:]))
-    return "".join(parts)
-
-
-def _rewrite_punctuation(text: str) -> str:
-    text = re.sub(r"\s*[—–]\s*", ", ", text)
-    text = re.sub(r";\s+([A-Z])", lambda match: ". " + match.group(1), text)
-    return re.sub(r";\s*", ", ", text)
 
 
 _REDUNDANCY_STOP_WORDS = frozenset(
@@ -453,7 +437,6 @@ class ResponsePolicy:
             response = _remove_suffix_preserving_punctuation(
                 response, CANNED_ADDRESS_SUFFIX_PATTERN
             )
-            response = naturalize_prose_punctuation(response)
         if not self.minimal_sanitization:
             response = CODE_BLOCK_PATTERN.sub("", response).strip()
             response = INLINE_CODE_PATTERN.sub("", response).strip()
@@ -592,6 +575,15 @@ class ResponsePolicy:
             ).strip()
             if without_physical_plan:
                 styled = without_physical_plan
+        if re.search(r"\b(?:pick|choose) one\b", str(user_text or ""), re.I):
+            # Don't hand an explicit choice request back to the user. Outside
+            # this context the same sentence can be a useful clarification.
+            styled = re.sub(
+                r"(?<=[.!?])\s+let me know (?:which|what) you prefer[.!?]?\s*$",
+                "",
+                styled,
+                flags=re.I,
+            ).strip()
         styled = GENERIC_FOLLOWUP_PATTERN.sub("", styled).strip()
         styled = GENERIC_REASSURANCE_SENTENCE_PATTERN.sub("", styled).strip()
         styled = remove_trailing_fragment(styled)
