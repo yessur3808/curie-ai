@@ -6,6 +6,71 @@ open-ended message as a closed acknowledgement just because it starts with thank
 
 import re
 
+
+def weather_observation(text: str) -> bool:
+    """Closed vocabulary for a harmless weather correction, never a request.
+
+    This deliberately abstains on unfamiliar wording. A broad weather keyword
+    match must not consume an additional instruction or a personal disclosure.
+    """
+    words = re.findall(r"[\w'’]+", text.casefold())
+    allowed = {
+        "no",
+        "rain",
+        "storm",
+        "snow",
+        "not",
+        "raining",
+        "rainy",
+        "snowing",
+        "it",
+        "is",
+        "it's",
+        "it’s",
+        "quite",
+        "very",
+        "actually",
+        "hot",
+        "warm",
+        "humid",
+        "muggy",
+        "stuffy",
+        "here",
+        "but",
+        "at",
+        "least",
+        "there",
+        "and",
+        "still",
+        "today",
+        "now",
+        "just",
+        "outside",
+        "i'm",
+        "i’m",
+        "i",
+        "am",
+        "surviving",
+    }
+    return bool(
+        words
+        and set(words) <= allowed
+        and not any(mark in text for mark in ("?", '"', "`", "“", "”"))
+        and re.search(
+            r"\b(?:no (?:rain|storm|snow)|not (?:raining|rainy|snowing))\b", text, re.I
+        )
+        and not re.search(r"\bnot (?:hot|warm|humid|muggy|stuffy)\b", text, re.I)
+    )
+
+
+def without_weather_preface(text: str) -> str:
+    """Remove at most one closed weather statement before a separate request."""
+    preface = re.fullmatch(r"([^.!?;]+)[.!;]\s+(.+)", text.strip(), re.S)
+    if preface and weather_observation(preface.group(1)):
+        return preface.group(2)
+    return text
+
+
 ACKNOWLEDGEMENT = re.compile(
     r"^(?:(?:thanks(?: a lot)?|thank you|cheers)"
     r"(?:[,!. ]+(?:that (?:helped|helps|worked)|that(?:['’]s| is) helpful|"

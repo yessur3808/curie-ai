@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 
 from agent.orchestration.contracts import ResponseCandidate
-from agent.conversation_contract import ACKNOWLEDGEMENT, closed_repetition_feedback
+from agent.conversation_contract import (
+    ACKNOWLEDGEMENT,
+    closed_repetition_feedback,
+    weather_observation,
+)
 
 
 class SocialConversationService:
@@ -67,9 +71,10 @@ class SocialConversationService:
             return ResponseCandidate(
                 "Got it. No query needed.", "social:no_tool_acknowledgement"
             )
-        if self._WEATHER_CORRECTION.fullmatch(
-            text.strip()
-        ) or self._HOT_NO_RAIN_UPDATE.fullmatch(text.strip()):
+        if weather_observation(text) and (
+            self._WEATHER_CORRECTION.fullmatch(text.strip())
+            or self._HOT_NO_RAIN_UPDATE.fullmatch(text.strip())
+        ):
             reply = (
                 "Oof. That kind of stuffy heat is miserable."
                 if re.search(r"\b(?:hot|warm|humid|muggy|stuffy)\b", text, re.I)

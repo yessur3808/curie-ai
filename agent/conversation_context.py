@@ -36,7 +36,11 @@ _ELLIPSIS = re.compile(
 
 def discussion_only(text):
     """Discussion, explanation and prohibitions do not authorize execution."""
-    clean = str(text or "").strip()
+    from agent.conversation_contract import without_weather_preface
+
+    # "Not raining. Turn off the lamp" negates weather, not the action.
+    # Any prohibition in the remaining request still takes precedence.
+    clean = without_weather_preface(str(text or "").strip())
     if clean.startswith("/"):
         return False
     if re.match(

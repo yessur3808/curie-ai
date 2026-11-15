@@ -162,7 +162,11 @@ def _remove_suffix_preserving_punctuation(text: str, pattern: re.Pattern) -> str
     punctuation = next((mark for mark in "?!" if mark in suffix), "")
     if not punctuation and "." in suffix:
         punctuation = "."
-    stem = text[: match.start()].rstrip()
+    # Once an end-tag is removed, its joining punctuation has no right-hand
+    # clause. Preserve internal punctuation, but do not produce "done;.".
+    stem = text[: match.start()].rstrip(" ,;:—–")
+    if not stem:
+        return text
     if punctuation and stem and stem[-1] not in ".!?":
         stem += punctuation
     return stem

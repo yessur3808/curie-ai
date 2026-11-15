@@ -21,6 +21,22 @@ import uuid
 from unittest.mock import patch
 
 FLOWS = {
+    "fresh_company": [
+        "I spent the afternoon drafting a proposal. I haven't sent it yet. Just keeping you company, no work advice please.",
+        "I found a typo after closing the laptop. Give me one dry joke about that, not a plan.",
+        "Different topic: I like rainy afternoons and strong black coffee.",
+        "Ask me one relaxed question about that.",
+        "The sound on the windows. I usually read while it rains.",
+        "Back to the proposal: have I told you whether I sent it?",
+        "Correction: I sent it ten minutes ago. No need to remind me.",
+        "Thanks. Goodnight.",
+    ],
+    "compound_requests": [
+        "No rain, quite hot and stuffy actually. Turn off the desk lamp.",
+        "Is the lamp off now?",
+        "You already shared that engineering update. Explain why it might still be relevant, without inventing any new release details.",
+        "No schedule please. Just suggest one easy thing to cook with rice and eggs.",
+    ],
     "evening_close": [
         "Let's leave our tiny dragon Pip guarding her bottle caps tonight.",
         "Thanks. Goodnight.",
@@ -133,6 +149,8 @@ def behavioral_checks(row):
     """Objective floor only: passing these is not a conversational-quality score."""
     key = (row["flow"], row["turn"])
     expected_calls = {
+        ("compound_requests", 1): ["home_control"],
+        ("compound_requests", 2): ["home_status"],
         ("error_recovery", 1): ["x_search"],
         ("tool_followup", 1): ["weather"],
         ("tool_followup", 3): ["weather"],
@@ -145,6 +163,20 @@ def behavioral_checks(row):
         "only_expected_tool_calls": [c["capability"] for c in row["tool_calls"]]
         == expected_calls.get(key, []),
     }
+    if row["flow"] in {"fresh_company", "compound_requests"}:
+        checks["no_dangling_punctuation"] = not re.search(r"[;:,][.!?]", reply)
+    if key == ("fresh_company", 2):
+        checks["joke_uses_conversational_model"] = (row.get("coordination") or {}).get(
+            "roles"
+        ) == ["general"]
+    if key == ("fresh_company", 4):
+        checks["one_invited_question"] = reply.count("?") == 1
+    if key in {("fresh_company", 8), ("evening_close", 2), ("everyday_chat", 10)}:
+        checks["farewell_not_greeting"] = not re.match(
+            r"(?:hello|bonjour)\b", reply, re.I
+        )
+    if key in {("compound_requests", 1), ("compound_requests", 2)}:
+        checks["lamp_verified_off"] = "Desk Lamp: off" in reply
     if key not in expected_calls:
         checks["no_unrequested_tool_route"] = not (
             (row.get("routing") or {}).get("selected_capability")

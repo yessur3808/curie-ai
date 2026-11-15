@@ -873,7 +873,12 @@ def classify_request(
 ) -> Optional[ToolRequest]:
     """Recognize explicit, high-confidence requests without model inference."""
     from agent.conversation_context import discussion_only
+    from agent.conversation_contract import without_weather_preface
 
+    # Only a closed, non-instructional weather observation may be skipped.
+    # Parse the entire remaining request with the same prohibition, quoting,
+    # target-validation and approval rules; never extract an action keyword.
+    text = without_weather_preface(text)
     if discussion_only(text):
         return None
     if history:

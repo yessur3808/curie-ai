@@ -248,7 +248,14 @@ async def route_request(
         )
         _record(owner_id, text, decision)
         return decision
-    clauses = [part for part in _MULTI_SPLIT.split(text.strip()) if part]
+    from agent.conversation_contract import without_weather_preface
+
+    # A weather observation is not a second task needing an ordering question.
+    clauses = [
+        part
+        for part in _MULTI_SPLIT.split(without_weather_preface(text.strip()))
+        if part
+    ]
     timezone_name = _owner_timezone(owner_id)
     if len(clauses) > 1:
         clause_decisions = [

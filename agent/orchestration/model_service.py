@@ -142,6 +142,13 @@ class ModelConversationService:
     def model_role(user_text: str) -> str:
         """Select a model specialty from the user's actual task."""
         text = user_text.strip().casefold()
+        # Negated output types are constraints, not specialist requests. Keep
+        # the original message intact for generation and all authorization.
+        text = re.sub(
+            r"\b(?:not|no|without)\s+(?:an?\s+)?(?:plan|analysis|strategy|research|code)\b",
+            "",
+            text,
+        )
         if ModelConversationService.is_lightweight_opinion(user_text):
             # Contextual conversation deserves the main local model. The small
             # fast model remains available for mechanical text transformations.
@@ -159,7 +166,7 @@ class ModelConversationService:
             return "general"
         if (
             re.search(
-                r"\b(?:would|should|why|analy[sz]e|investigate|evaluate|tradeoffs?|first step|first measure|root cause)\b",
+                r"\b(?:would|should|why|explain|analy[sz]e|investigate|evaluate|tradeoffs?|first step|first measure|root cause)\b",
                 text,
             )
             and re.search(
