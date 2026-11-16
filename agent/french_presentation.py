@@ -6,7 +6,7 @@ FRENCH_TOUCH = re.compile(
     r"\b(?:bonjour|bonsoir|salut|merci|voilà|d['’]accord|bien\s+sûr|"
     r"avec\s+plaisir|je\s+comprends|c['’]est|très|ça|bon\s+courage|"
     r"bon\s+repos|bon\s+appétit|en\s+effet|mon\s+dieu|quelle|magnifique|"
-    r"charmant|parfait|monsieur|madame|mon\s+ami)\b",
+    r"charmant|parfait|monsieur|madame|mon\s+ami|bonne\s+nuit|à\s+bientôt|à\s+la\s+prochaine)\b",
     re.I,
 )
 LANGUAGE_OR_EXACT_REQUEST = re.compile(
@@ -78,7 +78,7 @@ def constrain_french_opening(
     )
     explicit_french = bool(
         re.search(
-            r"\b(?:speak|say|write|reply|respond|translate)\b.{0,30}\bfrench\b",
+            r"\b(?:speak|say|write|reply|respond|answer|translate)\b.{0,40}\b(?:french|français)\b",
             user_text,
             re.I,
         )
@@ -101,7 +101,12 @@ def constrain_french_opening(
         or context["user_emotion"] == "distress"
     )
     if not english_only and (
-        explicit_french or (not restrained and not repeats_french(response, history))
+        explicit_french
+        or (
+            not restrained
+            and not repeats_french(response, history)
+            and len(french_touches(response)) <= 1
+        )
     ):
         return response
     openings = (

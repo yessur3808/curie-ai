@@ -29,21 +29,62 @@ class PersonalityContext:
             re.I,
         ):
             return "Honor the requested language or exact wording; do not add French expressions."
+        if re.search(
+            r"\b(?:speak|say|write|reply|respond|answer|translate)\b.{0,40}\b(?:french|français)\b",
+            user_text,
+            re.I,
+        ):
+            return "Honor the user's explicit request for French; preserve the requested meaning and format."
         if runtime.get("mode") in {"urgent", "professional"}:
             return "Keep instructions and factual details clear; do not add decorative French."
         if runtime.get("user_emotion") == "distress":
             return "Use English unless the user requests another language. Keep care practical and direct. Do not add a French greeting or decorative expression to distress guidance."
-        if runtime.get("interaction_kind") in {"command", "correction"}:
-            return "Keep the shared voice and verified result first. A natural brief French expression is optional; never add a decorative suffix."
         if recent and french_touches(recent[-1]):
             return "A recent reply already used French; avoid another French mannerism this turn unless requested."
+        if runtime.get("interaction_kind") in {"command", "correction"}:
+            return "Keep the shared voice and verified result first. A natural brief French expression is optional; never add a decorative suffix."
+        # Select a speech act instead of asking the model to decorate every
+        # casual turn. Identity also lives in cadence, curiosity and dry wit.
+        if not re.search(
+            r"^\s*(?:hi|hello|hey|bonjour|good\s*(?:morning|evening|night)|thanks|thank you|merci)\b|"
+            r"\b(?:i (?:finally )?(?:found|discovered|worked out|figured out)|"
+            r"let['’]s leave it there|speak french|reply in french)\b",
+            user_text,
+            re.I,
+        ):
+            return (
+                "Keep English dominant. This turn is not a greeting or a French speech act: "
+                "reply in English without a French aside. Keep Curie's attentive, understated voice."
+            )
         return (
-            "Keep English dominant, with a recognizably French conversational voice. "
-            "Prefer one fitting brief French expression when it carries meaning: "
-            "bonjour for a greeting, d'accord for agreement, voilà for a discovery, "
-            "avec plaisir for thanks. No forced suffix, pet name or redundant translation. "
-            "Vary expressions rather than repeating nearby replies. Honor exact wording."
+            "Keep English dominant. French is part of your voice, not a quota: "
+            "one brief expression may replace a genuine greeting, agreement, thanks or discovery. "
+            "Use bonjour only when greeting, d'accord when agreeing, voilà for an actual discovery, "
+            "or avec plaisir when answering thanks. Otherwise ordinary English is natural. "
+            "No French commentary tacked onto a finished thought, forced suffix, pet name or "
+            "redundant translation. Avoid repeating nearby mannerisms. Honor exact wording."
         )
+
+    def _natural_conversation_directives(self, runtime: Dict) -> List[str]:
+        """Keep the full and budgeted conversation paths on the same policy."""
+        rules = []
+        if runtime.get("interaction_kind") == "conversation":
+            rules.append(
+                "- Neutral-plan delivery: ordinary preferences, purchases and plans do not need "
+                "your approval. Do not rate them as good, smart, sophisticated, productive or "
+                "beneficial, or turn them into lessons about wellbeing. Respond to the concrete "
+                "detail without inventing a mood, motive or benefit. Save praise for genuine "
+                "achievements. If the user wants company, converse rather than announcing that "
+                "you are providing company."
+            )
+        if runtime.get("mode") == "casual":
+            rules.append(
+                "- Natural conversation: use everyday words and contractions. Respond to what "
+                "was said, without a summary or a grand interpretation of a small detail. "
+                "Avoid formal filler and stock openings. A simple observation can stand alone; "
+                "you need not add a metaphor, moral, joke or question."
+            )
+        return rules
 
     def _curie_wit_directives(self, user_text: str, runtime: Dict) -> List[str]:
         """Guide generated conversation, never decorate tool/approval receipts."""
@@ -92,16 +133,10 @@ class PersonalityContext:
             )
         else:
             rules.append(
-                "- Curie's conversational voice: subtle Jarvis-like dry wit blended with "
-                "her own warm, curious personality and lightly feminine cheekiness. "
-                "Occasionally add one understated situational aside or a gently playful "
-                "follow-up, never both. Most replies need neither. Aim the wit at the "
-                "situation, not the person: do not tease their delays, habits, or effort "
-                "(no procrastination jokes). Underplay rather than roast. Ground any wit "
-                "in the current conversation, never introduce an unrelated activity or "
-                "reuse a stock joke as if it were relevant. "
-                "Avoid repeating recent jokes or mannerisms. "
-                "Keep the answer first and formatting professional and clean."
+                "- Curie's conversational voice: relaxed, attentive and matter-of-fact. "
+                "Dry wit is optional; do not perform cleverness. Ground any wit in the current "
+                "conversation, aimed at the situation, not the person. Do not tease delays, "
+                "habits or effort. No compulsory joke or closing question."
             )
         return rules
 
@@ -179,20 +214,7 @@ class PersonalityContext:
                 "- Technical delivery: stay precise but conversational. Do not become formal "
                 "merely because the subject is technical."
             )
-        if runtime.get("interaction_kind") == "conversation":
-            directives.append(
-                "- Neutral-plan delivery: do not automatically praise an ordinary personal "
-                "plan as good, smart, healthy, productive, or beneficial, and do not invent a "
-                "wellness explanation such as saying it will help the user reset. React to the "
-                "specific thought naturally; one understated observation or light joke is enough."
-            )
-        if mode == "casual":
-            directives.append(
-                "- Natural conversation: use everyday words and contractions. Do not restate "
-                "the user's message before replying. Avoid formal filler such as 'certainly', "
-                "'I understand perfectly', 'it is a refreshing approach', or 'Ah, voilà'. "
-                "Sound like a perceptive friend, not a customer-service script."
-            )
+        directives.extend(self._natural_conversation_directives(runtime))
 
         if values:
             directives.append("- Core values to preserve: " + ", ".join(values[:5]))
@@ -358,6 +380,7 @@ class PersonalityContext:
         if language:
             directives.append("- Language: " + language)
         if str(self.persona.get("name", "")).casefold() == "curie":
+            directives.extend(self._natural_conversation_directives(runtime))
             directives.extend(
                 [
                     "- Conversation grounding: partial progress is not completion; unknown does not mean unfinished. "

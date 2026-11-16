@@ -9,8 +9,8 @@ from agent.personality_context import PersonalityContext
 def test_curie_wit_is_optional_and_bounded(builder):
     context = PersonalityContext({"name": "Curie"})
     rules = "\n".join(getattr(context, builder)("I finally organized my desk."))
-    assert "Jarvis-like" in rules
-    assert "Most replies need neither" in rules
+    assert "Dry wit is optional" in rules
+    assert "No compulsory joke or closing question" in rules
     assert "at most one" in rules
     assert "never mock the user" in rules.casefold()
     assert "approval requests" in rules

@@ -128,7 +128,7 @@ CONGRATULATIONS_PATTERN = re.compile(
     re.I,
 )
 EXPLICIT_FRENCH_REQUEST_PATTERN = re.compile(
-    r"\b(?:speak|say|write|reply|respond|translate)\b.{0,30}\b(?:in|into)?\s*french\b|"
+    r"\b(?:speak|say|write|reply|respond|answer|translate)\b.{0,40}\b(?:french|français)\b|"
     r"^\s*(?:bonjour|salut)\b",
     re.I,
 )

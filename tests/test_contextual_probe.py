@@ -45,6 +45,10 @@ def test_probe_requires_curie_instead_of_workflow_fallback(monkeypatch):
         ),
         ("natural_holdout", 8, "We called it Peregrine.", "retains_chosen_name"),
         ("everyday_chat", 3, "Which pet? Which color?", "one_invited_question"),
+        ("voice_holdout", 1, "A sophisticated choice.", "no_stock_preference_praise"),
+        ("voice_transfer", 4, "An excellent choice.", "no_stock_preference_praise"),
+        ("voice_holdout", 3, "What colour? What size?", "one_invited_question"),
+        ("voice_transfer", 6, "Goodnight. Anything else?", "respects_conversation_end"),
     ],
 )
 def test_behavioral_gates_reject_observed_failures(flow, turn, reply, failed_check):

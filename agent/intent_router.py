@@ -868,6 +868,33 @@ def _corrective_home_request(
     return None
 
 
+def _bus_arrivals_requested(text: str) -> bool:
+    """Require a transit request, not incidental bus/commute vocabulary.
+
+    In particular, 'next to the bus stop' is a location description, not a
+    request for the next bus. Bare route/ETA queries remain useful shortcuts.
+    Negation and quotation guards in classify_request still apply first.
+    """
+    clause = r"(?:^|[.!?;]\s+)\s*"
+    polite = r"(?:(?:please\s+)|(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?))?"
+    transit = r"\b(?:bus(?:es|ses)?|kmb|citybus|18x|33x|(?:morning|evening|afternoon) commute)\b"
+    request = (
+        clause
+        + polite
+        + r"(?:check|show|get|track|find|look up|tell me|when|what(?:['’]s| is)?|how long|is there)\b"
+        + r"[^.!?;]{0,100}"
+        + transit
+    )
+    shorthand = (
+        clause + r"(?:next\s+(?:bus(?:es)?(?:\s+(?:18x|33x))?|18x|33x)|"
+        r"bus(?:\s+(?:18x|33x))?\s+(?:arrivals?|eta)|eta\s+(?:for\s+)?(?:18x|33x)|"
+        r"(?:morning|evening|afternoon) commute|"
+        r"(?:18x|33x)(?:\s+(?:or|and)\s+(?:18x|33x))?)"
+        r"(?:\s+(?:from|to|at|arrivals?|eta)\b[^.!?;]*)?[.!?]*\s*$"
+    )
+    return bool(re.search(request, text, re.I) or re.search(shorthand, text, re.I))
+
+
 def classify_request(
     text: str, history: Iterable[Any] | None = None, *, timezone_name=None
 ) -> Optional[ToolRequest]:
@@ -1667,10 +1694,7 @@ def classify_request(
         candidates.append(ToolRequest("inspect_project", {"path": "."}))
     elif re.search(r"\b(?:run|execute)\b.*\btests?\b", lowered):
         candidates.append(ToolRequest("run_tests", {"path": "."}))
-    if re.search(
-        r"\b(?:18x|33x)\b|\b(?:bus|buses|busses|kmb|citybus)\b.{0,80}\b(?:arrival|arrive|eta|commute|from|when|track)\b|\b(?:check|when|track|next)\b.{0,80}\b(?:bus|buses|busses|kmb|citybus)\b|\b(?:morning|evening|afternoon) commute\b",
-        lowered,
-    ):
+    if _bus_arrivals_requested(text):
         candidates.append(ToolRequest("bus_arrivals", {"query": text}))
     if not re.search(
         r"\b(?:weather|storm|rain)\s+(?:metaphor|symbol|imagery)\b|"

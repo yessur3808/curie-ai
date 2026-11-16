@@ -21,11 +21,43 @@ pytestmark = pytest.mark.security
         "18X from Ka On Street to Healthy Village",
         "18x or 33x from model housing estate to connaught garden",
         "Track KMB 1A from Star Ferry to Sau Mau Ping",
+        "When is the next bus from Central?",
+        "Next bus from Central",
+        "Next 18X",
+        "Next bus 18X",
+        "Bus 18X arrivals",
+        "ETA for 33X",
+        "Bus arrivals at Central",
+        "Could you check the next bus?",
+        "I chose the museum. Check my morning commute.",
     ],
 )
 def test_routes_to_bus_tool(query):
     assert classify_request(query).action == "bus_arrivals"
     assert get_runtime_registry().get("bus_arrivals").resource_policy.network
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "I chose the museum because it was next to the bus stop, not for any deep reason.",
+        "I read a book on the 18X yesterday.",
+        "My morning commute was surprisingly quiet.",
+        "I was next in line at the bus stop.",
+        "I remember when the bus arrived early.",
+        "The chair was from an old bus.",
+        "Don't check bus arrivals.",
+        'The sign said "check bus arrivals".',
+        "I like the 33X bus.",
+    ],
+)
+def test_bus_mentions_do_not_request_live_arrivals(query):
+    from agent.routing import route_request
+
+    assert classify_request(query) is None
+    decision = asyncio.run(route_request(query, allow_model_inference=False))
+    assert decision.intent == "conversation"
+    assert decision.selected_capability is None
 
 
 @pytest.mark.parametrize(

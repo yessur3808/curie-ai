@@ -2085,6 +2085,28 @@ class ChatWorkflow:
             return history[-4:]
         return history
 
+    @staticmethod
+    def _failure_context_relevant(snapshot, user_text: str) -> bool:
+        """Do not reattach an old failure to a continuation of a newer topic.
+
+        Retain the historical result for an explicit question about the error;
+        changing subjects must not delete evidence or authorize a retry.
+        """
+        failure = snapshot.last_failed_goal
+        topic = snapshot.active_topic
+        if failure is None:
+            return False
+        if topic is None or topic.created_at <= failure.created_at:
+            return True
+        return bool(
+            re.search(r"\b(?:error|failure|failed|fail|went wrong)\b", user_text, re.I)
+            and re.search(
+                r"\b(?:what|why|explain|back to|returning to|you (?:said|reported|mentioned))\b",
+                user_text,
+                re.I,
+            )
+        )
+
     def _prepare_prompt_context(
         self,
         history: list,
@@ -2216,6 +2238,7 @@ class ChatWorkflow:
             and transition.kind is TransitionClass.CONTINUATION
             and snapshot.last_failed_goal
             and not snapshot.last_failed_goal.expired()
+            and self._failure_context_relevant(snapshot, user_text)
         ):
             candidates.append(
                 ContextCandidate(

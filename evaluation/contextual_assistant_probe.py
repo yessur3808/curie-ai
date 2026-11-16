@@ -21,6 +21,22 @@ import uuid
 from unittest.mock import patch
 
 FLOWS = {
+    "voice_transfer": [
+        "I chose the museum because it was next to the bus stop, not for any deep reason.",
+        "I spent most of the visit looking at a wonky old chair. It amused me.",
+        "Give me a dry joke about the chair, not about my taste.",
+        "Different topic: I prefer salty popcorn to sweet popcorn.",
+        "Ask me one question about that.",
+        "Usually just salt, nothing fancy. Anyway, goodnight Curie.",
+    ],
+    "voice_holdout": [
+        "I bought a plain blue notebook. Nothing profound; I just liked the colour.",
+        "I haven't written in it yet. No advice needed, I'm just chatting.",
+        "Ask me one relaxed question about it.",
+        "Mostly shopping lists and things I don't want to forget.",
+        "Give me one dry joke about a notebook full of shopping lists. Don't compliment me.",
+        "Thanks. Let's leave it there for tonight.",
+    ],
     "fresh_company": [
         "I spent the afternoon drafting a proposal. I haven't sent it yet. Just keeping you company, no work advice please.",
         "I found a typo after closing the laptop. Give me one dry joke about that, not a plan.",
@@ -93,6 +109,7 @@ FLOWS = {
         "You previously mentioned the X search tool failed. Is that a login problem or something else?",
         "What can we do instead without paying X? Just one useful option.",
         "Different topic: I'm choosing dinner. Lentil soup or noodles, after a heavy lunch? Pick one.",
+        "Ask me one question about dinner.",
     ],
     "reference_editing": [
         "Draft two short notes to Nora: one apologizing for being late, one thanking her for waiting. Label them A and B. Don't send anything.",
@@ -163,8 +180,27 @@ def behavioral_checks(row):
         "only_expected_tool_calls": [c["capability"] for c in row["tool_calls"]]
         == expected_calls.get(key, []),
     }
-    if row["flow"] in {"fresh_company", "compound_requests"}:
+    if row["flow"] in {
+        "fresh_company",
+        "compound_requests",
+        "voice_holdout",
+        "voice_transfer",
+    }:
         checks["no_dangling_punctuation"] = not re.search(r"[;:,][.!?]", reply)
+    if key in {("voice_holdout", 1), ("fresh_company", 3), ("voice_transfer", 4)}:
+        checks["no_stock_preference_praise"] = not re.search(
+            r"\b(?:solid|excellent|great|smart|wise|sophisticated) (?:choice|combination|pairing|taste)\b",
+            reply,
+            re.I,
+        )
+    if key in {("voice_holdout", 3), ("voice_transfer", 5)}:
+        checks["one_invited_question"] = reply.count("?") == 1
+    if key in {("voice_holdout", 6), ("voice_transfer", 6)}:
+        checks["respects_conversation_end"] = "?" not in reply
+    if row["flow"] in {"voice_holdout", "voice_transfer"}:
+        checks["no_empty_service_closing"] = not re.search(
+            r"anything else|how can i (?:help|assist)", reply, re.I
+        )
     if key == ("fresh_company", 2):
         checks["joke_uses_conversational_model"] = (row.get("coordination") or {}).get(
             "roles"
@@ -275,6 +311,11 @@ def behavioral_checks(row):
         )
     if key in {("error_recovery", 2), ("error_recovery", 3)}:
         checks["retains_credit_error"] = "credit" in reply.casefold()
+    if row["flow"] == "error_recovery" and row["turn"] >= 5:
+        checks["no_old_failure_evidence_after_topic_change"] = (
+            "last-failed-tool-result"
+            not in ((row.get("coordination") or {}).get("evidence_ids") or [])
+        )
     if key == ("reference_editing", 1):
         checks["short_drafts"] = len(reply.split()) <= 80
         checks["recipient_preserved"] = "Nora" in reply
@@ -529,13 +570,18 @@ async def run_probe(report, *, keep_going=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", required=True)
-    parser.add_argument("--flow", choices=FLOWS)
+    parser.add_argument(
+        "--flow",
+        choices=FLOWS,
+        action="append",
+        help="Flow to run; repeat to select several.",
+    )
     parser.add_argument("--keep-going", action="store_true")
     args = parser.parse_args()
     if args.flow:
-        selected = FLOWS[args.flow]
+        selected = {name: FLOWS[name] for name in args.flow}
         FLOWS.clear()
-        FLOWS[args.flow] = selected
+        FLOWS.update(selected)
     from dotenv import load_dotenv
 
     load_dotenv()

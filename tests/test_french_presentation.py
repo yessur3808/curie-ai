@@ -76,7 +76,41 @@ def test_older_different_french_does_not_silence_current_touch(history):
     directive = PersonalityContext(active_persona())._french_turn_directive(
         "Thanks", {"mode": "casual"}, history
     )
-    assert "Prefer one fitting" in directive
+    assert "one brief expression may replace" in directive
+
+
+def test_double_french_speech_act_becomes_one_without_changing_content():
+    from agent.french_presentation import constrain_french_opening
+
+    assert (
+        constrain_french_opening(
+            "D'accord. Bonne nuit.", "Goodnight.", active_persona()
+        )
+        == "All right. Bonne nuit."
+    )
+    assert (
+        constrain_french_opening(
+            "D'accord. Bonne nuit.", "Reply in French.", active_persona()
+        )
+        == "D'accord. Bonne nuit."
+    )
+    assert (
+        constrain_french_opening(
+            "Bonjour. Total: $12.50; voilà.", "Show the total.", active_persona()
+        )
+        == "Hello. Total: $12.50; voilà."
+    )
+
+
+def test_explicit_answer_in_french_survives_final_boundary_and_recent_french():
+    assert (
+        policy().finalize(
+            "D'accord. Bonne nuit.",
+            "Please answer in French.",
+            history=[("assistant", "Bonjour.")],
+        )
+        == "D'accord. Bonne nuit."
+    )
 
 
 def test_adjacent_or_same_recent_expression_is_not_injected():
