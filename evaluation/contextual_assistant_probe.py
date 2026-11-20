@@ -21,6 +21,14 @@ import uuid
 from unittest.mock import patch
 
 FLOWS = {
+    "recall_language_transfer": [
+        "I haven't booked the train tickets yet. Just mentioning it; no advice or reminders.",
+        "Have I mentioned whether the tickets are booked?",
+        "Correction: I booked them this morning. The departure time is 07:35.",
+        "English only: what time did I say the train departs?",
+        "Reply with exactly this and nothing else: Train 07:35 — platform 4",
+        "Could you say goodnight in French? Just a short farewell.",
+    ],
     "voice_transfer": [
         "I chose the museum because it was next to the bus stop, not for any deep reason.",
         "I spent most of the visit looking at a wonky old chair. It amused me.",
@@ -180,6 +188,23 @@ def behavioral_checks(row):
         "only_expected_tool_calls": [c["capability"] for c in row["tool_calls"]]
         == expected_calls.get(key, []),
     }
+    if key == ("recall_language_transfer", 2):
+        checks["recalls_negative_status_report"] = bool(
+            re.search(
+                r"(?:said|told|mentioned|earlier).*?(?:\b\w+n't\b|\bnot\b|unbooked)",
+                reply,
+                re.I,
+            )
+        ) and not re.match(r"\s*no\b", reply, re.I)
+    if key == ("recall_language_transfer", 4):
+        checks["retains_departure_time"] = "07:35" in reply
+        checks["english_only"] = not re.search(
+            r"bonjour|voilà|d'accord|bien sûr", reply, re.I
+        )
+    if key == ("recall_language_transfer", 5):
+        checks["exact_output_preserved"] = reply == "Train 07:35 — platform 4"
+    if key == ("recall_language_transfer", 6):
+        checks["honors_explicit_french"] = "bonne nuit" in reply.casefold()
     if row["flow"] in {
         "fresh_company",
         "compound_requests",
@@ -187,9 +212,35 @@ def behavioral_checks(row):
         "voice_transfer",
     }:
         checks["no_dangling_punctuation"] = not re.search(r"[;:,][.!?]", reply)
-    if key in {("voice_holdout", 1), ("fresh_company", 3), ("voice_transfer", 4)}:
+    if key in {
+        ("voice_holdout", 1),
+        ("voice_holdout", 4),
+        ("fresh_company", 3),
+        ("voice_transfer", 1),
+        ("voice_transfer", 4),
+    }:
         checks["no_stock_preference_praise"] = not re.search(
-            r"\b(?:solid|excellent|great|smart|wise|sophisticated) (?:choice|combination|pairing|taste)\b",
+            r"\b(?:solid|excellent|great|smart|wise|sophisticated|pragmatic|practical|reliable|good) "
+            r"(?:choice|combo|combination|pairing|taste)\b|\bpractical and efficient\b",
+            reply,
+            re.I,
+        )
+    if key == ("voice_transfer", 1):
+        checks["conversational_role_for_anecdote"] = (
+            row.get("coordination") or {}
+        ).get("roles") == ["general"]
+        checks["no_invented_weather"] = not re.search(r"\brain|raining\b", reply, re.I)
+    if key == ("fresh_company", 6):
+        checks["recalls_reported_proposal_status"] = bool(
+            re.search(
+                r"(?:said|told|mentioned|earlier|last).*?(?:\b\w+n't\b|\bnot\b|unsent)",
+                reply,
+                re.I,
+            )
+        ) and not re.match(r"\s*no\b", reply, re.I)
+    if key in {("error_recovery", 2), ("error_recovery", 3)}:
+        checks["no_invented_credit_reset"] = not re.search(
+            r"billing cycle|credits? (?:to )?(?:reset|refresh)|resets? (?:on|at|next)",
             reply,
             re.I,
         )
@@ -262,7 +313,7 @@ def behavioral_checks(row):
     if key in {("natural_conversation", 5), ("context_recall", 1)}:
         checks["grounded_uncertainty"] = bool(
             re.search(
-                r"(?:don't|not|unknown|haven't|can't|cannot|unclear)", reply, re.I
+                r"(?:\bno\b|don't|not|unknown|haven't|can't|cannot|unclear)", reply, re.I
             )
         )
         checks["uses_partial_progress_context"] = bool(
@@ -329,7 +380,9 @@ def behavioral_checks(row):
     if key == ("tool_followup", 4):
         checks["latest_city_reference"] = "osaka" in reply.casefold()
     if key == ("device_flow", 3):
-        checks["does_not_deny_verified_action"] = not any(
+        checks["does_not_deny_verified_action"] = not re.match(
+            r"\s*I (?:didn't|did not)[.!]", reply, re.I
+        ) and not any(
             phrase in reply.casefold()
             for phrase in (
                 "didn't turn",

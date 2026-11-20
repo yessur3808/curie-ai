@@ -1,5 +1,25 @@
 from agent.orchestration.model_service import ModelConversationService
 from llm.chat_prompt import conversation_prompt
+import pytest
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I chose the museum because it was next to the bus stop, not for any deep reason.",
+        "I bought it for no particular reason.",
+        "The reason I like it is the colour.",
+    ],
+)
+def test_incidental_reason_is_not_a_reasoning_task(text):
+    assert ModelConversationService.model_role(text) == "general"
+
+
+@pytest.mark.parametrize(
+    "text", ["Reason through these constraints", "Reason about this paradox"]
+)
+def test_explicit_reasoning_request_keeps_specialist(text):
+    assert ModelConversationService.model_role(text) == "reasoning"
 
 
 def test_reasoning_followup_retains_specialist_but_new_topic_does_not():

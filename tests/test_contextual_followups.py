@@ -88,6 +88,40 @@ def test_corrected_location_runs_a_real_lookup(city):
     assert classify_request(f"Actually I meant {city}. Check that instead.") is None
 
 
+@pytest.mark.parametrize(
+    "followup", ["Would I need an umbrella there?", "Should I bring a coat?"]
+)
+def test_weather_correction_survives_a_weather_clarification(followup):
+    history = [
+        {"role": "user", "content": "What's the weather in Kyoto tomorrow?"},
+        {"role": "assistant", "content": "Rain."},
+        {"role": "user", "content": followup},
+        {"role": "assistant", "content": "Yes."},
+    ]
+    result = classify_request("Actually I meant Osaka. Check that instead.", history)
+    assert result.action == "weather"
+    assert "Osaka" in result.params["query"]
+    assert "tomorrow" in result.params["query"]
+
+
+@pytest.mark.parametrize(
+    "followup",
+    [
+        "New topic: should I bring a coat?",
+        "Would I need a lamp there?",
+        "Would I need an umbrella there? Send Nora a message.",
+    ],
+)
+def test_correction_does_not_cross_other_topics_or_compound_requests(followup):
+    history = [
+        {"role": "user", "content": "Weather in Kyoto?"},
+        {"role": "user", "content": followup},
+    ]
+    assert (
+        classify_request("Actually I meant Osaka. Check that instead.", history) is None
+    )
+
+
 def test_conversation_pressure_does_not_silently_replace_the_model(tmp_path):
     from services.resource_governor import ResourceGovernor
 

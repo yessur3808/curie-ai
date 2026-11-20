@@ -70,6 +70,18 @@ def test_curly_apostrophes_do_not_fail_grounded_uncertainty():
     assert all(checks.values())
 
 
+def test_plain_no_with_partial_progress_is_valid_uncertainty():
+    checks = behavioral_checks(
+        {
+            "flow": "context_recall",
+            "turn": 1,
+            "assistant": "No, you only mentioned finding the missing piece.",
+            "tool_calls": [],
+        }
+    )
+    assert all(checks.values())
+
+
 def test_completed_social_acknowledgement_is_not_a_tool_action():
     row = {
         "flow": "briefing_feedback",

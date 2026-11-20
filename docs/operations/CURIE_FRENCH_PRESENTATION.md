@@ -1,5 +1,9 @@
 # Curie's French presentation
 
+The [November 20 validation](CURIE_CHAT_VALIDATION_2026-11-20.md) records the
+subsequent repeated-chat investigation, retained code repairs and unresolved
+model-quality failures.
+
 Curie's personality is presentation, not a model-intelligence upgrade. Inference
 remains local. The change adds no translation model, second generation pass,
 background training, or global conversation counter.
@@ -117,6 +121,20 @@ inference, and sandboxed tool results. They do not send Telegram messages. The
 checks are a regression floor, not a human-quality certificate: manual review
 must still look for flattery, invented motives, incorrect recall and repetitive
 questions. A passing report must not be described as proving natural conversation.
+
+Re-score earlier saved conversations with today's checks without generating new
+answers or overwriting the original evidence:
+
+```sh
+.venv/bin/python -m evaluation.review_conversation_reports \
+  evaluation/reports/curie-final-acceptance-2026-11-16.json
+```
+
+The command exits nonzero for failed checks, incomplete runs, and empty reports.
+It deliberately does not assign a naturalness score. Keep manual review findings
+alongside objective checks; a rephrased compliment can evade a phrase-based gate.
+The `recall_language_transfer` flow adds a fresh negative-status report, correction,
+English-only request, exact-output constraint, and explicit French farewell.
 
 November 16 outcome: 3,215 offline tests passed. The final 14-turn live report
 `evaluation/reports/curie-final-acceptance-2026-11-16.json` confirmed the routing,

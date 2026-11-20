@@ -1727,6 +1727,13 @@ class ChatWorkflow:
             except Exception:
                 pass
 
+        # Routing uses parser-normalized text; generation and conversational
+        # memory need the validated source, including punctuation and code
+        # indentation. Never trust a caller-supplied _original_text override.
+        inbound_event = normalized_input.get("_inbound_event")
+        if isinstance(inbound_event, InboundEvent):
+            user_text = inbound_event.original_text.strip()
+
         try:
             # Load user profile and conversation history in parallel
             with trace.stage("context"):

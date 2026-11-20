@@ -7,7 +7,12 @@ from unittest.mock import patch
 import pytest
 
 from llm.chat_prompt import as_chat_prompt, conversation_prompt
-from llm.coordination import coordinated_answer, context_digest, verify_answer
+from llm.coordination import (
+    coordinated_answer,
+    context_digest,
+    verify_answer,
+    deterministic_issues,
+)
 from llm.ensemble import should_use_ensemble
 from llm.local_gateway import execute, receive, send
 
@@ -30,6 +35,21 @@ def evidence_prompt():
                 },
             }
         ]
+    )
+
+
+@pytest.mark.parametrize(
+    "answer", ["I didn’t. You asked me to, so I did.", "I didn’t turn it off."]
+)
+def test_curly_apostrophe_or_short_denial_cannot_deny_verified_device_action(answer):
+    assert "denied_verified_action" in deterministic_issues(
+        evidence_prompt(), answer, "Why did you turn it off?"
+    )
+
+
+def test_short_denial_of_unrelated_action_is_not_a_device_contradiction():
+    assert "denied_verified_action" not in deterministic_issues(
+        evidence_prompt(), "I didn't.", "Did you also post on Twitter?"
     )
 
 
@@ -108,6 +128,8 @@ def test_verified_action_cannot_be_denied(answer):
     )
     assert result.status == "blocked"
     assert "Desk Lamp is off" in result.answer
+    assert "your request" in result.answer
+    assert "Turn off the desk lamp" in result.answer
 
 
 def test_unexecuted_action_cannot_be_claimed():

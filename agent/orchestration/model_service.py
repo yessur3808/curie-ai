@@ -187,7 +187,7 @@ class ModelConversationService:
         ):
             return "coding"
         if re.search(
-            r"\b(?:reason|analyse|analyze|evaluate|compare|tradeoffs?|prove|math|"
+            r"\b(?:reason (?:through|about)|analyse|analyze|evaluate|compare|tradeoffs?|prove|math|"
             r"calculate|architecture|design|strategy|plan|research|investigate|"
             r"diagnose|why does|root cause|step by step|correlate|infer|deduce|"
             r"cause and effect|pros and cons|best approach|best option|recommend|"

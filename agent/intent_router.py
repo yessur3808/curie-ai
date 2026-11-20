@@ -927,6 +927,22 @@ def classify_request(
                     continue
                 if role != "user":
                     continue
+                if re.match(
+                    r"\s*(?:new topic|different topic|moving on|separately)\b",
+                    str(content),
+                    re.I,
+                ):
+                    break
+                # Preserve the original location and date through a closed
+                # weather clarification, even if it also matches generic weather.
+                if re.fullmatch(
+                    r"\s*(?:would|will|might|do|should) I "
+                    r"(?:need|bring|take|carry|wear) (?:an? |my )?"
+                    r"(?:umbrella|raincoat|coat|jacket)(?: (?:there|then))?[?.! ]*",
+                    str(content),
+                    re.I,
+                ):
+                    continue
                 prior = classify_request(
                     str(content), history=rows[:index], timezone_name=timezone_name
                 )

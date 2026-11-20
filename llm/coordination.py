@@ -75,6 +75,7 @@ def _outcomes(prompt):
 
 def deterministic_issues(prompt, answer, user_text):
     """Conservative checks of action claims, not a semantic quality score."""
+    answer = answer.replace("’", "'")
     if _DRAFT.search(user_text):
         return ()
     outcomes = _outcomes(prompt)
@@ -100,6 +101,12 @@ def deterministic_issues(prompt, answer, user_text):
             break
     if successful and _DENIED_ACTION.search(answer):
         issues.append("denied_verified_action")
+    elif (
+        any("home_control" in o.get("capabilities", ()) for o in successful)
+        and re.match(r"\s*why did you (?:turn|switch)\b", user_text, re.I)
+        and re.match(r"\s*I (?:didn't|did not)[.!]", answer, re.I)
+    ):
+        issues.append("denied_verified_action")
     # Missing credentials and an unrelated credit error do not prove login state.
     claims_login = re.search(
         r"\b(?:you (?:are|aren't)|I (?:am|am not)|we are|you're|I'm) "
@@ -119,6 +126,18 @@ def deterministic_issues(prompt, answer, user_text):
 def grounded_fallback(prompt, issues=()):
     """Never return an unverified model draft after a failed verification."""
     outcomes = _outcomes(prompt)
+    if "denied_verified_action" in issues:
+        for outcome in reversed(outcomes):
+            if (
+                outcome.get("status") in {"verified", "already_satisfied"}
+                and "home_control" in outcome.get("capabilities", ())
+                and outcome.get("request")
+                and outcome.get("response")
+            ):
+                return (
+                    f"I followed your request: “{outcome['request']}”. "
+                    + str(outcome["response"]).strip()
+                )
     responses = [str(o.get("response", "")).strip() for o in outcomes]
     responses = [r for r in responses if r]
     if responses:
