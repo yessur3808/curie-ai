@@ -14,7 +14,7 @@ def capability_discovery(item):
     text = title + " " + excerpt
     subject = bool(re.search(WATCHED_TOOLS, text, re.I)) or bool(
         re.search(
-            r"agent (?:harness|workspace|framework|setup)|coding (?:agent|tool|assistant)|persistent memory|remote coding|agentic",
+            r"agent (?:harness|workspace|framework|setup|orchestration)|coding (?:agent|tool|assistant)|AI (?:workspace|coding|developer tool)|developer tools?|persistent memory|remote coding|agentic",
             text,
             re.I,
         )
@@ -86,3 +86,42 @@ def devin_updates(body, now):
                 }
             )
     return items[:24]
+
+
+def workflow_explanation(item):
+    """Feature-linked proposed uses; source claims stay in the separate summary.
+
+    No product catalog: unfamiliar tools get the same treatment. No inferred
+    integration, price, performance or hands-on testing claims.
+    """
+    text = str(item.get("excerpt", ""))
+    angles = (
+        (
+            r"remote (?:session|control|coding)|session handoff|desktop and phone",
+            "I’d explore this for checking or steering a coding task away from your desk. The potential benefit is continuity without returning to the same screen; verify authentication and which actions the remote client actually supports.",
+        ),
+        (
+            r"persistent memory|durable context|memory across|remember.*session",
+            "I’d try this on a project you revisit across sessions. Useful memory could save you from repeating conventions and decisions; check what is retained, how to correct it and how projects stay separated.",
+        ),
+        (
+            r"parallel sessions|isolated workspaces|worktrees|multi-agent|agent orchestration",
+            "I’d try this on two independent repository tasks. The potential benefit is progressing separate pieces of work together; isolation does not remove the need to review changes and resolve integration conflicts.",
+        ),
+        (
+            r"open.weights?|local deployment|quantiz|hardware requirements",
+            "I’d evaluate this as a model you could run for your own coding tasks. The benefit could be more control over deployment and data; measure quality, memory use and latency on your hardware before replacing anything.",
+        ),
+        (
+            r"sandbox|permissions|credential",
+            "I’d examine this before letting an agent work on a real repository. Better isolation could make experimentation easier to contain; verify the actual permission boundaries and exposed data.",
+        ),
+        (
+            r"plugin|integration|MCP|tool.call",
+            "I’d test one supported connection in a disposable workflow. The potential benefit is reducing manual handoffs between the agent and your tools; check compatibility, permissions and failure handling first.",
+        ),
+    )
+    for pattern, explanation in angles:
+        if re.search(pattern, text, re.I):
+            return explanation
+    return ""

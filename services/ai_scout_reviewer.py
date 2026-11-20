@@ -60,7 +60,7 @@ async def review(candidates, prefs):
                     else "General engineering"
                 ),
                 "required_relevance": (
-                    "Find interesting capability discoveries: T3 Code features, Devin and Hermes use cases, "
+                    "Discover unfamiliar tools and useful new setups as well as updates. Named projects are taste examples, not a whitelist or a reason to rank higher. Other credible sources are welcome alongside X. Find interesting capabilities such as T3 Code features, Devin and Hermes use cases, "
                     "ADE/Zeron/Paseo/MausBot/OpenBot setups, and new open-source or open-weight LLMs "
                     "with useful advances in coding, reasoning, tool use, multimodality or hardware requirements. "
                     "Choose source-described features and things the owner could actually do. A familiar "

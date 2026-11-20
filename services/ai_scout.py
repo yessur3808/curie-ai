@@ -252,6 +252,27 @@ def discovery_queries(prefs, index, now):
         for handle in prefs.get("preferred_accounts", [])[:12]
         if isinstance(handle, str) and re.fullmatch(r"[A-Za-z0-9_]{1,15}", handle)
     ]
+    if prefs.get("discovery_style") == "exploratory":
+        topics = (
+            '("agent harness" OR "coding agent") (setup OR workflow OR tool)',
+            '("remote coding" OR "agent workspace" OR "remote control") (agent OR developer)',
+            '("persistent memory" OR "agent memory") (setup OR tool OR workflow)',
+            '("open weights" OR "open source LLM") (coding OR reasoning OR multimodal)',
+            '("developer tools" OR "AI coding") (launch OR demo OR walkthrough)',
+            '("agent orchestration" OR "multi-agent") (workspace OR setup OR tutorial)',
+        )
+        # Two broad searches and one rotating creator group, never a brand watchlist.
+        rotation = now.date().toordinal() * 4 + index
+        queries = [topics[(rotation * 2 + n) % len(topics)] + since for n in range(2)]
+        if accounts:
+            group = [
+                accounts[(rotation * 3 + n) % len(accounts)]
+                for n in range(min(3, len(accounts)))
+            ]
+            queries.append("(" + " OR ".join("from:" + h for h in group) + ")" + since)
+        else:
+            queries.append(topics[(rotation * 2 + 2) % len(topics)] + since)
+        return queries
     if accounts:
         # Named anchors always get coverage; peers share a second bounded search.
         groups = (accounts[:2], accounts[2:])
@@ -482,6 +503,16 @@ async def fetch_releases(now, cache):
         async def fetch(repository, topic, feed_url=None, domain=None):
             async with gate:
                 saved = cache.get(repository, {})
+                checked = parse_time(saved.get("checked_at"))
+                # Direct project checks are daily background coverage. Editorial feeds
+                # remain fresh each slot and can introduce unfamiliar projects.
+                if (
+                    not domain
+                    and checked
+                    and timedelta(0) <= now - checked < timedelta(days=1)
+                ):
+                    items.extend(saved.get("items", []))
+                    return
                 headers = {"If-None-Match": saved["etag"]} if saved.get("etag") else {}
                 try:
                     async with client.stream(
@@ -490,6 +521,7 @@ async def fetch_releases(now, cache):
                         headers=headers,
                     ) as response:
                         if response.status_code == 304:
+                            saved["checked_at"] = now.isoformat()
                             items.extend(saved.get("items", []))
                             return
                         response.raise_for_status()
@@ -522,6 +554,7 @@ async def fetch_releases(now, cache):
                                 )
                             )
                         cache[repository] = {
+                            "checked_at": now.isoformat(),
                             "etag": response.headers.get("etag", "")[:256],
                             "items": parsed,
                         }
@@ -600,19 +633,6 @@ def rank_candidates(items, state, prefs, now, history=()):
         )
         item["score"] = round(
             strength
-            + (
-                8
-                if discovery
-                and raw.get("publisher")
-                in {
-                    "pingdotgg/t3code",
-                    "getpaseo/paseo",
-                    "zeronsh/zeron",
-                    "milind-soni/OpenMausBot",
-                    "Devin",
-                }
-                else 0
-            )
             - age / 12
             - (3 if preview else 0)
             - (2 if len(item.get("excerpt", "")) < 60 else 0)
@@ -721,6 +741,12 @@ def report_parts(items, coverage, prefs=None):
                 f"\n[{label}]({item['url']}) · Not independently tested.",
             ]
         )
+        if (prefs or {}).get("explain_tools"):
+            from services.scout_discovery import workflow_explanation
+
+            explanation = workflow_explanation(item)
+            if explanation:
+                lines.insert(-1, "\n**Where I’d use it:** " + explanation)
         if coverage.get("x") != "read" and index == min(3, len(items)):
             lines.append("\nX browsing is unavailable; this edition uses public feeds.")
         parts.append("\n".join(lines))
@@ -854,6 +880,7 @@ class AIScoutWorker:
         )
         save_personal_item(owner, STATE, state)
         try:
+            prefs = preferences(owner)
             coverage, posts = {"x": "not_authenticated"}, []
             metadata = self.metadata(owner)
             allowed = profile.get("x_research_browser_risk_accepted") and profile.get(
@@ -925,7 +952,15 @@ class AIScoutWorker:
                         **item,
                         "observed_at": now.isoformat(),
                         "expires_at": (
-                            parse_time(item["published_at"]) + timedelta(hours=48)
+                            parse_time(item["published_at"])
+                            + timedelta(
+                                hours=(
+                                    168
+                                    if prefs.get("discovery_scope")
+                                    == "capability_discoveries"
+                                    else 48
+                                )
+                            )
                         ).isoformat(),
                     },
                 )
@@ -1007,6 +1042,8 @@ class AIScoutWorker:
             state["delivery"] = "no_telegram_identity"
             return
         prefs = preferences(owner)
+        from services.scout_discovery import capability_discovery
+
         if prefs.get("focus") == "engineering_lead":
             from services.scout_novelty import novel_engineering
 
@@ -1023,7 +1060,14 @@ class AIScoutWorker:
             findings = [
                 item
                 for item in findings
-                if engineering_score(item) >= 3 and len(useful_summary(item)) >= 60
+                if (
+                    engineering_score(item) >= 3
+                    or (
+                        prefs.get("discovery_scope") == "capability_discoveries"
+                        and capability_discovery(item)
+                    )
+                )
+                and len(useful_summary(item)) >= 60
             ]
         if not findings:
             state["delivery"] = "no_relevant_items"

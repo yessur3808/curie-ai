@@ -143,3 +143,15 @@ review packet; neither creates a delivery quota. Cards lead with the product and
 source-described capability instead of a version-only title. Letta receives the
 same updated editorial criteria. This is bounded feed discovery, not unrestricted
 web/X crawling or proof of user-visible quality. No manual digest required.
+
+### Exploratory owner preference
+
+`discovery_style=exploratory` uses two rotating broad X topic queries plus one
+rotating creator group, subject to existing browser enrollment and safety gates.
+Named products are taste examples; ranking has no product-name bonus. Public
+editorial sources remain valid discovery inputs. Direct project feeds reuse
+successful cached results for 24 hours; editorial feeds still revalidate each
+slot. The existing publication-age and novelty filters apply to cached items.
+`explain_tools=true` adds feature-linked proposed workflow uses, benefits and
+checks to cards, without claiming hands-on testing or inventing product facts.
+The capability-discovery window is seven days for both selection and expiry.
