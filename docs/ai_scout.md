@@ -123,3 +123,23 @@ General Telegram replies prefer paragraph boundaries, preserve Markdown links, a
 hide link previews. Default proactive text is rendered as safe HTML and split too;
 explicit native parse modes remain caller-owned. Network errors never trigger a plain
 text retry in replies. The standalone scout runner uses the same HTML renderer.
+
+
+### Capability discoveries (2026-11-20 owner correction)
+
+Owner scope `capability_discoveries` replaces the earlier hands-on-tools-only
+restriction: meaningful T3 Code/Devin/Hermes features, ADE/Zeron/Paseo/MausBot/
+OpenBot workflows, and capable new open-source/open-weight models are eligible.
+Public collection now includes T3 Code, Paseo, Zeron, MausBot and two separately
+identified OpenBot repositories, Devin's dated official feature notes, and Simon
+Willison's Atom feed for practical discoveries. Existing feeds remain available.
+New sources were verified read-only; project claims are not independent tests.
+Seven-day discovery lookback accommodates weekly feature notes; existing URL and
+content deduplication, quiet hours and send receipts remain enforced. Only this
+scope uses seven days; older modes retain48hours at ranking. Feature-bearing
+previews are explicitly labeled; download-only previews remain suppressed.
+One candidate per publisher and a model contender (when eligible) improve the
+review packet; neither creates a delivery quota. Cards lead with the product and
+source-described capability instead of a version-only title. Letta receives the
+same updated editorial criteria. This is bounded feed discovery, not unrestricted
+web/X crawling or proof of user-visible quality. No manual digest required.

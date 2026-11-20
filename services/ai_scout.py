@@ -6,9 +6,10 @@ import asyncio
 from datetime import datetime, time, timedelta, timezone
 import hashlib
 import re
-from email.utils import parsedate_to_datetime
+from email.utils import parsedate_to_datetime, format_datetime
 from urllib.parse import urlparse
 from defusedxml import ElementTree as ET
+from xml.etree.ElementTree import Element, SubElement
 
 import httpx
 
@@ -37,6 +38,12 @@ TOPICS = {
 # Explicit public project release feeds. New sources require an operator change;
 # post text cannot redirect the reader to arbitrary URLs or install software.
 FEEDS = (
+    ("pingdotgg/t3code", "tools"),
+    ("getpaseo/paseo", "tools"),
+    ("zeronsh/zeron", "tools"),
+    ("milind-soni/OpenMausBot", "agents"),
+    ("nightly-labs/openbot", "agents"),
+    ("CopilotKit/OpenBot", "agents"),
     ("ollama/ollama", "local-ai"),
     ("ggml-org/llama.cpp", "local-ai"),
     ("vllm-project/vllm", "local-ai"),
@@ -49,6 +56,12 @@ FEEDS = (
     ("anthropics/claude-code", "tools"),
 )
 BLOGS = (
+    (
+        "Simon Willison",
+        "https://simonwillison.net/atom/everything/",
+        "simonwillison.net",
+        "research",
+    ),
     ("OpenAI", "https://openai.com/news/rss.xml", "openai.com", "models"),
     (
         "Hugging Face",
@@ -61,7 +74,7 @@ BLOGS = (
 
 def x_candidates(posts, now):
     patterns = {
-        "harnesses": r"\bharness|context engineering|\bmcp\b|letta|hermes",
+        "harnesses": r"\bharness|context engineering|\bmcp\b|letta|hermes|t3\s*code|zeron|paseo|devin|mausbot|openbot|\bADE\b",
         "local-ai": r"local llm|quantiz|\bgguf\b|\bllama\.cpp\b|\bvllm\b|\bollama\b",
         "agents": r"\bai agents?\b|agent framework|multi.agent",
         "models": r"\bllms?\b|open.weights|\bqwen\b|\bglm\b|reasoning model",
@@ -106,7 +119,7 @@ def x_candidates(posts, now):
     return results
 
 
-def parse_blog_feed(body, publisher, domain, topic, now):
+def parse_blog_feed(body, publisher, domain, topic, now, lookback_hours=48):
     if (
         len(body) > 2097152
         or b"<!DOCTYPE" in body.upper()
@@ -114,6 +127,34 @@ def parse_blog_feed(body, publisher, domain, topic, now):
     ):
         raise ValueError("feed_not_supported")
     root = ET.fromstring(body)
+    if root.tag == "{http://www.w3.org/2005/Atom}feed":
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        rss = Element("rss")
+        channel = SubElement(rss, "channel")
+        for entry in root.findall("a:entry", ns)[:25]:
+            stamp = parse_time(
+                entry.findtext("a:published", namespaces=ns)
+                or entry.findtext("a:updated", namespaces=ns)
+            )
+            if not stamp:
+                continue
+            node = SubElement(channel, "item")
+            for key, value in {
+                "pubDate": format_datetime(stamp),
+                "title": entry.findtext("a:title", "", ns),
+                "description": entry.findtext("a:summary", namespaces=ns)
+                or entry.findtext("a:content", "", ns),
+                "link": next(
+                    (
+                        link.get("href", "")
+                        for link in entry.findall("a:link", ns)
+                        if link.get("rel", "alternate") == "alternate"
+                    ),
+                    "",
+                ),
+            }.items():
+                SubElement(node, key).text = value
+        root = rss
     result = []
     for entry in root.findall("./channel/item")[:25]:
         try:
@@ -124,7 +165,7 @@ def parse_blog_feed(body, publisher, domain, topic, now):
         parsed = urlparse(url)
         if (
             not stamp.tzinfo
-            or not now - timedelta(hours=48) <= stamp <= now
+            or not now - timedelta(hours=lookback_hours) <= stamp <= now
             or parsed.scheme != "https"
             or parsed.netloc != domain
         ):
@@ -223,10 +264,13 @@ def discovery_queries(prefs, index, now):
             '("agent harness" OR "coding agent" OR "coding tools")',
             '("remote control" OR "remote coding") (agent OR coding)',
             '("persistent memory" OR "agent memory") (setup OR tool OR workflow)',
+            '("open weights" OR "open source LLM") (coding OR reasoning OR multimodal)',
+            '("T3 Code" OR Zeron OR Paseo OR Devin OR Hermes OR MausBot OR OpenBot) (feature OR setup)',
         )
         query = (
             focus_queries[index % len(focus_queries)]
-            if prefs.get("discovery_scope") == "hands_on_agent_tools"
+            if prefs.get("discovery_scope")
+            in {"hands_on_agent_tools", "capability_discoveries"}
             else list(TOPICS.values())[index % len(TOPICS)]
         )
         queries.append(query + since)
@@ -373,7 +417,7 @@ def feedback(owner, topic, direction):
     return weights
 
 
-def parse_release_feed(body, repository, topic, now):
+def parse_release_feed(body, repository, topic, now, lookback_hours=48):
     if (
         len(body) > 2097152
         or b"<!DOCTYPE" in body.upper()
@@ -397,7 +441,7 @@ def parse_release_feed(body, repository, topic, now):
             "",
         )
         parsed = urlparse(link)
-        if not stamp or not now - timedelta(hours=48) <= stamp <= now:
+        if not stamp or not now - timedelta(hours=lookback_hours) <= stamp <= now:
             continue
         if (
             parsed.scheme != "https"
@@ -454,11 +498,29 @@ async def fetch_releases(now, cache):
                             body.extend(chunk)
                             if len(body) > 2097152:
                                 raise ValueError("feed_too_large")
-                        parsed = (
-                            parse_blog_feed(bytes(body), repository, domain, topic, now)
-                            if domain
-                            else parse_release_feed(bytes(body), repository, topic, now)
-                        )
+                        if repository == "Devin":
+                            from services.scout_discovery import devin_updates
+
+                            parsed = devin_updates(bytes(body), now)
+                        else:
+                            parsed = (
+                                parse_blog_feed(
+                                    bytes(body),
+                                    repository,
+                                    domain,
+                                    topic,
+                                    now,
+                                    lookback_hours=168,
+                                )
+                                if domain
+                                else parse_release_feed(
+                                    bytes(body),
+                                    repository,
+                                    topic,
+                                    now,
+                                    lookback_hours=168,
+                                )
+                            )
                         cache[repository] = {
                             "etag": response.headers.get("etag", "")[:256],
                             "items": parsed,
@@ -468,6 +530,7 @@ async def fetch_releases(now, cache):
                     errors.append({"source": repository, "error": type(exc).__name__})
 
         await asyncio.gather(
+            fetch("Devin", "agents", "https://docs.devin.ai/release-notes/overview.md"),
             *(fetch(*feed) for feed in FEEDS),
             *(fetch(name, topic, url, domain) for name, url, domain, topic in BLOGS),
         )
@@ -475,6 +538,9 @@ async def fetch_releases(now, cache):
 
 
 def rank_candidates(items, state, prefs, now, history=()):
+    discovery = prefs.get("discovery_scope") == "capability_discoveries"
+    from services.scout_discovery import capability_discovery
+
     seen = set(state.get("seen_urls", []))
     stories = set(state.get("seen_stories", []))
     unique = {}
@@ -482,7 +548,7 @@ def rank_candidates(items, state, prefs, now, history=()):
         stamp = parse_time(raw.get("published_at"))
         if (
             not stamp
-            or not now - timedelta(hours=48) <= stamp <= now
+            or not now - timedelta(hours=168 if discovery else 48) <= stamp <= now
             or raw.get("url") in seen
         ):
             continue
@@ -492,15 +558,21 @@ def rank_candidates(items, state, prefs, now, history=()):
             "unverified_x_lead",
         }:
             continue
+        if discovery:
+            raw = {**raw, "capability_preview": True}
+        if discovery and not capability_discovery(raw):
+            continue
         if prefs.get("focus") == "engineering_lead":
             from services.scout_novelty import release_noise
 
             if release_noise(raw):
                 continue
             # A release existing is not enough to interrupt the reader.
-            relevant_setup = prefs.get(
-                "discovery_scope"
-            ) == "hands_on_agent_tools" and hands_on_agent_tool(raw)
+            relevant_setup = (
+                discovery
+                or prefs.get("discovery_scope") == "hands_on_agent_tools"
+                and hands_on_agent_tool(raw)
+            )
             if (engineering_score(raw) < 3 and not relevant_setup) or len(
                 useful_summary(raw)
             ) < 60:
@@ -528,6 +600,19 @@ def rank_candidates(items, state, prefs, now, history=()):
         )
         item["score"] = round(
             strength
+            + (
+                8
+                if discovery
+                and raw.get("publisher")
+                in {
+                    "pingdotgg/t3code",
+                    "getpaseo/paseo",
+                    "zeronsh/zeron",
+                    "milind-soni/OpenMausBot",
+                    "Devin",
+                }
+                else 0
+            )
             - age / 12
             - (3 if preview else 0)
             - (2 if len(item.get("excerpt", "")) < 60 else 0)
@@ -544,7 +629,7 @@ def rank_candidates(items, state, prefs, now, history=()):
     if prefs.get("focus") == "engineering_lead":
         from services.scout_novelty import novel_engineering
 
-        ranked = novel_engineering(ranked, history)
+        ranked = novel_engineering(ranked, history, one_per_publisher=discovery)
     novel = []
     for item in ranked:
         if item["story_key"] not in stories:
@@ -559,6 +644,19 @@ def rank_candidates(items, state, prefs, now, history=()):
     selected.extend(item for item in ranked if item not in selected)
     if prefs.get("discovery_focus") == "agent_workflows":
         selected.sort(key=lambda item: not workflow_discovery(item))
+    if discovery:
+        # Keep one meaningful model contender visible to Letta, not a send quota.
+        models = [
+            item
+            for item in ranked
+            if re.search(
+                r"open[- ](?:weights?|source).*(?:model|LLM)|\b(?:Qwen|DeepSeek|Gemma|GLM|Mistral)\b",
+                item.get("title", "") + " " + item.get("excerpt", ""),
+                re.I,
+            )
+        ]
+        if models and models[0] not in selected[:8]:
+            selected = selected[:7] + [models[0]] + selected[7:]
     preferred = {
         h.casefold() for h in prefs.get("preferred_accounts", []) if isinstance(h, str)
     }
@@ -596,14 +694,22 @@ def report_parts(items, coverage, prefs=None):
             if item["evidence"] == "unverified_x_lead"
             else "Source announcement"
         )
-        lines = [f"**Curie’s engineering brief · {index}/{min(3, len(items))}**"]
+        discovery = (prefs or {}).get("discovery_scope") == "capability_discoveries"
+        if discovery and item.get("evidence") == "publisher_release":
+            title = re.sub(r"[\n*`<>\[\]]", "", str(item.get("publisher") or title))[
+                :110
+            ]
+            if re.search(r"nightly|canary|preview|beta", item.get("title", ""), re.I):
+                title += " · preview"
+        heading = "Curie’s discoveries" if discovery else "Curie’s engineering brief"
+        lines = [f"**{heading} · {index}/{min(3, len(items))}**"]
         engineering = (prefs or {}).get("focus") == "engineering_lead"
         if index == 1 and not engineering:
             lines.append("A little inspiration for your next build, monsieur.")
         lines.extend(
             [
                 f"\n**{title}**",
-                f"\n**What changed:** {summary or 'See the source for details.'}",
+                f"\n**{'What’s new / possible' if discovery else 'What changed'}:** {summary or 'See the source for details.'}",
                 *(
                     []
                     if engineering

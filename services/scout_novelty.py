@@ -46,7 +46,18 @@ def release_noise(item):
         )
     )
     return bool(
-        re.search(r"\b(?:canary|nightly|abandoned)\b|\brc[.\d-]", title, re.I)
+        (
+            re.search(r"\b(?:canary|nightly)\b", title, re.I)
+            and not (
+                item.get("capability_preview")
+                and re.search(
+                    r"\b(?:feat|adds?|added|introduc\w*|enables?|new feature)\b",
+                    substantive,
+                    re.I,
+                )
+            )
+        )
+        or re.search(r"\babandoned\b|\brc[.\d-]", title, re.I)
         or re.match(r'\{\s*"(?:attempt|schema|version|autopublish)"\s*:', excerpt)
         or packaging_only
         or len(substantive) < 60

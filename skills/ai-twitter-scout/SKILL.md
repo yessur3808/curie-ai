@@ -105,3 +105,17 @@ and Sarah Wooders (letta.com/blog). Product builders are interested sources, not
 independent endorsements. Prefer concrete examples, configurations and trade-offs.
 Return selected_ids: [] when no supplied finding is useful enough. Scheduled slots
 are opportunities to check, never obligations to send. No forced content quota.
+
+
+## Capability discoveries (owner correction, 2026-11-20)
+
+For discovery_scope=capability_discoveries, prioritize interesting new capabilities
+and what can be done with them: T3 Code features; Devin/Hermes workflows; ADE,
+Zeron, Paseo, MausBot and clearly identified OpenBot setups; and new open-source
+or open-weight LLMs that improve coding, reasoning, tool use, multimodality or
+hardware requirements. This supersedes the earlier tools-only exclusion of model
+news. Show a source-backed feature or useful application, not a version number
+and generic testing advice. Do not claim benchmark improvements are independently
+proven. Distinguish model licenses from weight availability. Keep silence when
+nothing earns attention. Public project/docs feeds remain useful when X is down;
+never imply a creator's X feed was read when it was not.

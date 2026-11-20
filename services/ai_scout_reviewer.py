@@ -60,13 +60,22 @@ async def review(candidates, prefs):
                     else "General engineering"
                 ),
                 "required_relevance": (
-                    "Prioritize hands-on agent harnesses, coding tools, remote control and persistent-memory setups. "
-                    "Only select concrete tools or reproducible setups with a clear software-engineering use. "
-                    "Exclude generic model news, benchmark headlines and routine maintenance releases. "
-                    "Explain workflow fit, how to try it and adoption trade-offs only when supported by the source. "
-                    "If none qualifies, return empty selected_ids."
-                    if prefs.get("discovery_scope") == "hands_on_agent_tools"
-                    else "Use the supplied reading focus."
+                    "Find interesting capability discoveries: T3 Code features, Devin and Hermes use cases, "
+                    "ADE/Zeron/Paseo/MausBot/OpenBot setups, and new open-source or open-weight LLMs "
+                    "with useful advances in coding, reasoning, tool use, multimodality or hardware requirements. "
+                    "Choose source-described features and things the owner could actually do. A familiar "
+                    "product name or version bump is not enough. Benchmarks may support a capability claim "
+                    "but are not independent proof. Do not invent comparisons. Return empty if nothing qualifies."
+                    if prefs.get("discovery_scope") == "capability_discoveries"
+                    else (
+                        "Prioritize hands-on agent harnesses, coding tools, remote control and persistent-memory setups. "
+                        "Only select concrete tools or reproducible setups with a clear software-engineering use. "
+                        "Exclude generic model news, benchmark headlines and routine maintenance releases. "
+                        "Explain workflow fit, how to try it and adoption trade-offs only when supported by the source. "
+                        "If none qualifies, return empty selected_ids."
+                        if prefs.get("discovery_scope") == "hands_on_agent_tools"
+                        else "Use the supplied reading focus."
+                    )
                 ),
                 "reading_focus": (
                     "Practical tools and knowledge for a software engineer and technical lead: "
