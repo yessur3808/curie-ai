@@ -574,6 +574,12 @@ def rank_candidates(items, state, prefs, now, history=()):
     discovery = prefs.get("discovery_scope") == "capability_discoveries"
     from services.scout_discovery import capability_discovery
 
+    if prefs.get("discovery_style") == "exploratory":
+        from services.scout_novelty import fresh_project_updates, project_history
+
+        items = fresh_project_updates(
+            items, [*history, *project_history(state, history)], now
+        )
     seen = set(state.get("seen_urls", []))
     stories = set(state.get("seen_stories", []))
     unique = {}
@@ -1069,6 +1075,14 @@ class AIScoutWorker:
                 )
                 and len(useful_summary(item)) >= 60
             ]
+        if prefs.get("discovery_style") == "exploratory":
+            from services.scout_novelty import fresh_project_updates, project_history
+
+            findings = fresh_project_updates(
+                findings,
+                project_history(state, list_personal_items(owner, FINDING)),
+                now,
+            )
         if not findings:
             state["delivery"] = "no_relevant_items"
             return
@@ -1086,6 +1100,18 @@ class AIScoutWorker:
             hashlib.sha256(message.encode()).hexdigest(),
         ):
             return
+        # Persist project-level history before sending, including uncertain attempts.
+        from services.scout_novelty import project_key
+
+        projects = state.setdefault("reported_projects", {})
+        for item in findings:
+            if key_project := project_key(item):
+                projects[key_project] = {
+                    "publisher": item.get("publisher"),
+                    "evidence": item.get("evidence"),
+                    "published_at": item.get("published_at"),
+                    "reported_at": now.isoformat(),
+                }
         # An ambiguous send must not reappear in the evening recap either.
         state["reported_urls"] = list(
             dict.fromkeys(

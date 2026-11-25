@@ -135,3 +135,12 @@ Use Curie's thoughtful, warm personality without forced catchphrases. Clearly
 separate proposed uses from source claims and hands-on results; never imply an
 untested tool was tested. Keep cards readable and skip updates without worthwhile
 new information. Both OpenBot projects remain distinct by publisher/repository.
+
+### Repeat-project correction (2026-11-25)
+
+Do not turn a release backlog into discoveries. Previously covered tools should
+not dominate later slots through different version numbers. Exploratory mode
+allows direct project announcements at most once per seven days and blocks older
+releases after a newer one has been observed. Prefer an empty selection over
+routine repeat coverage. Distinct editorial articles remain eligible, subject to
+relevance and content novelty; different URLs alone are not evidence of novelty.

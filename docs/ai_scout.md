@@ -155,3 +155,12 @@ slot. The existing publication-age and novelty filters apply to cached items.
 `explain_tools=true` adds feature-linked proposed workflow uses, benefits and
 checks to cards, without claiming hands-on testing or inventing product facts.
 The capability-discovery window is seven days for both selection and expiry.
+
+Exploratory discovery prevents release-feed backfill: only the newest publication
+per direct project can compete, even when that release was already seen. Previously
+observed newer releases also block older ones. Direct project announcements have
+a seven-day cooldown from the last attempted delivery, with a second check at
+send time. Durable `reported_projects` state survives finding-history pruning;
+older installations conservatively bootstrap from reported findings' observation
+times. Uncertain sends count as attempts. Editorial publishers are not treated as
+single projects. This is a frequency limit, not semantic cross-source deduplication.

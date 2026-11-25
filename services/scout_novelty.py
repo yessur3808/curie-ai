@@ -106,3 +106,50 @@ def novel_engineering(items, history=(), *, one_per_publisher=False):
         selected.append(item)
         publishers.add(publisher)
     return selected
+
+
+def project_key(item):
+    """Only direct project announcements; an editorial publisher is not a tool."""
+    if item.get("evidence") == "publisher_release" or item.get("publisher") == "Devin":
+        return str(item.get("publisher", "")).casefold()
+    return ""
+
+
+def project_history(state, history):
+    """Include attempted sends, conservatively covering uncertain deliveries."""
+    reported = set(state.get("reported_urls", []))
+    rows = [dict(row) for row in state.get("reported_projects", {}).values()]
+    rows.extend(
+        {**row, "reported_at": row.get("observed_at") or row.get("published_at")}
+        for row in history
+        if row.get("url") in reported
+    )
+    return rows
+
+
+def fresh_project_updates(items, history, now):
+    """Never drain old release backlogs; allow a project at most once per week.
+
+    Publication timestamps establish order, not version string guesses. The
+    cooldown is a deliberate discovery preference, not semantic novelty proof.
+    """
+    from datetime import timedelta
+    from utils.temporal_context import parse_time
+
+    newest, last_report = {}, {}
+    for row in [*items, *history]:
+        key, stamp = project_key(row), parse_time(row.get("published_at"))
+        if key and stamp and stamp <= now:
+            newest[key] = max(newest.get(key, stamp), stamp)
+        sent = parse_time(row.get("reported_at"))
+        if key and sent:
+            last_report[key] = max(last_report.get(key, sent), sent)
+    return [
+        row
+        for row in items
+        if not (key := project_key(row))
+        or (
+            parse_time(row.get("published_at")) == newest.get(key)
+            and (key not in last_report or now - last_report[key] >= timedelta(days=7))
+        )
+    ]

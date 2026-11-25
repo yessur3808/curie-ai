@@ -137,3 +137,89 @@ async def test_similar_new_url_after_uncertain_send_is_not_retried(runtime):
     assert service.send.await_count == 1
     assert service.reviewer.await_count == 1
     assert scout.state_for("owner")["delivery"] == "uncertain"
+
+
+EXPLORE = {
+    **PREFS,
+    "discovery_scope": "capability_discoveries",
+    "discovery_style": "exploratory",
+}
+
+
+def test_seen_latest_release_does_not_expose_older_backlog():
+    newest = finding("newest", age=1)
+    old = finding(
+        "old",
+        "Adds remote coding agent access with session handoff and isolated workspaces for independent development tasks.",
+        age=24,
+    )
+    state = {"seen_urls": [newest["url"]]}
+    assert scout.rank_candidates([old, newest], state, EXPLORE, NOW) == []
+    assert scout.rank_candidates([old], state, EXPLORE, NOW, history=[newest]) == []
+
+
+def test_project_cooldown_uses_report_time_and_preserves_other_tools():
+    old = finding("old", age=100, observed_at=(NOW - timedelta(hours=2)).isoformat())
+    new = finding(
+        "new",
+        "Adds remote coding agent access with session handoff and isolated workspaces for independent development tasks.",
+    )
+    other = {
+        **new,
+        "id": "other",
+        "publisher": "different/tool",
+        "url": "https://github.com/different/tool/releases/tag/v1",
+    }
+    state = {"reported_urls": [old["url"]]}
+    ranked = scout.rank_candidates([new, other], state, EXPLORE, NOW, history=[old])
+    assert [row["id"] for row in ranked] == ["other"]
+    from services.scout_novelty import fresh_project_updates
+
+    history = [{**old, "reported_at": (NOW - timedelta(days=7)).isoformat()}]
+    assert fresh_project_updates([new], history, NOW) == [new]
+
+
+def test_editorial_publisher_is_not_subject_to_project_cooldown():
+    from services.scout_novelty import fresh_project_updates
+
+    old = finding(
+        "old",
+        publisher="Writer",
+        evidence="publication_feed",
+        reported_at=NOW.isoformat(),
+    )
+    new = finding("new", publisher="Writer", evidence="publication_feed")
+    assert fresh_project_updates([new], [old], NOW) == [new]
+
+
+@pytest.mark.asyncio
+async def test_repeat_tool_blocked_at_delivery_even_with_different_content(runtime):
+    scout.save_personal_item("owner", scout.PREFERENCES, {"id": "prefs", **EXPLORE})
+    old = finding("old", observed_at=(NOW - timedelta(hours=3)).isoformat())
+    scout.save_personal_item("owner", scout.FINDING, old)
+    new = finding(
+        "new",
+        "Adds remote coding agent access with session handoff and isolated workspaces for independent development tasks.",
+    )
+    state = {"coverage": {"x": "read"}, "reported_urls": [old["url"]]}
+    service = worker()
+    await service.deliver("owner", [new], state, "repeat-tool", NOW)
+    service.send.assert_not_awaited()
+    assert state["delivery"] == "no_relevant_items"
+
+
+@pytest.mark.asyncio
+async def test_uncertain_send_keeps_project_cooldown_without_finding_history(runtime):
+    from unittest.mock import AsyncMock
+
+    scout.save_personal_item("owner", scout.PREFERENCES, {"id": "prefs", **EXPLORE})
+    state = {"coverage": {"x": "read"}}
+    service = worker(send=AsyncMock(return_value=False))
+    await service.deliver("owner", [finding("first")], state, "uncertain-project", NOW)
+    assert state["delivery"] == "uncertain"
+    new = finding(
+        "second",
+        "Adds remote coding agent access with session handoff and isolated workspaces for independent development tasks.",
+        published_at=(NOW + timedelta(hours=1)).isoformat(),
+    )
+    assert scout.rank_candidates([new], state, EXPLORE, NOW + timedelta(hours=2)) == []
